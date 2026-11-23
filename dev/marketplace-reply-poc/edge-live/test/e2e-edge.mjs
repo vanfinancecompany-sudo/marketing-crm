@@ -156,6 +156,13 @@ try {
   // Pilot, wrong conversation: the row text does not match, so it is not opened.
   await fb("customer", { threadId: "400", name: "Tester", listing: "2015 Renault Master LWB", text: "Hi, is this still available?" });
   await waitFor(async () => (await api("/status")).events.some((e) => e.type === "unread-observed" && e.threadId === "400"), "pilot test enquiry detected");
+  // Finder: words matched inside the page; only IDs come back.
+  await api("/control", { find: { words: "Renault Master" } });
+  const finder = await waitFor(async () => { const f = (await api("/status")).finder; return f?.status === "done" ? f : null; }, "finder", 60_000);
+  assert.deepEqual(finder.matches.map((m) => m.id), ["400"]);
+  assert.ok(finder.searched >= 3);
+  pass("finder located the one 'Renault Master' conversation among " + finder.searched + " visible rows, returning only its ID");
+
   const opened = () => fb("state").then((st) => Object.entries(st.threads).filter(([, t]) => !t.unread).map(([id]) => id).sort().join(","));
   const readBefore = await opened();
   await api("/control", { startPilot: { threadId: "300", mustContain: "Renault Master" } });

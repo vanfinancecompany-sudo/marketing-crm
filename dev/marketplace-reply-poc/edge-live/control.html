@@ -45,6 +45,10 @@
   <button id="pilotRun">Verify and read once</button>
   <button id="pilotCancel">Cancel</button>
   <pre id="pilot" style="margin-top:8px"></pre>
+  <p class="muted" style="margin-top:10px">Not sure which conversation? Find visible Marketplace rows containing these words (matched inside Edge; only IDs come back):</p>
+  <input id="findWords" type="text" placeholder="e.g. Renault Master">
+  <button id="findRun">Find</button>
+  <div id="finder" style="margin-top:6px;font-size:13px"></div>
 </section>
 
 <section>
@@ -73,6 +77,7 @@ const EVENT = {
   "list-opener": (e) => "List opener: " + e.status,
   mode: (e) => "Mode set to " + e.mode,
   pilot: (e) => "Pilot " + e.status + (e.why ? ": " + e.why : ""),
+  find: (e) => "Find \"" + e.words + "\": " + e.status + (e.status === "done" ? ", " + e.matches + " match(es) among " + e.searched : ""),
   incoming: () => "Read new customer message",
   askme: (e) => "Ask Me answered in " + e.ms + " ms",
   draft: () => "Draft recorded (not sent)",
@@ -105,6 +110,7 @@ function render(s) {
   const p = s.pilot;
   document.getElementById("pilot").textContent = !p ? "No pilot run yet." : [
     "Conversation " + p.threadId + ": " + p.status + (p.error ? " - " + p.error : ""),
+    ...(p.wordHits ? ["Words found in that row: " + Object.entries(p.wordHits).map(([w, hit]) => w + " " + (hit ? "yes" : "no")).join(", ") + " (row has " + p.rowWords + " words; text not stored)"] : []),
     ...(p.rowText ? ["Row text matched: " + p.rowText] : []),
     ...(p.result ? [
       "Messages read: " + p.result.messages + " (incoming " + p.result.incoming + ", outgoing " + p.result.outgoing + ", unknown " + p.result.unknown + ")",
@@ -116,6 +122,11 @@ function render(s) {
       "Structure: " + JSON.stringify(p.result.structure),
     ] : []),
   ].join("\n");
+  const f = s.finder;
+  document.getElementById("finder").innerHTML = !f ? "" : f.status !== "done"
+    ? esc("Find \"" + f.words + "\": " + f.status + (f.error ? " - " + f.error : ""))
+    : esc("Find \"" + f.words + "\": " + f.matches.length + " of " + f.searched + " visible Marketplace conversations match.") + "<br>"
+      + f.matches.map((m) => fbLink(m.id) + " (position " + (m.pos + 1) + (m.unread ? ", unread" : "") + ") <button data-use-pilot=\"" + esc(m.id) + "\" data-words=\"" + esc(f.words) + "\">Use for pilot</button>").join("<br>");
   if (document.activeElement?.id !== "allow") document.getElementById("allow").value = s.allowThreads.join(", ");
   document.getElementById("allowAll").checked = s.allowAll;
   document.getElementById("human").innerHTML = s.needsHuman.map((t) => `<tr><td>${fbLink(t.threadId)}</td><td>${esc(t.listingTitle)}</td><td>${esc(t.reason)}</td><td><button data-resume="${esc(t.threadId)}">Hand back to assistant</button></td></tr>`).join("") || "<tr><td class=muted>None</td></tr>";
@@ -144,6 +155,13 @@ document.getElementById("pilotRun").onclick = () => {
   if (!confirm("Open and read conversation " + threadId + " once, only if its row contains \"" + mustContain + "\"? It will be marked read. Nothing is sent.")) return;
   api("/control", { startPilot: { threadId, mustContain } }).then((r) => r.error ? alert(r.error) : render(r));
 };
+document.getElementById("findRun").onclick = () => api("/control", { find: { words: document.getElementById("findWords").value.trim() } }).then((r) => r.error ? alert(r.error) : render(r));
+document.addEventListener("click", (e) => {
+  if (e.target.dataset.usePilot) {
+    document.getElementById("pilotThread").value = e.target.dataset.usePilot;
+    document.getElementById("pilotWords").value = e.target.dataset.words;
+  }
+});
 document.getElementById("pilotCancel").onclick = () => api("/control", { cancelPilot: true }).then(render);
 document.addEventListener("click", (e) => { if (e.target.dataset.resume) api("/control", { resumeThread: e.target.dataset.resume }).then(render); });
 refresh(); setInterval(refresh, 2000);

@@ -349,3 +349,26 @@ test("vehicle-specific Marketplace questions go to the website; general Rent2Buy
     assert.equal(marketplaceReplyRoute("rent2buy", m)?.reason, "Customer needs the team", m);
   }
 });
+
+test("the finder needs the Marketplace list, records only IDs, and times out clearly; mismatches report word hits without text", async () => {
+  const { startFind, recordFind, findTimeout } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
+  const state = emptyState();
+  setMode(state, "observe");
+  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "chats-only", rows: 13 };
+  assert.throws(() => startFind(state, { words: "Renault Master" }), /not open/);
+  state.heartbeat.list = "marketplace";
+  startFind(state, { words: "Renault Master" });
+  assert.equal(recordFind(state, { words: "other", matches: [] }).ok, false);
+  recordFind(state, { words: "Renault Master", searched: 74, matches: [{ id: "400", pos: 0, grid: "marketplace", unread: true, text: "Tester Renault Master" }] });
+  assert.deepEqual(state.finder.matches, [{ id: "400", pos: 0, grid: "marketplace", unread: true }]);
+  assert.ok(!JSON.stringify(state.finder).includes("Tester"));
+  startFind(state, { words: "Ford" });
+  findTimeout(state, Date.parse(state.finder.requestedAt) + 61_000);
+  assert.equal(state.finder.status, "failed");
+
+  startPilot(state, { threadId: "400", mustContain: "Renault Master" });
+  verifyPilot(state, { threadId: "400", found: true, rowText: "Sam Jones · 2016 Renault Trafic SWB" });
+  assert.deepEqual(state.pilot.wordHits, { renault: true, master: false });
+  assert.equal(state.pilot.rowWords, 7);
+  assert.ok(!JSON.stringify(state.pilot).includes("Trafic"));
+});

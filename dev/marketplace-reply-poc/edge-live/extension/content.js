@@ -196,6 +196,17 @@
 
   // Pilot check: the visible list-row text of ONE named conversation, so the
   // service can confirm it is the expected test conversation before opening it.
+  // Finder: match words against every visible Marketplace row inside the page;
+  // only IDs, positions and unread state are reported, never row text.
+  async function reportFind(words) {
+    const wanted = norm(words).toLowerCase();
+    const links = threadLinks().map((l) => ({ ...l, grid: gridName(l.link) })).filter((l) => l.grid === "marketplace");
+    const rows = rowsFromLinks(links);
+    const matches = classify(rows.map((r, pos) => ({ ...r, pos })).filter((r) => norm(r.row.innerText).toLowerCase().includes(wanted)))
+      .map((r) => ({ id: r.id, pos: r.pos, grid: r.grid, unread: r.unread }));
+    await api("/find/result", { words, matches, searched: rows.length });
+  }
+
   async function reportPilotRow(threadId) {
     const row = inboxRows().find((r) => r.id === threadId);
     await api("/pilot/verify", { threadId, found: Boolean(row), rowText: row ? norm(row.row.innerText).slice(0, 300) : "" });
@@ -515,6 +526,7 @@
     });
     if (beat.mode === "off" || state !== "healthy") return;
     if (beat.verifyThread && !threadId && listState() === "marketplace") await reportPilotRow(beat.verifyThread);
+    if (beat.findWords && !threadId && listState() === "marketplace") await reportFind(beat.findWords);
 
     if (threadId) {
       // Observe never stays on a conversation page; leaving does not change read status.

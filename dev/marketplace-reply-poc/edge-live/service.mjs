@@ -10,7 +10,7 @@ import { liveResponder } from "./askme-live.mjs";
 import {
   authoriseSend, inspectInbox, inspectThread, loadState, logEvent, publicStatus, recordDraft,
   recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
-  startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot,
+  startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot, startFind, recordFind, findTimeout,
 } from "./ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -99,19 +99,23 @@ const ROUTES = {
     if (body.cancelPilot) cancelPilot(state);
     if (body.mode) { cancelPilot(state); setMode(state, body.mode, body); }
     if (body.startPilot) startPilot(state, body.startPilot);
+    if (body.find) startFind(state, body.find);
     return statusWithExtension();
   },
   "POST /stop": () => { cancelPilot(state); setMode(state, "off"); logEvent(state, "emergency-stop"); return statusWithExtension(); },
   "POST /heartbeat": (body) => {
     recordHeartbeat(state, body);
     pilotTimeout(state);
+    findTimeout(state);
     return {
       mode: state.mode,
       verifyThread: state.pilot?.status === "verifying" ? state.pilot.threadId : null,
+      findWords: state.finder?.status === "searching" ? state.finder.words : null,
       extensionVersion: expectedExtensionVersion(),
     };
   },
   "POST /pilot/verify": (body) => verifyPilot(state, body),
+  "POST /find/result": (body) => recordFind(state, body),
   "POST /assist": (body) => { logEvent(state, "visibility-assist", { opened: Boolean(body.opened) }); return { ok: true }; },
   "POST /inbox": (body) => ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false, list: typeof body.list === "string" ? body.list.slice(0, 40) : null }) }),
   "POST /thread": (body) => handleThread(body),

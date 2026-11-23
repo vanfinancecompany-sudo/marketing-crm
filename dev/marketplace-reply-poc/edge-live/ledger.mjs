@@ -196,6 +196,39 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
 // "Renault Master") is the conversation opened, in Draft mode restricted to it.
 // After the draft is recorded the assistant returns to Observe. Never sends.
 const PILOT_TIMEOUT_MS = 180_000;
+// ---- Finder: which visible Marketplace rows contain given words ----
+// The extension matches the words inside the page and returns only conversation
+// IDs and list positions; no row text leaves the page.
+export function startFind(state, { words }) {
+  const w = String(words || "").trim();
+  if (w.length < 3) throw new TypeError("Enter at least 3 characters to find");
+  if (state.heartbeat?.list !== "marketplace") {
+    throw new TypeError("The Marketplace list is not open in the assistant tab yet. Wait for the green monitoring banner.");
+  }
+  state.finder = { words: w, status: "searching", requestedAt: new Date().toISOString(), matches: [], searched: 0 };
+  logEvent(state, "find", { status: "searching", words: w });
+  return state.finder;
+}
+
+export function recordFind(state, { words, matches, searched }) {
+  const finder = state.finder;
+  if (!finder || finder.status !== "searching" || normalise(words) !== normalise(finder.words)) return { ok: false };
+  finder.matches = (Array.isArray(matches) ? matches : []).filter((m) => THREAD_ID.test(String(m?.id))).slice(0, 20)
+    .map((m) => ({ id: String(m.id), pos: Number(m.pos) || 0, grid: String(m.grid || "").slice(0, 20), unread: m.unread === true }));
+  finder.searched = Number(searched) || 0;
+  finder.status = "done";
+  finder.finishedAt = new Date().toISOString();
+  logEvent(state, "find", { status: "done", words: finder.words, matches: finder.matches.length, searched: finder.searched });
+  return { ok: true };
+}
+
+export function findTimeout(state, now = Date.now()) {
+  if (state.finder?.status === "searching" && now - Date.parse(state.finder.requestedAt) > 60_000) {
+    state.finder.status = "failed";
+    state.finder.error = "The Edge tab did not report back in time (is the Marketplace list open, and the extension 0.3.4 or later?)";
+  }
+}
+
 export function startPilot(state, { threadId, mustContain }) {
   const id = String(threadId || "");
   const words = String(mustContain || "").trim();
@@ -232,6 +265,9 @@ export function verifyPilot(state, { threadId, found, rowText }) {
     // Another customer's row text is not stored.
     pilot.status = "mismatch";
     pilot.error = "The conversation row does not contain \"" + pilot.mustContain + "\". It was not opened.";
+    // Which expected words were present (no row text is stored).
+    pilot.wordHits = Object.fromEntries(words.split(" ").filter(Boolean).map((w) => [w, text.includes(w)]));
+    pilot.rowWords = text.split(" ").filter(Boolean).length;
     logEvent(state, "pilot", { status: "mismatch", threadId: pilot.threadId });
     return { ok: false };
   }
@@ -478,6 +514,7 @@ export function publicStatus(state) {
   return {
     monitoring: monitoringVerdict(state),
     pilot: state.pilot || null,
+    finder: state.finder || null,
     mode: state.mode,
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,
