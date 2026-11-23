@@ -69,6 +69,7 @@ async function supervise() {
   const hb = status.heartbeat;
   await badge(status.mode, status.mode === "off" || (hb?.health === "healthy" && Date.now() - Date.parse(hb.at) < STALE_HEARTBEAT_MS));
   if (status.fixtureHome) await chrome.storage.local.set({ home: status.fixtureHome });
+  if (await selfUpdateIfNeeded(status.extension?.expected)) return;
   if (status.mode === "off") return;
   const tab = await ensureTab();
   // Nudge the content script; background timers are throttled by the browser.
@@ -78,7 +79,42 @@ async function supervise() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("supervise", { periodInMinutes: 0.5 }); supervise(); });
+// ---- Self-update ----
+// The service reports the extension version on disk in this install. When it is
+// newer than the running one (after a git pull), the extension reloads itself,
+// then reloads the assistant tab so the new content script runs. At most one
+// attempt per version every 10 minutes, so a mismatch can never loop.
+const newer = (a, b) => {
+  const pa = String(a).split(".").map(Number);
+  const pb = String(b).split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+};
+async function selfUpdateIfNeeded(expected) {
+  if (!expected || !newer(expected, chrome.runtime.getManifest().version)) return false;
+  const { lastSelfUpdate } = await chrome.storage.local.get("lastSelfUpdate");
+  if (lastSelfUpdate?.version === expected && Date.now() - lastSelfUpdate.at < 600_000) return false;
+  const { tabId } = await chrome.storage.session.get("tabId");
+  await chrome.storage.local.set({ lastSelfUpdate: { version: expected, at: Date.now() }, reloadTabAfterUpdate: tabId ?? null });
+  chrome.runtime.reload();
+  return true;
+}
+
+chrome.runtime.onInstalled.addListener(async (details) => {
+  chrome.alarms.create("supervise", { periodInMinutes: 0.5 });
+  if (details.reason === "update") {
+    const { reloadTabAfterUpdate } = await chrome.storage.local.get("reloadTabAfterUpdate");
+    await chrome.storage.local.remove("reloadTabAfterUpdate");
+    const tab = reloadTabAfterUpdate == null ? null : await chrome.tabs.get(reloadTabAfterUpdate).catch(() => null);
+    if (tab) {
+      await chrome.storage.session.set({ tabId: tab.id });
+      await chrome.tabs.reload(tab.id);
+    }
+  }
+  supervise();
+});
 chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("supervise", { periodInMinutes: 0.5 }); supervise(); });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "supervise") supervise(); });
 chrome.commands.onCommand.addListener((command) => {

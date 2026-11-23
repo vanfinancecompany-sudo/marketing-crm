@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   authoriseSend, emptyState, inspectInbox, inspectThread, loadState, publicStatus, recordDraft,
-  recordSendResult, resumeThread, saveState, setMode, startupMode,
+  recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict,
 } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
 import { liveResponder } from "../dev/marketplace-reply-poc/edge-live/askme-live.mjs";
 import { draftMarketplaceReply } from "../dev/marketplace-reply-poc/assistant.mjs";
@@ -37,9 +37,26 @@ test("conversations unread at switch-on stay with a person; later unread ones ar
   assert.deepEqual(flag(state, "200"), { open: "200" });
   assert.equal(inspectInbox(state, [{ id: "100", unread: true }, { id: "200", unread: true }]).open, "200");
   assert.ok(!state.pendingOpen.includes("100"));
-  // Once the excluded thread is read and becomes unread again, it is new.
+  // Once the excluded thread is read and becomes unread again, it is new, but
+  // it is not on the allowlist, so it is reported and never opened.
   inspectInbox(state, [{ id: "100", unread: false }]);
-  assert.ok(inspectInbox(state, [{ id: "100", unread: true }]) && state.pendingOpen.includes("100"));
+  inspectInbox(state, [{ id: "100", unread: true }]);
+  assert.ok(!state.pendingOpen.includes("100"));
+  assert.equal(state.events.at(-1).type, "unread-not-opened");
+  state.allowThreads.push("100");
+  inspectInbox(state, [{ id: "100", unread: false }]);
+  inspectInbox(state, [{ id: "100", unread: true }]);
+  assert.ok(state.pendingOpen.includes("100"));
+});
+
+test("Draft and Send never open a conversation that is not on the allowlist", () => {
+  for (const mode of ["draft", "send"]) {
+    const state = enabled(mode, ["999"]);
+    assert.equal(flag(state, "200").open, null, mode);
+    assert.deepEqual(state.pendingOpen, []);
+    assert.equal(state.events.at(-1).type, "unread-not-opened");
+    assert.equal(state.events.at(-1).reason, "new-at-top");
+  }
 });
 
 test("a flagged thread answers only the trailing customer messages, once", () => {
@@ -148,15 +165,74 @@ test("a service restart never restores Send", () => {
   assert.equal(observing.mode, "observe");
 });
 
-test("draft mode and threads off the allowlist never get a send instruction", () => {
-  for (const [mode, allow] of [["draft", ["200"]], ["send", ["999"]]]) {
-    const state = enabled(mode, allow);
-    flag(state, "200");
-    const decision = inspectThread(state, { threadId: "200", messages: [msg(1, "incoming", "Hi")] }, OPTS);
-    const result = recordDraft(state, decision, { text: "Hello" });
-    assert.equal(result.action, "none", mode);
-    assert.equal(result.draft, "Hello");
-  }
+test("Draft mode never gets a send instruction", () => {
+  const state = enabled("draft", ["200"]);
+  flag(state, "200");
+  const decision = inspectThread(state, { threadId: "200", messages: [msg(1, "incoming", "Hi")] }, OPTS);
+  const result = recordDraft(state, decision, { text: "Hello" });
+  assert.equal(result.action, "none");
+  assert.equal(result.draft, "Hello");
+});
+
+test("only the Marketplace list counts once lists are named; arrival reasons are recorded", () => {
+  const state = emptyState();
+  setMode(state, "observe");
+  const base = [{ id: "1", unread: false, pos: 0, grid: "chats" }, { id: "10", unread: false, pos: 0, grid: "marketplace" },
+    { id: "11", unread: true, pos: 1, grid: "marketplace" }, { id: "12", unread: true, pos: 2, grid: "marketplace" }];
+  inspectInbox(state, base, { list: "marketplace" });
+  assert.equal(state.inboxBaseline.unread.length, 2);
+  // A friend's chat becomes unread: ignored. Conversation 12 (already unread,
+  // pos 2) jumps to the top: a further message in an unanswered chat.
+  inspectInbox(state, [{ id: "1", unread: true, pos: 0, grid: "chats" }, { id: "12", unread: true, pos: 0, grid: "marketplace" },
+    { id: "10", unread: false, pos: 1, grid: "marketplace" }, { id: "11", unread: true, pos: 2, grid: "marketplace" }], { list: "marketplace" });
+  const events = state.events.filter((e) => e.type === "unread-observed");
+  assert.deepEqual(events.map((e) => [e.threadId, e.reason]), [["12", "moved-to-top"]]);
+  // Removing the top row shifts the next one up by one: not an arrival.
+  inspectInbox(state, [{ id: "10", unread: false, pos: 0, grid: "marketplace" }, { id: "11", unread: true, pos: 1, grid: "marketplace" }], { list: "marketplace" });
+  inspectInbox(state, [{ id: "11", unread: true, pos: 0, grid: "marketplace" }], { list: "marketplace" });
+  assert.equal(state.events.filter((e) => e.type === "unread-observed").length, 1);
+});
+
+test("the pilot opens its one conversation only when the row text matches, drafts once, then returns to Observe", () => {
+  const state = emptyState();
+  setMode(state, "observe");
+  inspectInbox(state, [{ id: "500", unread: true, pos: 0, grid: "marketplace" }, { id: "501", unread: true, pos: 1, grid: "marketplace" }], { list: "marketplace" });
+  assert.throws(() => startPilot(state, { threadId: "500", mustContain: "" }));
+  startPilot(state, { threadId: "500", mustContain: "Renault Master" });
+  assert.equal(verifyPilot(state, { threadId: "500", found: true, rowText: "Sam · 2016 Ford Transit" }).ok, false);
+  assert.equal(state.pilot.status, "mismatch");
+  assert.equal(state.mode, "observe");
+  assert.ok(!JSON.stringify(state.pilot).includes("Ford Transit"), "another customer's row text is not stored");
+
+  startPilot(state, { threadId: "500", mustContain: "Renault Master" });
+  assert.equal(verifyPilot(state, { threadId: "500", found: true, rowText: "Tester · 2015 Renault Master LWB" }).ok, true);
+  assert.equal(state.mode, "draft");
+  assert.deepEqual(state.allowThreads, ["500"]);
+  // The list snapshot after the switch queues only the pilot conversation.
+  assert.equal(inspectInbox(state, [{ id: "501", unread: true, pos: 0, grid: "marketplace" }, { id: "500", unread: true, pos: 1, grid: "marketplace" }], { list: "marketplace" }).open, "500");
+  const snapshot = { threadId: "500", listingTitle: "2015 Renault Master LWB", listingId: "42", messages: [msg(1, "incoming", "Is this still available?")] };
+  const decision = inspectThread(state, snapshot, OPTS);
+  assert.equal(decision.action, "draft");
+  const outcome = recordDraft(state, decision, { text: "Check the website: https://www.rent2buyvans.co.uk/" });
+  assert.equal(outcome.action, "none");
+  assert.equal(finishPilot(state, { snapshot, decision, outcome, askMeMs: 0 }), true);
+  assert.equal(state.mode, "observe");
+  assert.equal(state.pilot.status, "done");
+  assert.equal(state.pilot.result.incoming, 1);
+  assert.match(state.pilot.result.draft, /rent2buyvans/);
+  assert.deepEqual(state.pendingOpen, []);
+});
+
+test("the monitoring verdict explains in plain words why monitoring is not working", () => {
+  const state = emptyState();
+  assert.equal(monitoringVerdict(state).ok, false);
+  setMode(state, "observe");
+  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "chats-only", opener: "no-marketplace-control", rows: 13 };
+  assert.match(monitoringVerdict(state).reasons.join(" "), /Marketplace entry was not found/);
+  state.heartbeat = { ...state.heartbeat, list: "marketplace", opener: "present" };
+  inspectInbox(state, [{ id: "1", unread: false, pos: 0 }], { list: "marketplace" });
+  assert.deepEqual(monitoringVerdict(state), { ok: true, reasons: [] });
+  assert.match(monitoringVerdict(state, Date.now() + 300_000).reasons[0], /No report from the Edge assistant tab/);
 });
 
 test("switching off between the claim and the send control cancels the send", () => {
@@ -234,4 +310,19 @@ test("the live responder keeps one website Ask Me conversation per Facebook thre
   const stock = await draftMarketplaceReply({ product: "rent2buy", message: "Is this van still available?", history: [] }, { respond });
   assert.match(stock.text, /rent2buyvans\.co\.uk/);
   assert.equal(calls.length, 3, "stock questions go to the website without an Ask Me call");
+});
+
+test("vehicle-specific Marketplace questions go to the website; general Rent2Buy questions go to Ask Me", async () => {
+  const { marketplaceReplyRoute, RENT2BUY_WEBSITE } = await import("../dev/marketplace-reply-poc/reply-policy.mjs");
+  for (const m of ["Hi, is this still available?", "How much per month is the Renault Master?", "What's the mileage on it?",
+    "Can you hold it for me until Saturday?", "Is it manual or automatic?", "What year is it?", "Can you keep it for me until Friday?"]) {
+    assert.ok(marketplaceReplyRoute("rent2buy", m)?.text?.includes(RENT2BUY_WEBSITE), m);
+  }
+  for (const m of ["How does Rent2Buy work?", "Do I need a deposit?", "How much is the initial rental?", "Can I return the van early?",
+    "Can I keep the van at the end?", "Can I apply if I'm self-employed?", "What happens if I go over the mileage?"]) {
+    assert.equal(marketplaceReplyRoute("rent2buy", m), null, m);
+  }
+  for (const m of ["Will I be approved?", "I want to speak to someone please", "I want to make a complaint"]) {
+    assert.equal(marketplaceReplyRoute("rent2buy", m)?.reason, "Customer needs the team", m);
+  }
 });

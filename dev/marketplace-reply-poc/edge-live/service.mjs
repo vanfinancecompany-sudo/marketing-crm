@@ -10,6 +10,7 @@ import { liveResponder } from "./askme-live.mjs";
 import {
   authoriseSend, inspectInbox, inspectThread, loadState, logEvent, publicStatus, recordDraft,
   recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
+  startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot,
 } from "./ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,12 @@ const DIAGNOSTICS_FILE = join(dirname(STATE_FILE), "inbox-diagnostics.json");
 // the popup). Kept outside the ledger; no message text is ever included.
 let diagnostics = existsSync(DIAGNOSTICS_FILE) ? JSON.parse(readFileSync(DIAGNOSTICS_FILE, "utf8")) : {};
 const DEFAULT_PRODUCT = process.env.R2B_DEFAULT_PRODUCT ?? "rent2buy";
+// The extension in this install. When its version on disk is newer than the
+// one running in Edge, the extension reloads itself (see background.js).
+const EXTENSION_DIR = process.env.R2B_EXTENSION_DIR || join(HERE, "extension");
+function expectedExtensionVersion() {
+  try { return JSON.parse(readFileSync(join(EXTENSION_DIR, "manifest.json"), "utf8")).version; } catch { return null; }
+}
 const STUB = process.env.R2B_ASKME_STUB === "1";
 // Test-only Facebook-shaped page; never enabled in normal use.
 const fixture = process.env.R2B_FIXTURE === "1"
@@ -50,7 +57,10 @@ async function stubResponder(request) {
 async function handleThread(body) {
   const decision = inspectThread(state, body, { defaultProduct: DEFAULT_PRODUCT });
   saveState(STATE_FILE, state);
-  if (decision.action !== "draft") return decision;
+  if (decision.action !== "draft") {
+    finishPilot(state, { snapshot: body, structure: body.structure, decision });
+    return decision;
+  }
   const thread = state.threads[decision.threadId];
   const started = performance.now();
   let draft;
@@ -65,19 +75,42 @@ async function handleThread(body) {
   logEvent(state, "askme", { threadId: thread.id, ms: Math.round(performance.now() - started) });
   enforceStopFile();
   const result = recordDraft(state, decision, draft);
+  finishPilot(state, { snapshot: body, structure: body.structure, decision, outcome: result, askMeMs: Math.round(performance.now() - started) });
   saveState(STATE_FILE, state);
   return result;
 }
 
+function statusWithExtension() {
+  const status = publicStatus(state);
+  const expected = expectedExtensionVersion();
+  const running = state.heartbeat?.ext || null;
+  return {
+    ...status,
+    extension: { running, expected, updatePending: Boolean(expected && running && expected !== running) },
+    ...(fixture ? { fixtureHome: "http://127.0.0.1:" + PORT + "/__fb/inbox/" } : {}),
+  };
+}
+
 const ROUTES = {
-  "GET /status": () => ({ ...publicStatus(state), ...(fixture ? { fixtureHome: "http://127.0.0.1:" + PORT + "/__fb/inbox/" } : {}) }),
+  "GET /status": () => statusWithExtension(),
   "POST /control": (body) => {
     if (body.resumeThread) resumeThread(state, String(body.resumeThread));
-    if (body.mode) setMode(state, body.mode, body);
-    return publicStatus(state);
+    if (body.cancelPilot) cancelPilot(state);
+    if (body.mode) { cancelPilot(state); setMode(state, body.mode, body); }
+    if (body.startPilot) startPilot(state, body.startPilot);
+    return statusWithExtension();
   },
-  "POST /stop": () => { setMode(state, "off"); logEvent(state, "emergency-stop"); return publicStatus(state); },
-  "POST /heartbeat": (body) => { recordHeartbeat(state, body); return { mode: state.mode }; },
+  "POST /stop": () => { cancelPilot(state); setMode(state, "off"); logEvent(state, "emergency-stop"); return statusWithExtension(); },
+  "POST /heartbeat": (body) => {
+    recordHeartbeat(state, body);
+    pilotTimeout(state);
+    return {
+      mode: state.mode,
+      verifyThread: state.pilot?.status === "verifying" ? state.pilot.threadId : null,
+      extensionVersion: expectedExtensionVersion(),
+    };
+  },
+  "POST /pilot/verify": (body) => verifyPilot(state, body),
   "POST /inbox": (body) => ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false, list: typeof body.list === "string" ? body.list.slice(0, 40) : null }) }),
   "POST /thread": (body) => handleThread(body),
   "POST /go": (body) => authoriseSend(state, String(body.jobId)),

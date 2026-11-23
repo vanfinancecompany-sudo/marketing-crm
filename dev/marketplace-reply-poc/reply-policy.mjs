@@ -10,6 +10,18 @@ const LISTED_VEHICLE = /\b(?:(?:this|that|the|advertised|listed) (?:van|vehicle|
 const SPECIFIC_REQUEST = /\b(?:available|availability|price|cost|monthly|pay|payment|rent|rental|quote|mileage|miles|age|year|specs|details|mot)\b/i;
 const PERSONAL_PRICE = /\b(?:(?:personal(?:ised|ized)?|my|individual|exact|tailored|specific) (?:price|quote)|quote me|(?:get|give|send|have) (?:me )?(?:a|an) (?:written )?quote|how much (?:would|will|do) i pay|how much does (?:it|this|that) cost|what would (?:i pay|it cost me)|how much (?:would|will) (?:it|this|that) cost|how much (?:is|for) (?:it|this|that))\b/i;
 
+// Found by the live Marketplace check (23 Nov 2026): monthly prices of a van,
+// details asked about "it/this", and requests to hold a van reached Ask Me.
+// These depend on the individual vehicle, so they go to the website. General
+// fee questions (initial rental, deposit, reservation payment) still go to Ask Me.
+const VEHICLE_DETAIL = new RegExp([
+  String.raw`\bhow much\b(?!.*\b(?:initial rental|deposit|reservation|upfront|purchase option|fee)\b).*\b(?:per|a|each) (?:month|week)\b`,
+  String.raw`\b(?:monthly|weekly) (?:price|cost|payment|rental)s? (?:on|for|of) (?:the|this|that|your)\b`,
+  String.raw`\b(?:mileage|miles|mot|service history|condition|how old|what year|reg(?:istration)?)\b.{0,30}\b(?:it|this|that|one)\b`,
+  String.raw`\b(?:hold|save|put aside|reserve)\b.{0,20}\b(?:it|this|that|one|the van)\b`,
+  String.raw`\bkeep (?:it|this|that(?: one)?|the van) (?:for|until|till) (?:me|\w+day|tomorrow|the weekend)\b`,
+].join("|"), "i");
+
 const WEBSITE_GUIDANCE = "Check the live website for current vans, availability, vehicle details and prices. You can get a quote and apply online there.";
 const BROWSE_AND_APPLY = "You can browse current vans and apply online at " + RENT2BUY_WEBSITE;
 
@@ -25,7 +37,7 @@ export function marketplaceReplyRoute(product, message) {
     return { reason: "Question crosses the listing's product boundary" };
   }
   if (product === "rent2buy" && (
-    CURRENT_STOCK.test(message) || SPECIFICATION.test(message) || PERSONAL_PRICE.test(message)
+    CURRENT_STOCK.test(message) || SPECIFICATION.test(message) || PERSONAL_PRICE.test(message) || VEHICLE_DETAIL.test(message)
     || (LISTED_VEHICLE.test(message) && SPECIFIC_REQUEST.test(message))
     || /^(?:(?:what(?:[\x27’]s| is) (?:the )?)?(?:price|mileage|availability|available))\s*\??$/i.test(message.trim())
   )) return { text: WEBSITE_GUIDANCE + "\n\n" + RENT2BUY_WEBSITE };

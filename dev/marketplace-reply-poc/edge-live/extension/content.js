@@ -159,14 +159,38 @@
 
   // pos = order within its list, so the service can tell new arrivals (top)
   // from old conversations Facebook renders lazily further down.
-  function scanInbox() {
+  // grid = the list's name ("marketplace", "chats" or "other"). A conversation
+  // shown in both lists counts once, as Marketplace. Only the top rows of each
+  // list are classified: new activity always arrives at the top, and the live
+  // Marketplace list grows to hundreds of rows as Facebook loads it.
+  const ROWS_PER_LIST = 100;
+  const gridName = (el) => {
+    const label = norm(el.closest('[role="grid"][aria-label]')?.getAttribute("aria-label")).toLowerCase();
+    return label === "marketplace" ? "marketplace" : label === "chats" ? "chats" : "other";
+  };
+  function inboxRows() {
+    const links = threadLinks().map((l) => ({ ...l, grid: gridName(l.link) }));
+    const inMarketplace = new Set(links.filter((l) => l.grid === "marketplace").map((l) => l.id));
+    const kept = links.filter((l) => l.grid === "marketplace" || !inMarketplace.has(l.id));
     const counters = new Map();
-    return classify(rowsFromLinks(threadLinks())).map((r) => {
-      const list = landmark(r.row) || r.group;
-      const pos = counters.get(list) ?? 0;
-      counters.set(list, pos + 1);
-      return { id: r.id, unread: r.unread, pos };
-    });
+    const limited = [];
+    for (const r of rowsFromLinks(kept)) {
+      const grid = r.grid || "other";
+      const pos = counters.get(grid) ?? 0;
+      counters.set(grid, pos + 1);
+      if (pos < ROWS_PER_LIST) limited.push({ ...r, grid, pos });
+    }
+    return classify(limited);
+  }
+  function scanInbox() {
+    return inboxRows().map(({ id, unread, pos, grid }) => ({ id, unread, pos, grid }));
+  }
+
+  // Pilot check: the visible list-row text of ONE named conversation, so the
+  // service can confirm it is the expected test conversation before opening it.
+  async function reportPilotRow(threadId) {
+    const row = inboxRows().find((r) => r.id === threadId);
+    await api("/pilot/verify", { threadId, found: Boolean(row), rowText: row ? norm(row.row.innerText).slice(0, 300) : "" });
   }
 
   // ---- Keeping the conversation list open (list controls only) ----
@@ -440,8 +464,10 @@
     const beat = await api("/heartbeat", {
       health: state, visibility: document.visibilityState, url: location.pathname,
       rows: inbox.length, unread: inbox.filter((row) => row.unread).length, list: listState(), opener: openerStatus,
+      ext: chrome.runtime.getManifest().version,
     });
     if (beat.mode === "off" || state !== "healthy") return;
+    if (beat.verifyThread && !threadId && listState() === "marketplace") await reportPilotRow(beat.verifyThread);
 
     if (threadId) {
       // Observe never stays on a conversation page; leaving does not change read status.
@@ -469,6 +495,35 @@
     if (open) location.assign(threadUrl(open));
   }
 
+  // Structure of the opened conversation (no text): proves which identity and
+  // direction signals Facebook exposes on this account.
+  function threadStructure(log, messages) {
+    if (!log) return { logFound: false, composer: Boolean(composer()) };
+    const attrs = new Set();
+    for (const el of log.querySelectorAll("*")) for (const a of el.getAttributeNames()) if (a.startsWith("data-")) attrs.add(a);
+    let labelled = 0;
+    for (const node of log.querySelectorAll("[data-message-id]")) {
+      const row = node.closest('[role="row"]') || node;
+      const labels = [row, ...row.querySelectorAll("[aria-label], h4, h5, h6")].map((el) => el.getAttribute("aria-label") || (el.matches("h4, h5, h6") ? el.textContent : "") || "").join(" | ");
+      if (/\bsent\b|\byou:/i.test(labels)) labelled++;
+    }
+    return {
+      logFound: true,
+      logInMain: Boolean(log.closest('[role="main"]')),
+      rows: log.querySelectorAll('[role="row"]').length,
+      withMessageId: log.querySelectorAll("[data-message-id]").length,
+      directions: {
+        incoming: messages.filter((m) => m.direction === "incoming").length,
+        outgoing: messages.filter((m) => m.direction === "outgoing").length,
+        unknown: messages.filter((m) => !["incoming", "outgoing"].includes(m.direction)).length,
+      },
+      directionFromLabels: labelled,
+      dataAttributes: [...attrs].slice(0, 20),
+      composer: Boolean(composer()),
+      listingLink: Boolean(listing().listingId),
+    };
+  }
+
   async function handleThread(threadId) {
     let log = null;
     for (let i = 0; i < 20 && !(log = chatLog())?.querySelector("[data-message-id]"); i++) await sleep(500);
@@ -481,7 +536,7 @@
       const ids = messages.map((m) => m.id).join(",");
       if (ids === lastIds) break;
       lastIds = ids;
-      const decision = await api("/thread", { threadId, messages, ...listing() });
+      const decision = await api("/thread", { threadId, messages, ...listing(), structure: threadStructure(log, messages) });
       if (decision.action === "send") await sendReply(decision, log);
       await sleep(2_000);
     }

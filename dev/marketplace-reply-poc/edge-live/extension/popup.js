@@ -9,6 +9,7 @@ function render(s) {
   document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
   const hb = s.heartbeat;
   document.getElementById("status").textContent = [
+    s.monitoring?.ok ? "MONITORING MARKETPLACE: YES" : "MONITORING MARKETPLACE: NO - " + (s.monitoring?.reasons?.[0] || "unknown"),
     "Mode: " + s.mode,
     "Tab: " + (hb ? hb.health + " (" + hb.visibility + "), " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + "s ago" : "not seen"),
     "Chats visible: " + (hb?.rows ?? 0) + ", unread: " + (hb?.unread ?? 0),

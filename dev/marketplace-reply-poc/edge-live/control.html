@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Marketplace Assistant</title>
 <style>
-  body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 960px; color: #1c1e21; background: #f5f6f7; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 980px; color: #1c1e21; background: #f5f6f7; }
   h1 { font-size: 20px; margin: 0 0 12px; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
   button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #ccd0d5; background: #fff; cursor: pointer; }
@@ -16,12 +16,18 @@
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   td, th { text-align: left; padding: 4px 6px; border-top: 1px solid #eee; vertical-align: top; }
   .muted { color: #65676b; font-size: 13px; }
-  input[type=text] { font: inherit; padding: 6px; width: min(100%, 420px); }
-  pre { white-space: pre-wrap; margin: 0; }
+  input[type=text] { font: inherit; padding: 6px; width: min(100%, 360px); box-sizing: border-box; }
+  pre { white-space: pre-wrap; margin: 0; font-size: 13px; }
+  #banner { border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; font-weight: 600; }
+  #banner.ok { background: #e7f5ea; border: 1px solid #2e7d32; color: #1b5e20; }
+  #banner.bad { background: #fdecea; border: 1px solid #c62828; color: #8e1c1c; }
+  #banner ul { margin: 6px 0 0; padding-left: 20px; font-weight: 400; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #eef1f4; font-size: 12px; }
 </style>
 </head>
 <body>
 <h1>Marketplace Assistant</h1>
+<div id="banner" class="bad">Connecting to the local service…</div>
 <div class="bar">
   <button id="stop">STOP NOW</button>
   <span class="muted">Mode:</span>
@@ -30,42 +36,99 @@
   <button data-mode="draft">Draft only</button>
   <button data-mode="send">Send</button>
 </div>
+
 <section>
-  <h2>Send allowlist</h2>
-  <p class="muted">Send mode only replies in these Facebook thread IDs, unless "all conversations" is ticked.</p>
-  <input id="allow" type="text" placeholder="Thread IDs, comma separated">
+  <h2>Pilot: verify and read one test conversation</h2>
+  <p class="muted">Runs from Observe. The assistant reads the visible list row of this one conversation and opens it only if the row contains the words below. It reads the messages, asks Ask Me for a draft, never sends, and returns to Observe.</p>
+  <input id="pilotThread" type="text" placeholder="Conversation ID">
+  <input id="pilotWords" type="text" placeholder="Row must contain, e.g. Renault Master">
+  <button id="pilotRun">Verify and read once</button>
+  <button id="pilotCancel">Cancel</button>
+  <pre id="pilot" style="margin-top:8px"></pre>
+</section>
+
+<section>
+  <h2>Allowlist for Draft and Send</h2>
+  <p class="muted">Draft and Send open and reply only in these conversation IDs, unless "all conversations" is ticked.</p>
+  <input id="allow" type="text" placeholder="Conversation IDs, comma separated">
   <label><input id="allowAll" type="checkbox"> all conversations</label>
   <button id="saveAllow">Save</button>
 </section>
 <section><h2>Status</h2><pre id="status">Loading…</pre></section>
 <section><h2>Needs a person</h2><table id="human"></table></section>
-<section><h2>Recent replies</h2><table id="jobs"></table></section>
+<section><h2>Recent drafts and replies</h2><table id="jobs"></table></section>
 <section><h2>Events</h2><table id="events"></table></section>
 <script>
 const api = (path, body) => fetch(path, body === undefined ? {} : {
   method: "POST", headers: { "Content-Type": "application/json", "x-r2b-assistant": "1" }, body: JSON.stringify(body),
 }).then((r) => r.json());
 const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fbLink = (id) => id ? `<a href="https://www.facebook.com/messages/t/${esc(id)}/" target="_blank" rel="noopener">${esc(id)}</a>` : "";
+const REASON = { "read-to-unread": "a read conversation became unread", "new-at-top": "new conversation at the top", "moved-to-top": "another message in an unanswered conversation" };
+const EVENT = {
+  "unread-observed": (e) => "New Marketplace message detected (" + (REASON[e.reason] || e.reason || "unread") + ")",
+  "unread-not-opened": (e) => "New message detected; not opened (not on the allowlist)",
+  unread: (e) => "New message detected; opening (" + (REASON[e.reason] || "") + ")",
+  baseline: (e) => "Starting snapshot of the " + (e.list || "") + " list: " + e.rows + " conversations, " + e.unreadLeftForPerson + " already unread (left for a person)",
+  "list-opener": (e) => "List opener: " + e.status,
+  mode: (e) => "Mode set to " + e.mode,
+  pilot: (e) => "Pilot " + e.status + (e.why ? ": " + e.why : ""),
+  incoming: () => "Read new customer message",
+  askme: (e) => "Ask Me answered in " + e.ms + " ms",
+  draft: () => "Draft recorded (not sent)",
+  escalate: (e) => "Passed to a person: " + e.reason,
+  "send-not-restored": () => "Service restarted: Send was not restored",
+  "emergency-stop": () => "STOP pressed",
+  health: (e) => "Facebook page problem: " + e.health,
+};
 function render(s) {
+  const m = s.monitoring || { ok: false, reasons: ["Unknown"] };
+  const banner = document.getElementById("banner");
+  banner.className = m.ok ? "ok" : "bad";
+  banner.innerHTML = m.ok
+    ? "Monitoring the Marketplace list: yes. New enquiries will be detected (mode: " + esc(s.mode) + ")."
+    : "Monitoring the Marketplace list: NO<ul>" + m.reasons.map((r) => "<li>" + esc(r) + "</li>").join("") + "</ul>";
   document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
   const hb = s.heartbeat;
+  const ext = s.extension || {};
   document.getElementById("status").textContent = [
     "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
-    "Browser tab: " + (hb ? hb.health + ", " + hb.visibility + ", last seen " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + "s ago" : "not connected"),
-    "Conversation list on assistant tab: " + (hb ? hb.rows + " rows, " + hb.unread + " unread, list=" + (hb.list || "none") + (hb.opener ? ", opener: " + hb.opener : "") + (hb.rows ? "" : "  <-- NONE: new messages cannot be detected") : "-"),
-    "Unread at switch-on (left for a person): " + (s.baselineUnread ?? "not yet taken"),
-    ...(s.mode === "observe" ? ["Observe (passive): conversations unread now: " + (s.observedUnread.join(", ") || "none")] : []),
+    "Edge assistant tab: " + (hb ? hb.health + ", " + hb.visibility + ", last report " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + " s ago" : "not connected"),
+    "Conversation list: " + (hb ? hb.list + " (" + hb.rows + " rows checked, " + hb.unread + " unread), opener: " + (hb.opener || "-") : "-"),
+    "Extension: running " + (ext.running || "unknown") + ", installed " + (ext.expected || "unknown") + (ext.updatePending ? "  <-- will update itself within a minute; if not, reload it in edge://extensions" : ""),
+    "Already unread at the starting snapshot (left for a person): " + (s.baselineUnread ?? "no snapshot yet"),
+    "Waiting to open: " + (s.pendingOpen.join(", ") || "none") + "   Allowlist: " + (s.allowAll ? "ALL" : s.allowThreads.join(", ") || "empty"),
+    "Drafts: " + s.counts.drafts + "   Sent: " + s.counts.sent + "   Needs a person: " + s.counts.needsHuman,
     "Send is never restored after a restart; it must be switched on here each time.",
-    "Waiting to open: " + (s.pendingOpen.join(", ") || "none"),
-    "Sent: " + s.counts.sent + "   Drafts: " + s.counts.drafts + "   Needs a person: " + s.counts.needsHuman,
+  ].join("\n");
+  const p = s.pilot;
+  document.getElementById("pilot").textContent = !p ? "No pilot run yet." : [
+    "Conversation " + p.threadId + ": " + p.status + (p.error ? " - " + p.error : ""),
+    ...(p.rowText ? ["Row text matched: " + p.rowText] : []),
+    ...(p.result ? [
+      "Messages read: " + p.result.messages + " (incoming " + p.result.incoming + ", outgoing " + p.result.outgoing + ", unknown " + p.result.unknown + ")",
+      "Listing: " + (p.result.listingTitle || "-") + (p.result.listingId ? " (item " + p.result.listingId + ")" : ""),
+      "Latest customer messages: " + (p.result.latestIncoming || []).join(" | "),
+      "Answered: " + (p.result.customerMessage || "-"),
+      p.result.draft ? "Draft (NOT sent):\n" + p.result.draft : "No draft: " + (p.result.noDraftReason || "-"),
+      ...(p.result.askMeMs != null ? ["Ask Me time: " + p.result.askMeMs + " ms"] : []),
+      "Structure: " + JSON.stringify(p.result.structure),
+    ] : []),
   ].join("\n");
   if (document.activeElement?.id !== "allow") document.getElementById("allow").value = s.allowThreads.join(", ");
   document.getElementById("allowAll").checked = s.allowAll;
-  document.getElementById("human").innerHTML = s.needsHuman.map((t) => `<tr><td><a href="https://www.facebook.com/messages/t/${esc(t.threadId)}/" target="_blank">${esc(t.threadId)}</a></td><td>${esc(t.listingTitle)}</td><td>${esc(t.reason)}</td><td><button data-resume="${esc(t.threadId)}">Hand back to assistant</button></td></tr>`).join("") || "<tr><td class=muted>None</td></tr>";
-  document.getElementById("jobs").innerHTML = s.recentJobs.map((j) => `<tr><td>${esc(new Date(j.at).toLocaleTimeString())}</td><td>${esc(j.threadId)}</td><td>${esc(j.status)}</td><td><b>Customer:</b> ${esc(j.customer)}<br><b>Reply:</b> ${esc(j.text)}</td></tr>`).join("") || "<tr><td class=muted>None</td></tr>";
-  document.getElementById("events").innerHTML = s.events.map((e) => `<tr><td>${esc(new Date(e.at).toLocaleTimeString())}</td><td>${esc(e.type)}</td><td>${esc(JSON.stringify({ ...e, at: undefined, type: undefined }))}</td></tr>`).join("");
+  document.getElementById("human").innerHTML = s.needsHuman.map((t) => `<tr><td>${fbLink(t.threadId)}</td><td>${esc(t.listingTitle)}</td><td>${esc(t.reason)}</td><td><button data-resume="${esc(t.threadId)}">Hand back to assistant</button></td></tr>`).join("") || "<tr><td class=muted>None</td></tr>";
+  document.getElementById("jobs").innerHTML = s.recentJobs.map((j) => `<tr><td>${esc(new Date(j.at).toLocaleTimeString())}</td><td>${fbLink(j.threadId)}</td><td><span class="pill">${esc(j.status)}</span></td><td><b>Customer:</b> ${esc(j.customer)}<br><b>Reply:</b> ${esc(j.text)}</td></tr>`).join("") || "<tr><td class=muted>None</td></tr>";
+  document.getElementById("events").innerHTML = s.events.map((e) => {
+    const text = EVENT[e.type] ? EVENT[e.type](e) : e.type;
+    return `<tr><td>${esc(new Date(e.at).toLocaleTimeString())}</td><td>${esc(text)}</td><td>${fbLink(e.threadId)}</td></tr>`;
+  }).join("");
 }
-const refresh = () => api("/status").then(render).catch(() => { document.getElementById("status").textContent = "Service not reachable."; });
+const refresh = () => api("/status").then(render).catch(() => {
+  const banner = document.getElementById("banner");
+  banner.className = "bad";
+  banner.textContent = "The local assistant service is not running. Start it, then this page will reconnect.";
+});
 document.getElementById("stop").onclick = () => api("/stop", {}).then(render);
 document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
   if (b.dataset.mode === "send" && !confirm("Switch on LIVE sending to Facebook customers on the allowlist?")) return;
@@ -74,6 +137,13 @@ document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
 document.getElementById("saveAllow").onclick = () => api("/status").then((s) => api("/control", {
   mode: s.mode, allowThreads: document.getElementById("allow").value.split(/[\s,]+/).filter(Boolean), allowAll: document.getElementById("allowAll").checked,
 })).then(render);
+document.getElementById("pilotRun").onclick = () => {
+  const threadId = document.getElementById("pilotThread").value.trim();
+  const mustContain = document.getElementById("pilotWords").value.trim();
+  if (!confirm("Open and read conversation " + threadId + " once, only if its row contains \"" + mustContain + "\"? It will be marked read. Nothing is sent.")) return;
+  api("/control", { startPilot: { threadId, mustContain } }).then((r) => r.error ? alert(r.error) : render(r));
+};
+document.getElementById("pilotCancel").onclick = () => api("/control", { cancelPilot: true }).then(render);
 document.addEventListener("click", (e) => { if (e.target.dataset.resume) api("/control", { resumeThread: e.target.dataset.resume }).then(render); });
 refresh(); setInterval(refresh, 2000);
 </script>

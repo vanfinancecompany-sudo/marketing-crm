@@ -33,7 +33,7 @@ let service;
 let edge;
 function startService() {
   service = spawn(process.execPath, [join(HERE, "..", "service.mjs")], {
-    env: { ...process.env, R2B_ASSISTANT_PORT: String(PORT), R2B_ASSISTANT_STATE: stateFile, R2B_ASKME_STUB: "1", R2B_FIXTURE: "1" },
+    env: { ...process.env, R2B_ASSISTANT_PORT: String(PORT), R2B_EXTENSION_DIR: join(work, "extension-" + (launches + 1)), R2B_ASSISTANT_STATE: stateFile, R2B_ASKME_STUB: "1", R2B_FIXTURE: "1" },
     stdio: ["ignore", "pipe", "inherit"],
   });
   return new Promise((ok) => service.stdout.once("data", ok));
@@ -151,6 +151,46 @@ try {
   assert.ok(decoy && decoy.safe === false, "navigation link must be unclickable: " + JSON.stringify(diag.controls));
   assert.ok(!JSON.stringify(diag).includes("Observe-only enquiry"), "diagnostics must not contain message text");
   pass(`diagnostics: per-conversation rows (${row("300").size[1]}px), unread by dot+bold, 'Mark as unread' rows read, decoy link unclickable, no message text`);
+
+  // Pilot, wrong conversation: the row text does not match, so it is not opened.
+  await fb("customer", { threadId: "400", name: "Tester", listing: "2015 Renault Master LWB", text: "Hi, is this still available?" });
+  await waitFor(async () => (await api("/status")).events.some((e) => e.type === "unread-observed" && e.threadId === "400"), "pilot test enquiry detected");
+  const opened = () => fb("state").then((st) => Object.entries(st.threads).filter(([, t]) => !t.unread).map(([id]) => id).sort().join(","));
+  const readBefore = await opened();
+  await api("/control", { startPilot: { threadId: "300", mustContain: "Renault Master" } });
+  const mismatch = await waitFor(async () => { const p = (await api("/status")).pilot; return p?.status === "mismatch" ? p : null; }, "pilot mismatch", 60_000);
+  assert.equal((await api("/status")).mode, "observe");
+  assert.equal(await opened(), readBefore, "no conversation was opened");
+  assert.ok(!JSON.stringify(mismatch).includes("Jo"), "another customer's row text is not stored");
+  pass("pilot refused a conversation whose row does not contain 'Renault Master': not opened, still unread, back in Observe");
+
+  // Pilot, test conversation: verified, opened once, read, drafted, never sent, back to Observe.
+  const sendsBefore = (await fb("state")).sends;
+  await api("/control", { startPilot: { threadId: "400", mustContain: "Renault Master" } });
+  const pilot = await waitFor(async () => { const p = (await api("/status")).pilot; return p?.status === "done" || p?.status === "failed" ? p : null; }, "pilot done", 90_000);
+  assert.equal(pilot.status, "done", JSON.stringify(pilot));
+  const after = await api("/status");
+  assert.equal(after.mode, "observe");
+  assert.deepEqual(after.allowThreads, ["400"]);
+  assert.equal((await fb("state")).sends, sendsBefore, "nothing was sent");
+  assert.equal(await opened(), [...readBefore.split(",").filter(Boolean), "400"].sort().join(","), "only the test conversation was opened");
+  assert.equal(pilot.result.incoming, 1);
+  assert.equal(pilot.result.outgoing, 0);
+  assert.equal(pilot.result.listingTitle, "2015 Renault Master LWB");
+  assert.equal(pilot.result.customerMessage, "Hi, is this still available?");
+  assert.ok(pilot.result.draft.includes("https://www.rent2buyvans.co.uk/"), pilot.result.draft);
+  assert.ok(pilot.result.structure.logInMain && pilot.result.structure.withMessageId === 1, JSON.stringify(pilot.result.structure));
+  await waitFor(async () => (await api("/status")).monitoring.ok, "monitoring resumes after pilot", 60_000);
+  pass("pilot verified 'Renault Master', opened only that conversation, read 1 incoming message and its listing, drafted a website reply, sent nothing, returned to Observe and resumed monitoring");
+
+  // Self-update: a newer extension version on disk is picked up without anyone touching Edge.
+  const manifestPath = join(work, "extension-" + launches, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.version = "9.9.9";
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  await waitFor(async () => (await api("/status")).heartbeat?.ext === "9.9.9", "extension self-update", 120_000);
+  await waitFor(async () => (await api("/status")).monitoring.ok, "monitoring after self-update", 90_000);
+  pass("extension updated itself from disk, reloaded the assistant tab, reopened the list and resumed monitoring");
 
   // Deliberate activation: everything unread now is left for a person.
   await api("/control", { mode: "send", allowThreads: ["200", "300"] });

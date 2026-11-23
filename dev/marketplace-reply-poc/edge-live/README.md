@@ -75,3 +75,32 @@ These cannot be tested without the signed-in Edge profile and a consenting test 
 5. **Windows reboot.** The service comes back Off after a reboot by design. `install-startup.ps1` adds a Startup-folder shortcut that starts the service and Edge at logon. It has not been installed. The PC must stay signed in, awake and online.
 
 Meta's terms restrict automated access to Facebook. Running this on a personal profile carries a risk of account checks or restrictions. A security checkpoint pauses the assistant (`health: security-challenge`).
+
+## Session of 23 November 2026 (evening)
+
+**Live detection evidence.** The `unread-observed` event at 19:31:48 was for conversation `1761408039328724`:
+- It was the first row of the Marketplace list, which is where Facebook places the newest activity.
+- It was absent from the 27-row starting snapshot taken at 19:31:22.
+- It showed the unread dot and bold name.
+- No other Marketplace arrival was logged in the following minutes.
+
+The diagnostics on extension 0.2.0 strip names and titles, so its link to the Renault Master test is unconfirmed until the pilot reads the row text.
+
+**Safety fix.** In Draft or Send, a newly unread conversation is now opened only if it is on the allowlist. Before this fix, any new conversation would have been opened.
+
+**Detection**
+- Only the Marketplace list counts; ordinary Messenger chats are ignored.
+- Each arrival records its reason: `new-at-top`, `read-to-unread`, or `moved-to-top`. Moved-to-top means a further message in an unanswered chat jumped from position 2 or lower to the top.
+- Only the top 100 rows of each list are classified.
+
+**Pilot** (control page, "Verify and read once"):
+1. Reads the visible row text of one conversation.
+2. Opens it only if the text contains the expected words.
+3. Reads it and drafts a reply with Ask Me. Nothing is sent.
+4. Returns to Observe.
+
+**Monitoring banner.** The popup and control page say "Monitoring the Marketplace list: yes/no", with plain-language reasons.
+
+**Self-update.** From extension 0.3.0 on, a `git pull` is enough: the extension reloads itself and the assistant tab. Version 0.2.0 needs one manual reload.
+
+**Live Ask Me check** (`test/askme-live-check.mjs`, 13 Marketplace questions on the deployed Rent2Buy endpoint): 13 of 13 pass. Three vehicle-specific phrasings had been reaching Ask Me: a van's monthly price, details asked about "it", and requests to hold a van. The Marketplace routing in `reply-policy.mjs` now sends these to the website. Ask Me itself is unchanged.

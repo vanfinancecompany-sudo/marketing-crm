@@ -97,12 +97,13 @@ export function setMode(state, mode, { allowThreads, allowAll } = {}) {
   logEvent(state, "mode", { mode, allowAll: state.allowAll, allowThreads: state.allowThreads });
 }
 
-export function recordHeartbeat(state, { health, visibility, url, rows, unread, list, opener }) {
+export function recordHeartbeat(state, { health, visibility, url, rows, unread, list, opener, ext }) {
   const previous = state.heartbeat;
   state.heartbeat = {
     at: new Date().toISOString(), health: String(health || "unknown"), visibility: String(visibility || ""),
     url: String(url || "").slice(0, 200), rows: Number(rows) || 0, unread: Number(unread) || 0,
     list: String(list || "none").slice(0, 40), opener: String(opener || "").slice(0, 80),
+    ext: typeof ext === "string" ? ext.slice(0, 20) : null,
   };
   if (state.mode !== "off" && health !== previous?.health && health !== "healthy" && health !== "loading") {
     logEvent(state, "health", { health });
@@ -114,17 +115,25 @@ export function recordHeartbeat(state, { health, visibility, url, rows, unread, 
 
 const MAX_LIST_SEEN = 3000;
 const TOP_ROWS = 5;
+const PRIMARY_LIST = "marketplace";
 
-// Inbox list snapshot: [{ id, unread, pos }], pos = index within its list.
-// A conversation counts as newly unread only when it goes from read to unread,
-// or appears unread for the first time near the top of its list (where new
-// conversations arrive). Old unread conversations that Facebook renders lazily
-// further down never count. Nothing is assessed until the list is fully open.
+// Inbox list snapshot: [{ id, unread, pos, grid }]. pos = index within its
+// list; grid = the list's name (newer extensions). When lists are named, only
+// the Marketplace list counts: ordinary Messenger chats are ignored.
+//
+// A conversation counts as a new arrival only when:
+//   read-to-unread  it was seen read and is now unread;
+//   new-at-top      it is unread, never seen before, and in the top 5 rows;
+//   moved-to-top    it was already unread lower down (pos >= 2) and jumped to
+//                   the top, i.e. a further message in an unanswered chat.
+// Old unread conversations that Facebook renders lazily further down never
+// count. Nothing is assessed until the list is fully open.
 export function inspectInbox(state, threads, { listReady = true, list = null } = {}) {
   if (state.mode === "off") return { open: null };
   if (!listReady) return { open: null, waiting: "Conversation list is not open yet" };
-  const rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 600);
-  if (!rows.length) return { open: null, waiting: "No conversations visible" };
+  let rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 600);
+  if (rows.some((row) => typeof row.grid === "string")) rows = rows.filter((row) => row.grid === PRIMARY_LIST);
+  if (!rows.length) return { open: null, waiting: "No Marketplace conversations visible" };
   const unread = rows.filter((row) => row.unread === true).map((row) => String(row.id));
   // A different list (for example Chats, then Marketplace) gets a fresh baseline.
   const first = !state.inboxBaseline || (list !== null && state.inboxBaseline.list !== list);
@@ -133,10 +142,16 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
   for (const row of rows) {
     const id = String(row.id);
     const prev = seenList[id];
+    const prevState = typeof prev === "string" ? prev : prev?.s;
+    const prevPos = typeof prev === "object" && prev ? prev.p : undefined;
     const pos = Number.isFinite(row.pos) ? row.pos : 0;
-    if (!first && row.unread === true && (prev === "read" || (prev === undefined && pos < TOP_ROWS))) fresh.push(id);
+    if (!first && row.unread === true) {
+      if (prevState === "read") fresh.push({ id, pos, reason: "read-to-unread" });
+      else if (prevState === undefined && pos < TOP_ROWS) fresh.push({ id, pos, reason: "new-at-top" });
+      else if (prevState === "unread" && Number.isFinite(prevPos) && prevPos >= 2 && pos === 0) fresh.push({ id, pos, reason: "moved-to-top" });
+    }
     delete seenList[id];
-    seenList[id] = row.unread === true ? "unread" : "read";
+    seenList[id] = { s: row.unread === true ? "unread" : "read", p: pos };
   }
   const keys = Object.keys(seenList);
   for (const id of keys.slice(0, Math.max(0, keys.length - MAX_LIST_SEEN))) delete seenList[id];
@@ -145,21 +160,112 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
     state.inboxBaseline = { at: new Date().toISOString(), unread, list };
     if (state.mode === "observe") state.observedUnread = unread;
     logEvent(state, "baseline", { list, rows: rows.length, unreadLeftForPerson: unread.length });
-    return { open: null };
+    // Only an explicitly queued pilot conversation can be waiting here.
+    return { open: state.mode === "observe" ? null : state.pendingOpen[0] || null };
   }
   if (state.mode === "observe") {
     // Passive: record the arrival, nothing more. Nothing is queued to open,
     // so read status and message content are untouched.
-    for (const id of fresh) logEvent(state, "unread-observed", { threadId: id });
+    for (const f of fresh) logEvent(state, "unread-observed", { threadId: f.id, reason: f.reason, pos: f.pos, list });
     state.observedUnread = unread;
     return { open: null };
   }
-  for (const id of fresh) {
-    if (state.pendingOpen.includes(id) || state.threads[id]?.needsHuman) continue;
-    state.pendingOpen.push(id);
-    logEvent(state, "unread", { threadId: id });
+  for (const f of fresh) {
+    // Draft and Send open only allowlisted conversations (or all, when the
+    // owner has deliberately ticked "all conversations").
+    if (!(state.allowAll || state.allowThreads.includes(f.id))) {
+      logEvent(state, "unread-not-opened", { threadId: f.id, reason: f.reason, why: "Not on the allowlist" });
+      continue;
+    }
+    if (state.pendingOpen.includes(f.id) || state.threads[f.id]?.needsHuman) continue;
+    state.pendingOpen.push(f.id);
+    logEvent(state, "unread", { threadId: f.id, reason: f.reason });
   }
   return { open: state.pendingOpen[0] || null };
+}
+
+// ---- Verify-first pilot: one named conversation, read and drafted once ----
+// Started from Observe. The extension reports the visible list-row text of
+// that one conversation; only if it contains the expected words (for example
+// "Renault Master") is the conversation opened, in Draft mode restricted to it.
+// After the draft is recorded the assistant returns to Observe. Never sends.
+const PILOT_TIMEOUT_MS = 180_000;
+export function startPilot(state, { threadId, mustContain }) {
+  const id = String(threadId || "");
+  const words = String(mustContain || "").trim();
+  if (!THREAD_ID.test(id)) throw new TypeError("Pilot needs a conversation ID");
+  if (words.length < 3) throw new TypeError("Pilot needs words that must appear in the conversation row");
+  if (state.mode !== "observe") throw new TypeError("Start the pilot from Observe mode");
+  state.pilot = { threadId: id, mustContain: words, status: "verifying", requestedAt: new Date().toISOString(), result: null };
+  logEvent(state, "pilot", { status: "verifying", threadId: id, mustContain: words });
+  return state.pilot;
+}
+
+export function cancelPilot(state, why = "Cancelled") {
+  if (!state.pilot || ["done", "mismatch", "failed", "cancelled"].includes(state.pilot.status)) return;
+  const wasOpening = state.pilot.status === "opening";
+  state.pilot.status = why === "Cancelled" ? "cancelled" : "failed";
+  state.pilot.error = why;
+  logEvent(state, "pilot", { status: state.pilot.status, threadId: state.pilot.threadId, why });
+  if (wasOpening) setMode(state, "observe");
+}
+
+export function verifyPilot(state, { threadId, found, rowText }) {
+  const pilot = state.pilot;
+  if (!pilot || pilot.status !== "verifying" || String(threadId) !== pilot.threadId) return { ok: false };
+  if (!found) {
+    cancelPilot(state, "The conversation is not in the visible Marketplace list");
+    return { ok: false };
+  }
+  const text = normalise(rowText);
+  const words = normalise(pilot.mustContain);
+  if (!text.includes(words)) {
+    // Another customer's row text is not stored.
+    pilot.status = "mismatch";
+    pilot.error = "The conversation row does not contain \"" + pilot.mustContain + "\". It was not opened.";
+    logEvent(state, "pilot", { status: "mismatch", threadId: pilot.threadId });
+    return { ok: false };
+  }
+  pilot.rowText = String(rowText).replace(/\s+/g, " ").trim().slice(0, 300);
+  pilot.status = "opening";
+  pilot.openedAt = new Date().toISOString();
+  setMode(state, "draft", { allowThreads: [pilot.threadId], allowAll: false });
+  state.pendingOpen = [pilot.threadId];
+  logEvent(state, "pilot", { status: "opening", threadId: pilot.threadId });
+  return { ok: true };
+}
+
+export function pilotTimeout(state) {
+  const pilot = state.pilot;
+  if (pilot?.status === "verifying" && Date.now() - Date.parse(pilot.requestedAt) > PILOT_TIMEOUT_MS) {
+    cancelPilot(state, "The Edge tab did not report the conversation row in time (is the extension updated?)");
+  }
+  if (pilot?.status === "opening" && Date.now() - Date.parse(pilot.openedAt) > PILOT_TIMEOUT_MS) {
+    cancelPilot(state, "The conversation did not finish loading in time");
+  }
+}
+
+// Called after the pilot conversation has been read (and drafted, if new).
+export function finishPilot(state, { snapshot, structure, decision, outcome, askMeMs }) {
+  const pilot = state.pilot;
+  if (!pilot || pilot.status !== "opening" || String(snapshot?.threadId) !== pilot.threadId) return false;
+  const messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
+  const count = (direction) => messages.filter((m) => m.direction === direction).length;
+  pilot.result = {
+    messages: messages.length, incoming: count("incoming"), outgoing: count("outgoing"), unknown: messages.length - count("incoming") - count("outgoing"),
+    latestIncoming: messages.filter((m) => m.direction === "incoming").slice(-3).map((m) => String(m.text || "").slice(0, 300)),
+    listingId: snapshot.listingId || null, listingTitle: String(snapshot.listingTitle || "").slice(0, 200),
+    customerMessage: decision?.message || null,
+    draft: outcome?.draft || null,
+    noDraftReason: outcome?.draft ? null : outcome?.reason || decision?.reason || null,
+    askMeMs: askMeMs ?? null,
+    structure: structure || null,
+  };
+  pilot.status = "done";
+  pilot.finishedAt = new Date().toISOString();
+  logEvent(state, "pilot", { status: "done", threadId: pilot.threadId, draft: Boolean(outcome?.draft) });
+  setMode(state, "observe");
+  return true;
 }
 
 export function resolveProduct(listingTitle, defaultProduct) {
@@ -319,9 +425,40 @@ export function resumeThread(state, threadId) {
   return true;
 }
 
+const OPENER_TEXT = {
+  "no-messenger-button": "Could not find the Messenger button at the top of the Facebook page.",
+  "no-marketplace-control": "The Messenger panel is open but its Marketplace entry was not found.",
+  "messenger-panel-not-found": "Clicking Messenger did not show the chat panel; retrying every 10 minutes.",
+};
+const HEALTH_TEXT = {
+  "signed-out": "Facebook is signed out in Edge.",
+  "security-challenge": "Facebook is showing a security check. Complete it in Edge.",
+  loading: "The Facebook page is still loading.",
+};
+
+// Is the assistant genuinely watching the Marketplace list right now?
+export function monitoringVerdict(state, now = Date.now()) {
+  const hb = state.heartbeat;
+  const reasons = [];
+  if (state.mode === "off") reasons.push("The assistant is Off.");
+  if (!hb) reasons.push("The Edge extension has not connected to this service yet.");
+  else {
+    const age = Math.round((now - Date.parse(hb.at)) / 1000);
+    if (age > 150) reasons.push("No report from the Edge assistant tab for " + age + " s: Edge may be closed or asleep, or the extension disabled.");
+    if (hb.health !== "healthy") reasons.push(HEALTH_TEXT[hb.health] || "The Facebook page is not healthy (" + hb.health + ").");
+    if (/^tripped|^disabled/.test(hb.opener)) reasons.push("Safety stop: a conversation view appeared after a click, so the list opener switched itself off. Reload the assistant tab.");
+    else if (hb.list !== "marketplace") reasons.push(OPENER_TEXT[hb.opener] || "The Marketplace conversation list is not open in the assistant tab (" + (hb.list || "none") + ").");
+    if (!hb.rows) reasons.push("No conversations are visible in the assistant tab.");
+  }
+  if (state.mode !== "off" && !state.inboxBaseline) reasons.push("Waiting for the first full snapshot of the Marketplace list.");
+  return { ok: reasons.length === 0, reasons };
+}
+
 export function publicStatus(state) {
   const threads = Object.values(state.threads);
   return {
+    monitoring: monitoringVerdict(state),
+    pilot: state.pilot || null,
     mode: state.mode,
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,
