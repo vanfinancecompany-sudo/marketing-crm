@@ -38,6 +38,22 @@ A simulated inbound observation can provide an explicit direction and stable mes
 - A recorded attempt with no visible receipt becomes Unconfirmed after eight seconds in the fixture. The worker never repeats that attempt automatically.
 - Run `node --test tests/marketplace-reply-poc.test.mjs tests/askme-lean-engine.test.js tests/marketplace-helper.test.js tests/marketplace-helper-package.test.js` for local regressions.
 
+## Inspect the read-only Edge observer
+
+With the loopback dev server running, load the separate **observer-extension** folder in a disposable Edge profile using Load unpacked. Open the observer lab from the local CRM fixture. Only the observer extension is needed for this lab. It reads synthetic DOM metadata and posts it to the loopback diagnostics endpoint. It has no Facebook host permission, composer, send control, model call or message-body upload.
+
+- Let the first snapshot establish a baseline. It should report zero accepted incoming messages.
+- Click **Simulate new messages**. Each batch adds one distinct Finance message and one Rent2Buy message. The displayed text is deliberately identical. Matching uses exact listing IDs from local test receipts.
+- Repeat the snapshot, open another tab, reload or restart Edge. The accepted count must stay the same. Outgoing, unread, incomplete, unlabelled, historical and unmatched observations are held outside reply eligibility. The simulated message sequence represents independently verified arrival evidence. An ID first seen after a refresh does not by itself establish a new enquiry.
+- Stop or disconnect the local service to exercise the unavailable state. A browser heartbeat resumes ordinary observation when the local service returns. A simulated authentication challenge reports a pause.
+- The observer reports DOM scan time, server ingest time and loopback round-trip time separately from Ask Me. The tests pass resolved products to the existing development Ask Me adapter without granting the observer control over the inbox.
+
+## Prepare a Windows pilot
+
+Start the service and its Edge profile at Windows user logon during a controlled pilot. Verify the dedicated profile can open its intended tab after a clean Edge restart, wait for the CRM heartbeat and alert when it goes stale. The local unattended process depends on a signed-in Windows session, the machine remaining awake and online, an active tab and a valid Facebook session. Confirm Edge sleeping-tab or tab-discard behaviour on the actual PC before relying on background observation. The test launcher may need to reload an unpacked extension installed through the DevTools test protocol. No startup task, profile option or browser permission is changed by this fixture.
+
+Before connecting a real read-only observer, obtain Meta's permission for automated access and a separately approved controlled inbound test. Verify new-versus-historical arrival, outgoing direction and unread semantics with a consenting test sender. Require an exact, owner-confirmed listing registry match. A logout, security challenge or unrecognised page state should stop the connection and notify a person. Any future sending test also needs explicit permission, durable claims, an outgoing confirmation signal and a stop control.
+
 ## Scope of the proof
 
-The mock sender and CRM claim use a single local state file. A supervised live test would need Meta permission for the browser access and sending, an explicitly approved test account and listing, and a dedicated browser profile. First verify stable conversation, listing and receipt identity and confirm that the operator can stop sending immediately. A production implementation would need durable server-side atomic claims, authenticated worker access and an alert path. The fixture's identity fields and delivery receipts provide no evidence that the live Facebook interface exposes equivalent signals.
+The mock sender and CRM claim use a single local state file. A supervised live test would need Meta permission for the browser access and sending, an explicitly approved test account and listing, and a dedicated browser profile. First verify stable conversation, listing and receipt identity and confirm that the operator can stop sending immediately. A production implementation would need durable server-side atomic claims, authenticated worker access and an alert path. A human-supervised live inspection found seven visible incoming IDs and the same listing link in one already-read conversation after hydration and refresh. A real new-message arrival, sender-direction parity, an unread thread, and sender receipt identity still need independent verification.

@@ -8,6 +8,8 @@ const ROOT = "/__marketplace-reply-poc";
 const ASSETS = {
   "/": ["control.html", "text/html; charset=utf-8"],
   "/inbox": ["inbox.html", "text/html; charset=utf-8"],
+  "/observer": ["observer.html", "text/html; charset=utf-8"],
+  "/observer-fixture.js": ["observer-fixture.js", "text/javascript; charset=utf-8"],
   "/fixture.js": ["fixture.js", "text/javascript; charset=utf-8"],
   "/fixture.css": ["fixture.css", "text/css; charset=utf-8"],
 };
@@ -73,6 +75,8 @@ export function createFixtureMiddleware(stateFile) {
           const turn = simulator.addFollowUp(input.threadId, input.message, input.observedMessage);
           return json(turn.ignored || turn.duplicate ? 200 : 201, turn);
         }
+        case "/observer-observe":
+          return json(200, simulator.observeBrowser(input));
         case "/observe":
           if (!Array.isArray(input.rows) || input.rows.some((row) => !row || typeof row.threadId !== "string"
               || !Array.isArray(row.incomingIds) || !Array.isArray(row.outgoingIds))) {

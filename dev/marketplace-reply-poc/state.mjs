@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { draftMarketplaceReply } from "./assistant.mjs";
+import { FIXTURE_RECEIPTS, inspectInboxSnapshot, marketplaceRegistry } from "./observation.mjs";
 
 export const LISTINGS = {
   "1001": {
@@ -89,6 +90,7 @@ function instruction(thread, turn) {
 export function createReplySimulator(file, now = Date.now, { draftReply = draftMarketplaceReply } = {}) {
   let state = loadState(file);
   let lastHeartbeat = null;
+  const listingRegistry = marketplaceRegistry(FIXTURE_RECEIPTS);
 
   // One loopback server owns the state. Reserve each turn before any async work.
   function change(update) {
@@ -106,6 +108,18 @@ export function createReplySimulator(file, now = Date.now, { draftReply = draftM
     snapshot() {
       const copy = structuredClone(state);
       return { ...copy, threads: copy.threads.map(summarise), lastHeartbeat };
+    },
+
+    observeBrowser(snapshot) {
+      const started = performance.now();
+      const report = change((next) => {
+        next.browserObserver ??= { ledger: {}, totalAccepted: 0 };
+        const audit = next.browserObserver;
+        const result = inspectInboxSnapshot(snapshot, audit.ledger, listingRegistry);
+        audit.totalAccepted += result.accepted.length;
+        return { ...result, totalAccepted: audit.totalAccepted };
+      });
+      return { ...report, ingestMs: performance.now() - started };
     },
 
     setEnabled(enabled) {

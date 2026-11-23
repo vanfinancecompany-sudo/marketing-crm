@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Marketplace Inbox Observer Lab",
+  "version": "0.1.0",
+  "description": "Reports identity metadata from the local Marketplace fixture. No message composer or Facebook access.",
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/__marketplace-reply-poc/observer"],
+      "js": ["observe.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
