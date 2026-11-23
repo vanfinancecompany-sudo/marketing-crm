@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { approveDealerKitRecovery, buildDealerKitRecovery, verifyPendingDealerKitRepairs } from "../api/_dealerkit-publish-recovery.js";
-import { ControlledPublishError, controlledWixCreateId, queryControlledRegistrationItems } from "../api/_dealerkit-controlled-publish-state.js";
+import { ControlledPublishError, controlledWixCreateId, controlledWixRequest, draftAwareControlledWixBody, queryControlledRegistrationItems } from "../api/_dealerkit-controlled-publish-state.js";
 import { reconcileRecoverableTargets, setTargetPublishStatus } from "../api/dealerkit-controlled-publish.js";
 import { submitDealerKitVehicle } from "../utils/dealerKitSubmitVehicle.js";
 import { preserveVehicleRoutes, retryTemporaryPublishOperation } from "../lib/dealerKitPublishRecovery.js";
@@ -284,4 +284,48 @@ test("temporary operations retry within their limit and avoid long rate-limit wi
     throw new ControlledPublishError(429, "rate limit", { retryAfterMs: 12000 });
   }, { wait }), /rate limit/);
   assert.equal(attempts, 4);
+});
+
+
+test("draft PATCH protection covers Cars, Finance and Rent2Buy before writing (WDE0197)", async () => {
+  const configuration = { apiBaseUrl: "https://wix.test", apiKey: "fake", siteId: "fixture" };
+  const collections = ["CARFINANCE", "CARPAGES", "VANFINANCEPAGES", "VANPAGES", "ALLRENT2BUYVANS"];
+  for (const collection of collections) {
+    const itemId = "vehicle-123";
+    const body = {
+      dataCollectionId: collection,
+      patch: { dataItemId: itemId, fieldModifications: [{ fieldPath: "picture", action: "SET_FIELD", setFieldOptions: { value: "new-image" } }] },
+    };
+    let requests = 0;
+    const result = await controlledWixRequest(configuration, "/wix-data/v2/items/" + itemId, {
+      method: "PATCH",
+      body,
+      request: async (_url, options) => {
+        requests++;
+        const submitted = JSON.parse(options.body);
+        assert.equal(submitted.publishPluginOptions.includeDraftItems, true, collection);
+        assert.deepEqual(submitted.patch, body.patch, "only draft option added, field patch preserved");
+        return { ok: true, status: 200, json: async () => ({ dataItem: { id: itemId } }) };
+      },
+    });
+    assert.equal(requests, 1, "Wix PATCH is sent once, not blindly retried");
+    assert.equal(result.dataItem.id, itemId);
+    assert.equal(body.publishPluginOptions, undefined, "caller payload is not mutated");
+    const rollback = draftAwareControlledWixBody("/wix-data/v2/items/" + itemId, "PATCH", {
+      dataCollectionId: collection, patch: { dataItemId: itemId, fieldModifications: [{ fieldPath: "picture", action: "REMOVE_FIELD" }] },
+    });
+    assert.equal(rollback.publishPluginOptions.includeDraftItems, true);
+    assert.equal(rollback.patch.fieldModifications[0].action, "REMOVE_FIELD");
+  }
+});
+
+test("draft-aware guard leaves published reads, publish tasks and explicit options unchanged", () => {
+  const draftBody = { dataCollectionId: "CARFINANCE", patch: { dataItemId: "car", fieldModifications: [] }, publishPluginOptions: { includeDraftItems: false } };
+  assert.equal(draftAwareControlledWixBody("/wix-data/v2/items/car", "PATCH", draftBody), draftBody);
+  const query = { dataCollectionId: "CARFINANCE", query: { paging: { limit: 1 } } };
+  assert.equal(draftAwareControlledWixBody("/wix-data/v2/items/query", "POST", query), query);
+  const status = { task: { type: "UPDATE_PUBLISH_STATUS" } };
+  assert.equal(draftAwareControlledWixBody("/cms/v1/tasks", "POST", status), status);
+  const unrelated = { dataCollectionId: "CARFINANCE", patch: { dataItemId: "car" } };
+  assert.equal(draftAwareControlledWixBody("/wix-data/v2/items/car", "GET", unrelated), unrelated);
 });
