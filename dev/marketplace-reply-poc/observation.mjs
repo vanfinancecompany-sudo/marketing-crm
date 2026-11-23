@@ -61,11 +61,19 @@ export const FIXTURE_RECEIPTS = [
   },
 ];
 
-export function inspectInboxSnapshot({ health, threads }, ledger, registry) {
+export function inspectInboxSnapshot({ health, threads }, audit, registry, recovering) {
   if (!["healthy", "signed-out", "security-challenge", "layout-changed"].includes(health)
       || !Array.isArray(threads) || threads.length > 16) throw new TypeError("Invalid observer snapshot");
   const accepted = [];
-  const counts = { baseline: 0, duplicate: 0, outgoing: 0, unread: 0, identity: 0, unmatched: 0, historical: 0 };
+  const counts = {
+    baseline: 0, duplicate: 0, outgoing: 0, unread: 0, unreadNotices: 0, closed: 0,
+    identity: 0, unmatched: 0, historical: 0, heldForReview: 0,
+  };
+  const previouslyReady = new Set(recovering ? [] : audit.ready);
+  const ready = new Set();
+  const unread = new Set(audit.unread);
+  const ledger = audit.ledger;
+  audit.ready = [];
   if (health !== "healthy") return { health, accepted, counts };
 
   for (const thread of threads) {
@@ -73,8 +81,17 @@ export function inspectInboxSnapshot({ health, threads }, ledger, registry) {
       counts.identity++;
       continue;
     }
-    if (thread.alreadyRead !== true) {
+    if (thread.open === false) counts.closed++;
+    if (thread.alreadyRead === false) {
       counts.unread++;
+      if (!unread.has(thread.id)) counts.unreadNotices++;
+      unread.add(thread.id);
+      continue;
+    }
+    if (thread.alreadyRead === true) unread.delete(thread.id);
+    if (thread.open === false) continue;
+    if (thread.alreadyRead !== true) {
+      counts.identity++;
       continue;
     }
     const listingId = marketplaceListingId(thread.listingUrl);
@@ -93,7 +110,7 @@ export function inspectInboxSnapshot({ health, threads }, ledger, registry) {
       counts.unmatched++;
       continue;
     }
-    const baseline = !prior;
+    ready.add(thread.id);
     const seen = new Set(prior?.seen || []);
     let cursor = prior?.cursor || 0;
     for (const message of thread.messages) {
@@ -112,7 +129,7 @@ export function inspectInboxSnapshot({ health, threads }, ledger, registry) {
       }
       seen.add(message.id);
       cursor = Math.max(cursor, message.sequence);
-      if (baseline) {
+      if (!prior) {
         counts.baseline++;
         continue;
       }
@@ -120,9 +137,15 @@ export function inspectInboxSnapshot({ health, threads }, ledger, registry) {
         counts.historical++;
         continue;
       }
+      if (!previouslyReady.has(thread.id)) {
+        counts.heldForReview++;
+        continue;
+      }
       accepted.push({ threadId: thread.id, listingId, messageId: message.id, product: receipt.product });
     }
     if (cursor > 0) ledger[thread.id] = { listingId, cursor, seen: [...seen] };
   }
+  audit.ready = [...ready];
+  audit.unread = [...unread];
   return { health, accepted, counts };
 }

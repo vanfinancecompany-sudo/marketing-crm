@@ -23,6 +23,7 @@ export const LISTINGS = {
 const SCENARIOS = { finance: "1001", rent2buy: "2002", unmatched: "9999", answered: "1001" };
 export const INBOX_HEALTH = ["healthy", "signed-out", "security-challenge", "layout-changed"];
 const CONFIRMATION_TIMEOUT_MS = 8_000;
+const OBSERVER_HEARTBEAT_TIMEOUT_MS = 8_000;
 const ACTIVE = new Set(["Drafting", "Sending", "Unconfirmed"]);
 
 function loadState(file) {
@@ -91,6 +92,7 @@ function instruction(thread, turn) {
 export function createReplySimulator(file, now = Date.now, { draftReply = draftMarketplaceReply } = {}) {
   let state = loadState(file);
   let lastHeartbeat = null;
+  let lastHealthyObservation = null;
   const listingRegistry = marketplaceRegistry(FIXTURE_RECEIPTS);
 
   // One loopback server owns the state. Reserve each turn before any async work.
@@ -113,13 +115,22 @@ export function createReplySimulator(file, now = Date.now, { draftReply = draftM
 
     observeBrowser(snapshot) {
       const started = performance.now();
+      const observedAt = now();
+      const recovering = snapshot.recovering === true || lastHealthyObservation === null
+        || observedAt - lastHealthyObservation >= OBSERVER_HEARTBEAT_TIMEOUT_MS;
       const report = change((next) => {
         next.browserObserver ??= { ledger: {}, totalAccepted: 0 };
         const audit = next.browserObserver;
-        const result = inspectInboxSnapshot(snapshot, audit.ledger, listingRegistry);
+        const result = inspectInboxSnapshot(snapshot, audit, listingRegistry, recovering);
         audit.totalAccepted += result.accepted.length;
-        return { ...result, totalAccepted: audit.totalAccepted };
+        audit.totalHeldForReview = (audit.totalHeldForReview ?? 0) + result.counts.heldForReview;
+        audit.totalUnreadNotices = (audit.totalUnreadNotices ?? 0) + result.counts.unreadNotices;
+        return {
+          ...result, recovering, totalAccepted: audit.totalAccepted,
+          totalHeldForReview: audit.totalHeldForReview, totalUnreadNotices: audit.totalUnreadNotices,
+        };
       });
+      lastHealthyObservation = report.health === "healthy" ? observedAt : null;
       return { ...report, ingestMs: performance.now() - started };
     },
 

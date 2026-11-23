@@ -14,7 +14,7 @@ const thread = (id, listing, messages, flags = {}) => ({
   id, listingUrl: "/marketplace/item/" + listing + "/", alreadyRead: true, historyReady: true, messages, ...flags,
 });
 
-function setup(t) {
+function setup(t, now) {
   const dir = mkdtempSync(join(tmpdir(), "marketplace-observer-test-"));
   const file = join(dir, "state.json");
   t.after(() => {
@@ -22,11 +22,11 @@ function setup(t) {
     rmSync(file + ".next", { force: true });
     rmdirSync(dir);
   });
-  const open = () => createReplySimulator(file);
+  const open = () => createReplySimulator(file, now);
   return { open, log: open() };
 }
 
-const observe = (log, threads, health = "healthy") => log.observeBrowser({ health, threads });
+const observe = (log, threads, health = "healthy", recovering = false) => log.observeBrowser({ health, threads, recovering });
 
 test("matches exact receipt IDs across URL variants and rejects missing or conflicting records", () => {
   assert.equal(marketplaceListingId("https://facebook.com/marketplace/item/1001/?ref=listing"), "1001");
@@ -80,7 +80,52 @@ test("pauses on auth loss and rejects a different listing on the same conversati
   observe(log, [thread("100", "1001", [incoming("mid.$old", 1)])]);
   assert.deepEqual(observe(log, [thread("100", "1001", [incoming("mid.$new", 2)])], "security-challenge").accepted, []);
   assert.equal(observe(open(), [thread("100", "2002", [incoming("mid.$new", 2)])]).counts.unmatched, 1);
-  assert.equal(observe(log, [thread("100", "1001", [incoming("mid.$new", 2)])]).totalAccepted, 1);
+  const recovered = observe(log, [thread("100", "1001", [incoming("mid.$new", 2)])]);
+  assert.equal(recovered.totalAccepted, 0);
+  assert.equal(recovered.totalHeldForReview, 1);
+});
+
+test("counts a closed unread notice only once until an explicit read, including across a restart", (t) => {
+  const { log, open } = setup(t);
+  const read = (messages) => thread("100", "1001", messages, { open: true });
+  const closed = (alreadyRead) => thread("100", "1001", [incoming("mid.$not-visible", 3)], {
+    open: false, alreadyRead, historyReady: false,
+  });
+  const history = [incoming("mid.$history", 1)];
+  observe(log, [read(history)]);
+  assert.equal(observe(log, [closed(true)]).counts.closed, 1);
+  const unread = observe(log, [closed(false)]);
+  assert.equal(unread.counts.unread, 1);
+  assert.equal(unread.totalUnreadNotices, 1);
+  assert.equal(unread.totalAccepted, 0);
+  const restored = open();
+  observe(restored, []);
+  assert.equal(observe(restored, [closed(false)]).totalUnreadNotices, 1);
+  assert.deepEqual(restored.snapshot().browserObserver.ledger["100"].seen, ["mid.$history"]);
+  const backlog = [...history, incoming("mid.$during-closed", 2)];
+  assert.equal(observe(restored, [read(backlog)]).totalHeldForReview, 1);
+  assert.equal(observe(restored, [closed(false)]).totalUnreadNotices, 2);
+  assert.equal(observe(restored, [read(backlog)]).totalAccepted, 0);
+  assert.equal(observe(restored, [read([...backlog, incoming("mid.$after", 3)])]).totalAccepted, 1);
+});
+
+test("holds messages found after a heartbeat gap, even when the thread initially reloads incomplete", (t) => {
+  let now = 10_000;
+  const { log } = setup(t, () => now);
+  const initial = thread("200", "2002", [incoming("mid.$old", 1)]);
+  observe(log, [initial]);
+  now += 8_000;
+  const partial = observe(log, [{ ...initial, historyReady: false }]);
+  assert.equal(partial.recovering, true);
+  const afterGap = { ...initial, messages: [...initial.messages, incoming("mid.$during-gap", 2)] };
+  assert.equal(observe(log, [afterGap]).totalHeldForReview, 1);
+  const afterReload = { ...initial, messages: [...afterGap.messages, incoming("mid.$during-reload", 3)] };
+  const browserAgain = observe(log, [afterReload], "healthy", true);
+  assert.equal(browserAgain.totalHeldForReview, 2);
+  assert.equal(browserAgain.totalAccepted, 0);
+  assert.equal(observe(log, [afterReload]).totalHeldForReview, 2);
+  assert.deepEqual(observe(log, [{ ...initial, messages: [...afterReload.messages, incoming("mid.$new", 4)] }])
+    .accepted.map(({ messageId }) => messageId), ["mid.$new"]);
 });
 
 test("resolved lanes can use the existing Ask Me adapter with no control over the inbox", async (t) => {
