@@ -117,7 +117,7 @@ try {
   for (const cmd of ["closepanel", "reload"]) {
     await fb("command", { cmd });
     await waitFor(async () => (await api("/status")).heartbeat.list !== "marketplace", "list gone after " + cmd, 20_000).catch(() => {});
-    await waitFor(async () => (await api("/status")).heartbeat.list === "marketplace", "list restored after " + cmd, 60_000);
+    await waitFor(async () => (await api("/status")).heartbeat.list === "marketplace", "list restored after " + cmd, 90_000);
   }
   assert.equal((await api("/status")).events.filter((e) => e.type === "unread-observed").length, 0);
   pass("list restored after the panel closed and after a page reload, without false arrivals");

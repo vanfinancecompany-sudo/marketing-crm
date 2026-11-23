@@ -35,6 +35,7 @@
   <button data-mode="observe">Observe</button>
   <button data-mode="draft">Draft only</button>
   <button data-mode="send">Send</button>
+  <button id="resetOpener" title="Use only after checking that no customer conversation was opened">Reset safety stop</button>
 </div>
 
 <section>
@@ -85,6 +86,7 @@ const EVENT = {
   "send-not-restored": () => "Service restarted: Send was not restored",
   "emergency-stop": () => "STOP pressed",
   health: (e) => "Facebook page problem: " + e.health,
+  "safety-reset": () => "Safety stop reset requested by the owner",
   "visibility-assist": (e) => "Idle visibility assist: assistant tab shown briefly; Marketplace list " + (e.opened ? "opened" : "did NOT open"),
 };
 function render(s) {
@@ -162,6 +164,10 @@ document.addEventListener("click", (e) => {
     document.getElementById("pilotWords").value = e.target.dataset.words;
   }
 });
+document.getElementById("resetOpener").onclick = () => {
+  if (!confirm("Reset the list opener's safety stop? Only do this after checking that no customer conversation was opened.")) return;
+  api("/control", { resetOpener: true }).then(render);
+};
 document.getElementById("pilotCancel").onclick = () => api("/control", { cancelPilot: true }).then(render);
 document.addEventListener("click", (e) => { if (e.target.dataset.resume) api("/control", { resumeThread: e.target.dataset.resume }).then(render); });
 refresh(); setInterval(refresh, 2000);

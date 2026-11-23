@@ -501,7 +501,7 @@ export function monitoringVerdict(state, now = Date.now()) {
     const age = Math.round((now - Date.parse(hb.at)) / 1000);
     if (age > 150) reasons.push("No report from the Edge assistant tab for " + age + " s: Edge may be closed or asleep, or the extension disabled.");
     if (hb.health !== "healthy") reasons.push(HEALTH_TEXT[hb.health] || "The Facebook page is not healthy (" + hb.health + ").");
-    if (/^tripped|^disabled/.test(hb.opener)) reasons.push("Safety stop: a conversation view appeared after a click, so the list opener switched itself off. Reload the assistant tab.");
+    if (/^tripped|^disabled/.test(hb.opener)) reasons.push("Safety stop: " + hb.opener.replace(/^(?:tripped|disabled): /, "") + ". The list opener switched itself off. Check that no customer conversation was opened, then press \"Reset safety stop\".");
     else if (hb.list !== "marketplace") reasons.push(OPENER_TEXT[hb.opener] || (/^Marketplace click had no effect/.test(hb.opener) ? "The Marketplace entry in the Messenger panel was clicked but the Marketplace list did not open. Retrying every 15 s with a different click method (" + hb.opener + ")." : null) || "The Marketplace conversation list is not open in the assistant tab (" + (hb.list || "none") + ").");
     if (!hb.rows) reasons.push("No conversations are visible in the assistant tab.");
   }

@@ -100,17 +100,20 @@ const ROUTES = {
     if (body.mode) { cancelPilot(state); setMode(state, body.mode, body); }
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);
+    if (body.resetOpener) { state.resetOpenerRequested = true; logEvent(state, "safety-reset", { requested: true }); }
     return statusWithExtension();
   },
   "POST /stop": () => { cancelPilot(state); setMode(state, "off"); logEvent(state, "emergency-stop"); return statusWithExtension(); },
   "POST /heartbeat": (body) => {
     recordHeartbeat(state, body);
+    if (state.resetOpenerRequested && !/^(?:tripped|disabled)/.test(String(body.opener || ""))) state.resetOpenerRequested = false;
     pilotTimeout(state);
     findTimeout(state);
     return {
       mode: state.mode,
       verifyThread: state.pilot?.status === "verifying" ? state.pilot.threadId : null,
       findWords: state.finder?.status === "searching" ? state.finder.words : null,
+      resetOpener: state.resetOpenerRequested === true,
       extensionVersion: expectedExtensionVersion(),
     };
   },

@@ -239,6 +239,26 @@
     return true;
   }
   const conversationSurfaces = () => [...document.querySelectorAll('[role="log"], [role="textbox"][contenteditable="true"]')].filter(visible).length;
+  // Where conversation views are: inside the main view or the Messenger panel
+  // (opened by a click on a conversation), or docked chat windows. Live (20:52):
+  // Facebook restores the owner's docked chat windows a few seconds after a
+  // reload, which tripped the safety stop on a Messenger-button click.
+  function surfaceCounts() {
+    const views = [...document.querySelectorAll('[role="log"]')].filter(visible);
+    const inPanelOrMain = views.filter((el) => el.closest('[role="main"], [role="dialog"][aria-label]')?.matches('[role="main"]')
+      || /^messenger$/i.test(norm(el.closest('[role="dialog"][aria-label]')?.getAttribute("aria-label")))).length;
+    return { total: conversationSurfaces(), inPanelOrMain, docked: views.length - inPanelOrMain };
+  }
+  // No clicks until the page has settled: 10 s after load and 8 s without any
+  // change in conversation views, so restored docked windows are counted first.
+  const pageLoadedAt = Date.now();
+  let lastSurfaceTotal = -1;
+  let surfacesStableSince = Date.now();
+  function pageSettled() {
+    const total = conversationSurfaces();
+    if (total !== lastSurfaceTotal) { lastSurfaceTotal = total; surfacesStableSince = Date.now(); }
+    return Date.now() - pageLoadedAt >= 10_000 && Date.now() - surfacesStableSince >= 8_000;
+  }
   const MESSENGER_LABEL = /^(?:messenger|chats|messages)\b/i;
   function messengerButton() {
     const found = [...document.querySelectorAll("[aria-label]")].filter((el) => MESSENGER_LABEL.test(norm(el.getAttribute("aria-label")))
@@ -320,12 +340,13 @@
   let messengerMisses = 0;
   let marketplaceMisses = 0;
   async function ensureChatList() {
-    if (sessionStorage.getItem("r2bOpenerTripped") === "1") return (openerStatus = "disabled: a conversation view appeared after a click");
+    if (sessionStorage.getItem("r2bOpenerTripped") === "1") return (openerStatus = "disabled: " + (sessionStorage.getItem("r2bOpenerTripReason") || "a conversation view appeared after a click"));
     if (namedGrid(/^marketplace$/i)) { messengerMisses = 0; marketplaceMisses = 0; return (openerStatus = "present"); }
     const backoff = messengerMisses >= 3 ? 600_000 : 15_000;
+    if (!pageSettled()) return (openerStatus = "waiting for the page to settle");
     if (Date.now() - lastOpenAt < backoff) return openerStatus;
     lastOpenAt = Date.now();
-    const before = { path: location.pathname, surfaces: conversationSurfaces() };
+    const before = { path: location.pathname, ...surfaceCounts() };
     const chatsOpen = Boolean(namedGrid(/^chats$/i));
     const target = chatsOpen ? marketplaceControl() : messengerButton();
     if (!target) return (openerStatus = chatsOpen ? "no-marketplace-control" : "no-messenger-button");
@@ -333,9 +354,15 @@
     if (chatsOpen) clickLikeMouse(target, strategy);
     else target.click(); // the Messenger button responds to a plain click (live)
     await sleep(2_500);
-    if (location.pathname !== before.path || THREAD_PATH.test(location.pathname) || conversationSurfaces() > before.surfaces) {
+    const after = surfaceCounts();
+    const why = location.pathname !== before.path || THREAD_PATH.test(location.pathname) ? "the page changed after a click"
+      : after.inPanelOrMain > before.inPanelOrMain ? "a conversation opened in the panel or main view after a click"
+      : after.docked > before.docked ? "a new docked chat window appeared after a click (" + before.docked + " -> " + after.docked + ")"
+      : null;
+    if (why) {
+      sessionStorage.setItem("r2bOpenerTripReason", why);
       sessionStorage.setItem("r2bOpenerTripped", "1");
-      return (openerStatus = "tripped: page changed or a conversation view appeared; opener disabled");
+      return (openerStatus = "tripped: " + why + "; opener disabled");
     }
     if (!chatsOpen) messengerMisses = namedGrid(/^chats$/i) ? 0 : messengerMisses + 1;
     if (messengerMisses >= 3) return (openerStatus = "messenger-panel-not-found");
@@ -518,6 +545,7 @@
   async function tick() {
     const state = health();
     const threadId = location.pathname.match(THREAD_PATH)?.[1] || null;
+    pageSettled(); // track conversation-view stability on every scan
     let inbox = state === "healthy" ? scanInbox() : [];
     const beat = await api("/heartbeat", {
       health: state, visibility: document.visibilityState, url: location.pathname,
@@ -527,6 +555,13 @@
     if (beat.mode === "off" || state !== "healthy") return;
     if (beat.verifyThread && !threadId && listState() === "marketplace") await reportPilotRow(beat.verifyThread);
     if (beat.findWords && !threadId && listState() === "marketplace") await reportFind(beat.findWords);
+    // The owner reset the safety stop after checking it was a false trip.
+    if (beat.resetOpener && sessionStorage.getItem("r2bOpenerTripped") === "1") {
+      sessionStorage.removeItem("r2bOpenerTripped");
+      sessionStorage.removeItem("r2bOpenerTripReason");
+      openerStatus = "safety stop reset";
+      lastOpenAt = 0;
+    }
 
     if (threadId) {
       // Observe never stays on a conversation page; leaving does not change read status.

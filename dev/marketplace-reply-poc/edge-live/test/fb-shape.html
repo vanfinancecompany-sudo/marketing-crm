@@ -89,6 +89,16 @@ async function render() {
   main.querySelector("[role=log]").innerHTML = t.messages.map((m) =>
     `<div role="row" class="${m.out ? "out" : ""}"><h5 style="display:none">${m.out ? "You sent" : esc(t.name) + " sent"}</h5><div data-message-id="${m.id}"><div class="bubble"><div dir="auto">${esc(m.text).replace(/\n/g, "<br>")}</div></div></div></div>`).join("");
 }
+// Live (20:52): Facebook restores the owner's docked chat windows a few seconds
+// after every page load. Without a settle period this tripped the safety stop.
+setTimeout(() => {
+  const docked = document.createElement("div");
+  docked.setAttribute("role", "log");
+  docked.setAttribute("aria-label", "Messages in conversation with Restored");
+  docked.style.cssText = "position:fixed;bottom:0;left:220px;width:200px;height:60px;background:#f6f6f6;border:1px solid #ccc";
+  docked.innerHTML = '<div data-message-id="mid.$docked2"><div dir="auto">Restored docked chat</div></div>';
+  document.body.appendChild(docked);
+}, 3_000);
 new EventSource("/__fb/api/events").onmessage = (e) => {
   if (e.data === "reload") return location.reload();
   if (e.data === "closepanel") { panelOpen = false; }
