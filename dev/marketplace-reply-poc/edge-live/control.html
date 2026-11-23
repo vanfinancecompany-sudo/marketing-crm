@@ -95,7 +95,7 @@ function render(s) {
     "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
     "Edge assistant tab: " + (hb ? hb.health + ", " + hb.visibility + ", last report " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + " s ago" : "not connected"),
     "Conversation list: " + (hb ? hb.list + " (" + hb.rows + " rows checked, " + hb.unread + " unread), opener: " + (hb.opener || "-") : "-"),
-    "Extension: running " + (ext.running || "unknown") + ", installed " + (ext.expected || "unknown") + (ext.updatePending ? "  <-- will update itself within a minute; if not, reload it in edge://extensions" : ""),
+    "Extension: running " + (ext.running || "unknown") + ", installed " + (ext.expected || "unknown") + (ext.manualReloadNeeded ? "  <-- an older extension is running: click Reload on it once in edge://extensions (later updates are automatic)" : ext.updatePending ? "  <-- will update itself within a minute; if not, reload it in edge://extensions" : ""),
     "Already unread at the starting snapshot (left for a person): " + (s.baselineUnread ?? "no snapshot yet"),
     "Waiting to open: " + (s.pendingOpen.join(", ") || "none") + "   Allowlist: " + (s.allowAll ? "ALL" : s.allowThreads.join(", ") || "empty"),
     "Drafts: " + s.counts.drafts + "   Sent: " + s.counts.sent + "   Needs a person: " + s.counts.needsHuman,

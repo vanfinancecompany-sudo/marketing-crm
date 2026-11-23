@@ -86,7 +86,8 @@ function statusWithExtension() {
   const running = state.heartbeat?.ext || null;
   return {
     ...status,
-    extension: { running, expected, updatePending: Boolean(expected && running && expected !== running) },
+    // A pre-0.3.0 extension reports no version and cannot update itself.
+    extension: { running, expected, updatePending: Boolean(expected && state.heartbeat && running !== expected), manualReloadNeeded: Boolean(state.heartbeat && !running) },
     ...(fixture ? { fixtureHome: "http://127.0.0.1:" + PORT + "/__fb/inbox/" } : {}),
   };
 }
