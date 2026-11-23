@@ -286,12 +286,25 @@ export function verifyPilot(state, { threadId, found, rowText }) {
   }
   const text = normalise(rowText);
   const words = normalise(pilot.mustContain);
-  if (!text.includes(words)) {
+  // Several required parts can be joined with "+": every part must be present
+  // as whole words. A part starting with "^" must begin the row, where Facebook
+  // shows the sender's name (so "^Van" cannot match "van" in a listing title).
+  const parts = pilot.mustContain.split("+").map((p) => p.trim()).filter(Boolean);
+  const escape = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const partHit = (part) => {
+    const anchored = part.startsWith("^");
+    const body = normalise(anchored ? part.slice(1) : part);
+    return new RegExp((anchored ? "^" : "(?:^|[^a-z0-9])") + escape(body) + "(?:$|[^a-z0-9])").test(text);
+  };
+  const matched = parts.length > 1 || parts[0]?.startsWith("^") ? parts.every(partHit) : text.includes(words);
+  if (!matched) {
     // Another customer's row text is not stored.
     pilot.status = "mismatch";
     pilot.error = "The conversation row does not contain \"" + pilot.mustContain + "\". It was not opened.";
-    // Which expected words were present (no row text is stored).
-    pilot.wordHits = Object.fromEntries(words.split(" ").filter(Boolean).map((w) => [w, text.includes(w)]));
+    // Which expected parts were present (no row text is stored).
+    pilot.wordHits = parts.length > 1 || parts[0]?.startsWith("^")
+      ? Object.fromEntries(parts.map((p) => [p, partHit(p)]))
+      : Object.fromEntries(words.split(" ").filter(Boolean).map((w) => [w, text.includes(w)]));
     pilot.rowWords = text.split(" ").filter(Boolean).length;
     logEvent(state, "pilot", { status: "mismatch", threadId: pilot.threadId });
     return { ok: false };
