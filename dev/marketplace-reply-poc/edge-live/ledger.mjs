@@ -97,49 +97,64 @@ export function setMode(state, mode, { allowThreads, allowAll } = {}) {
   logEvent(state, "mode", { mode, allowAll: state.allowAll, allowThreads: state.allowThreads });
 }
 
-export function recordHeartbeat(state, { health, visibility, url, rows, unread }) {
-  const previous = state.heartbeat?.health;
+export function recordHeartbeat(state, { health, visibility, url, rows, unread, list, opener }) {
+  const previous = state.heartbeat;
   state.heartbeat = {
     at: new Date().toISOString(), health: String(health || "unknown"), visibility: String(visibility || ""),
     url: String(url || "").slice(0, 200), rows: Number(rows) || 0, unread: Number(unread) || 0,
+    list: String(list || "none").slice(0, 40), opener: String(opener || "").slice(0, 80),
   };
-  if (state.mode !== "off" && health !== previous && health !== "healthy" && health !== "loading") {
+  if (state.mode !== "off" && health !== previous?.health && health !== "healthy" && health !== "loading") {
     logEvent(state, "health", { health });
+  }
+  if (state.mode !== "off" && opener && opener !== previous?.opener && !/^(?:present|waiting)/.test(opener)) {
+    logEvent(state, "list-opener", { status: state.heartbeat.opener, list: state.heartbeat.list });
   }
 }
 
-// Inbox list snapshot: [{ id, unread }]. Returns the thread to open next, if any.
-export function inspectInbox(state, threads) {
+const MAX_LIST_SEEN = 3000;
+const TOP_ROWS = 5;
+
+// Inbox list snapshot: [{ id, unread, pos }], pos = index within its list.
+// A conversation counts as newly unread only when it goes from read to unread,
+// or appears unread for the first time near the top of its list (where new
+// conversations arrive). Old unread conversations that Facebook renders lazily
+// further down never count. Nothing is assessed until the list is fully open.
+export function inspectInbox(state, threads, { listReady = true } = {}) {
   if (state.mode === "off") return { open: null };
-  const rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 200);
+  if (!listReady) return { open: null, waiting: "Conversation list is not open yet" };
+  const rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 600);
+  if (!rows.length) return { open: null, waiting: "No conversations visible" };
   const unread = rows.filter((row) => row.unread === true).map((row) => String(row.id));
+  const first = !state.inboxBaseline;
+  const seenList = (state.listSeen ??= {});
+  const fresh = [];
+  for (const row of rows) {
+    const id = String(row.id);
+    const prev = seenList[id];
+    const pos = Number.isFinite(row.pos) ? row.pos : 0;
+    if (!first && row.unread === true && (prev === "read" || (prev === undefined && pos < TOP_ROWS))) fresh.push(id);
+    delete seenList[id];
+    seenList[id] = row.unread === true ? "unread" : "read";
+  }
+  const keys = Object.keys(seenList);
+  for (const id of keys.slice(0, Math.max(0, keys.length - MAX_LIST_SEEN))) delete seenList[id];
+
+  if (first) {
+    state.inboxBaseline = { at: new Date().toISOString(), unread };
+    if (state.mode === "observe") state.observedUnread = unread;
+    logEvent(state, "baseline", { rows: rows.length, unreadLeftForPerson: unread.length });
+    return { open: null };
+  }
   if (state.mode === "observe") {
-    // Passive: record that a conversation became unread, nothing more. Nothing
-    // is queued to open, so read status and message content are untouched.
-    const known = new Set(state.observedUnread || []);
-    if (!state.inboxBaseline) {
-      state.inboxBaseline = { at: new Date().toISOString(), unread };
-      state.observedUnread = unread;
-      return { open: null };
-    }
-    for (const id of unread) if (!known.has(id)) logEvent(state, "unread-observed", { threadId: id });
+    // Passive: record the arrival, nothing more. Nothing is queued to open,
+    // so read status and message content are untouched.
+    for (const id of fresh) logEvent(state, "unread-observed", { threadId: id });
     state.observedUnread = unread;
     return { open: null };
   }
-  if (!state.inboxBaseline) {
-    state.inboxBaseline = { at: new Date().toISOString(), unread };
-    if (unread.length) logEvent(state, "baseline", { excludedUnread: unread.length });
-    return { open: null };
-  }
-  const excluded = new Set(state.inboxBaseline.unread);
-  // A baseline-unread conversation that is later read and then becomes unread
-  // again has a genuinely new message.
-  const readNow = new Set(rows.filter((row) => row.unread === false).map((row) => String(row.id)));
-  state.inboxBaseline.unread = state.inboxBaseline.unread.filter((id) => !readNow.has(id));
-  for (const id of unread) {
-    if (excluded.has(id) || state.pendingOpen.includes(id)) continue;
-    const thread = state.threads[id];
-    if (thread?.needsHuman) continue;
+  for (const id of fresh) {
+    if (state.pendingOpen.includes(id) || state.threads[id]?.needsHuman) continue;
     state.pendingOpen.push(id);
     logEvent(state, "unread", { threadId: id });
   }

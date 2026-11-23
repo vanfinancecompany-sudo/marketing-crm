@@ -52,7 +52,7 @@ function render(s) {
   document.getElementById("status").textContent = [
     "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
     "Browser tab: " + (hb ? hb.health + ", " + hb.visibility + ", last seen " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + "s ago" : "not connected"),
-    "Conversation list on assistant tab: " + (hb ? hb.rows + " rows, " + hb.unread + " unread" + (hb.rows ? "" : "  <-- NONE: new messages cannot be detected") : "-"),
+    "Conversation list on assistant tab: " + (hb ? hb.rows + " rows, " + hb.unread + " unread, list=" + (hb.list || "none") + (hb.opener ? ", opener: " + hb.opener : "") + (hb.rows ? "" : "  <-- NONE: new messages cannot be detected") : "-"),
     "Unread at switch-on (left for a person): " + (s.baselineUnread ?? "not yet taken"),
     ...(s.mode === "observe" ? ["Observe (passive): conversations unread now: " + (s.observedUnread.join(", ") || "none")] : []),
     "Send is never restored after a restart; it must be switched on here each time.",

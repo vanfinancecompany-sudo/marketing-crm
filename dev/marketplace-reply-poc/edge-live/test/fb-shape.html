@@ -1,40 +1,66 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Messenger test page</title>
-<style>body{font:14px system-ui;margin:0;display:flex;height:100vh}nav{width:300px;border-right:1px solid #ddd;overflow:auto}main{flex:1;display:flex;flex-direction:column}
-[role=log]{flex:1;overflow:auto;padding:8px}.out{text-align:right}.bubble{display:inline-block;padding:6px 10px;border-radius:14px;background:#eee;margin:2px}.out .bubble{background:#0a7cff;color:#fff}
-[role=row].unread a{font-weight:700}[contenteditable]{border:1px solid #ccc;min-height:24px;padding:6px;margin:8px}</style></head>
+<style>body{font:14px system-ui;margin:0}header{display:flex;gap:12px;align-items:center;padding:8px;border-bottom:1px solid #ddd}
+#panel{position:fixed;top:48px;right:8px;width:360px;max-height:80vh;overflow:auto;background:#fff;border:1px solid #ccc;display:none}
+main{display:flex;flex-direction:column;height:calc(100vh - 50px)}[role=log]{flex:1;overflow:auto;padding:8px}.out{text-align:right}
+.bubble{display:inline-block;padding:6px 10px;border-radius:14px;background:#eee;margin:2px}.out .bubble{background:#0a7cff;color:#fff}
+[contenteditable]{border:1px solid #ccc;min-height:24px;padding:6px;margin:8px}</style></head>
 <body>
-<!-- Test page with the structure observed in the signed-in Facebook chat UI:
-     thread links /messages/t/<id>, [role=log], [data-message-id], "<name> sent"
-     headings, a /marketplace/item/<id> link, a contenteditable textbox and a
-     "Press enter to send" control. Updates arrive over SSE like Facebook's push. -->
-<nav aria-label="Marketplace chats"><div id="list"></div></nav>
+<!-- Mirrors the real account (Edge diagnostics, 23 Nov 2026):
+     - the Marketplace page has no conversation list until the header Messenger
+       button opens a panel ("Chats" grid), and its "Marketplace" control shows
+       the role=grid "Marketplace" list;
+     - rows link to /messages/t/<id>; unread = blue dot rgb(0,100,209) + name
+       weight 600 (read: weight 500, no dot); read rows carry "Mark as unread";
+     - decoys that must never be clicked: a "Marketplace" navigation link and a
+       conversation row whose text is "Marketplace".
+     Updates arrive over SSE, like Facebook's realtime channel. -->
+<header role="banner">
+  <a href="/__fb/marketplace/">Marketplace</a>
+  <div role="button" aria-label="Messenger" id="messenger" tabindex="0">💬</div>
+</header>
+<div id="panel" role="dialog" aria-label="Chats panel">
+  <div><b>Chats</b> <div role="tab" id="tabChats" tabindex="0">Inbox</div> <div role="tab" id="tabMarket" tabindex="0">Marketplace</div></div>
+  <div id="grid"></div>
+</div>
 <main role="main" id="main"></main>
-<aside role="complementary" aria-label="Contacts" id="contacts" style="width:120px"></aside>
 <script>
 const threadId = location.pathname.match(/\/messages\/t\/(\d+)/)?.[1] || null;
 const esc = (v) => String(v).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const post = (path, body) => fetch("/__fb/api/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+let panelOpen = false;
+let tab = "chats";
+document.getElementById("messenger").onclick = () => { panelOpen = !panelOpen; tab = "chats"; render(); };
+document.getElementById("tabMarket").onclick = () => { tab = "marketplace"; render(); };
+document.getElementById("tabChats").onclick = () => { tab = "chats"; render(); };
+
+const row = (id, name, preview, unread) => `<div style="display:flex;align-items:center;height:72px">
+  <a href="/__fb/messages/t/${id}/" style="flex:1;text-decoration:none;color:inherit">
+    <span style="display:block;font-weight:${unread ? 600 : 500}">${esc(name)}</span>
+    <span style="display:block;font-weight:400">${esc(preview)}</span></a>
+  ${unread ? '<div style="width:12px;height:12px;border-radius:50%;background:rgb(0,100,209)"></div>' : '<div role="button" aria-label="Mark as unread"></div>'}</div>`;
+
 async function render() {
   const s = await fetch("/__fb/api/state").then((r) => r.json());
   if (threadId && s.threads[threadId]?.unread) { await post("read", { threadId }); return; }
-  // Reproduces the conditions that broke detection on the real account: one
-  // listitem wrapping every conversation, /marketplace/t/ links, "Mark as unread"
-  // on read rows, unrelated /messages/t/ contact links, and unread shown only by
-  // a blue dot and a bold preview.
-  document.getElementById("list").innerHTML =
-    `<div role="list"><div role="listitem">` + Object.entries(s.threads).map(([id, t]) => {
+  const panel = document.getElementById("panel");
+  panel.style.display = panelOpen ? "block" : "none";
+  const grid = document.getElementById("grid");
+  if (!panelOpen) grid.innerHTML = "";
+  else if (tab === "chats") {
+    grid.innerHTML = `<div role="grid" aria-label="Chats">` + row("778", "Marketplace", "", false)
+      + ["901", "902", "903"].map((id) => row(id, "Friend " + id, "See you soon", false)).join("") + `</div>`;
+  } else {
+    const threads = Object.entries(s.threads).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0));
+    grid.innerHTML = `<div role="grid" aria-label="Marketplace">` + threads.map(([id, t]) => {
       const last = t.messages.at(-1);
-      return `<div style="display:flex;align-items:center;height:64px"><a href="/__fb/marketplace/t/${id}/" style="flex:1;text-decoration:none;color:inherit">
-        <span style="display:block;font-weight:${t.unread ? 600 : 500}">${esc(t.name)} · ${esc(t.listing)}</span>
-        <span style="display:block;font-weight:400">${esc(last ? (last.out ? "You: " : "") + last.text : "")}</span></a>
-        ${t.unread ? '<div style="width:12px;height:12px;border-radius:50%;background:rgb(0,100,209)"></div>' : '<div role="button" aria-label="Mark as unread"></div>'}</div>`;
-    }).join("") + `</div></div>`;
-  document.getElementById("contacts").innerHTML = ["901", "902", "903"].map((id) => `<a href="/__fb/messages/t/${id}/">Contact</a><br>`).join("");
+      return row(id, t.name + " · " + t.listing, last ? (last.out ? "You: " : "") + last.text : "", t.unread);
+    }).join("") + `</div>`;
+  }
   const t = threadId && s.threads[threadId];
   const main = document.getElementById("main");
-  if (!t) { main.innerHTML = "<h2>Marketplace</h2>"; return; }
+  if (!t) { main.innerHTML = "<h2>Your listings</h2>"; return; }
   if (!main.querySelector("[role=log]")) {
     main.innerHTML = `<h2><a href="/marketplace/item/${t.listingId}/">${esc(t.listing)}</a></h2><div role="log"></div>
       <div style="display:flex"><div role="textbox" contenteditable="true" aria-label="Message" style="flex:1"></div><div role="button" aria-label="Press enter to send" id="send">➤</div></div>`;
@@ -49,7 +75,11 @@ async function render() {
   main.querySelector("[role=log]").innerHTML = t.messages.map((m) =>
     `<div role="row" class="${m.out ? "out" : ""}"><h5 style="display:none">${m.out ? "You sent" : esc(t.name) + " sent"}</h5><div data-message-id="${m.id}"><div class="bubble"><div dir="auto">${esc(m.text).replace(/\n/g, "<br>")}</div></div></div></div>`).join("");
 }
-new EventSource("/__fb/api/events").onmessage = render;
+new EventSource("/__fb/api/events").onmessage = (e) => {
+  if (e.data === "reload") return location.reload();
+  if (e.data === "closepanel") { panelOpen = false; }
+  render();
+};
 </script>
 </body>
 </html>

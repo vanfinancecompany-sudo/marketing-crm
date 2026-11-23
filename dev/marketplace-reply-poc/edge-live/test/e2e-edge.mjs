@@ -100,10 +100,26 @@ try {
   await api("/control", { mode: "observe" });
   startEdge();
 
-  const s0 = await waitFor(async () => { const s = await api("/status"); return s.baselineUnread !== null && s.heartbeat ? s : null; }, "assistant tab baseline", 60_000);
+  const s0 = await waitFor(async () => {
+    const s = await api("/status");
+    return s.baselineUnread !== null && s.heartbeat?.list === "marketplace" && s.events.some((e) => e.status === "clicked Marketplace") ? s : null;
+  }, "assistant tab opened the list and baselined", 90_000);
   assert.equal(s0.baselineUnread, 1);
+  assert.equal(s0.heartbeat.list, "marketplace");
   assert.equal((await assistantTabs()).length, 1);
-  pass("extension opened one background assistant tab and baselined 1 already-unread conversation");
+  assert.ok(!(await assistantTabs()).some((t) => /\/messages\/t\/|\/__fb\/marketplace\/$/.test(t.url)), "no conversation or navigation decoy opened");
+  const openerEvents = s0.events.filter((e) => e.type === "list-opener").map((e) => e.status).reverse();
+  assert.deepEqual(openerEvents.slice(0, 2), ["clicked Messenger", "clicked Marketplace"]);
+  pass(`background tab opened the list itself (${openerEvents.join(" -> ")}), never a conversation or decoy, then baselined 1 already-unread conversation`);
+
+  // Recovery: the panel closes, then the page reloads; the list is restored each time.
+  for (const cmd of ["closepanel", "reload"]) {
+    await fb("command", { cmd });
+    await waitFor(async () => (await api("/status")).heartbeat.list !== "marketplace", "list gone after " + cmd, 20_000).catch(() => {});
+    await waitFor(async () => (await api("/status")).heartbeat.list === "marketplace", "list restored after " + cmd, 60_000);
+  }
+  assert.equal((await api("/status")).events.filter((e) => e.type === "unread-observed").length, 0);
+  pass("list restored after the panel closed and after a page reload, without false arrivals");
 
   // 0. Observe is passive: a new enquiry is noticed but never opened, read or answered.
   await fb("customer", { threadId: "300", name: "Jo", text: "Observe-only enquiry" });
@@ -129,10 +145,12 @@ try {
   assert.ok(row("300").signals.dot && row("300").signals.bold, JSON.stringify(row("300").signals));
   assert.equal(row("200").unread, false, "read row with a 'Mark as unread' label must be read");
   assert.ok(row("300").size[1] <= 80, "row is one conversation, not the whole list: " + row("300").size);
-  for (const id of ["901", "902", "903"]) assert.equal(row(id).unread, false);
-  assert.ok(diag.threadLinkPatterns.includes("/__fb/marketplace/t/#/"));
+  assert.equal(diag.list, "marketplace");
+  assert.ok(diag.threadLinkPatterns.includes("/__fb/messages/t/#/"));
+  const decoy = diag.controls.find((c) => c.href === "/__fb/marketplace/");
+  assert.ok(decoy && decoy.safe === false, "navigation link must be unclickable: " + JSON.stringify(diag.controls));
   assert.ok(!JSON.stringify(diag).includes("Observe-only enquiry"), "diagnostics must not contain message text");
-  pass(`diagnostics: per-conversation rows (${row("300").size[1]}px), unread by dot+bold, 'Mark as unread' rows read, contact links not unread, no message text`);
+  pass(`diagnostics: per-conversation rows (${row("300").size[1]}px), unread by dot+bold, 'Mark as unread' rows read, decoy link unclickable, no message text`);
 
   // Deliberate activation: everything unread now is left for a person.
   await api("/control", { mode: "send", allowThreads: ["200", "300"] });

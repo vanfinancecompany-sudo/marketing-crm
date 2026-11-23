@@ -12,6 +12,7 @@ function render(s) {
     "Mode: " + s.mode,
     "Tab: " + (hb ? hb.health + " (" + hb.visibility + "), " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + "s ago" : "not seen"),
     "Chats visible: " + (hb?.rows ?? 0) + ", unread: " + (hb?.unread ?? 0),
+    "List: " + (hb?.list || "none") + (hb?.opener ? " (" + hb.opener + ")" : ""),
     ...(s.mode !== "off" && hb && !hb.rows ? ["WARNING: the assistant tab's page shows no conversation list, so new messages cannot be detected."] : []),
     "Sent " + s.counts.sent + " · drafts " + s.counts.drafts + " · needs a person " + s.counts.needsHuman,
   ].join("\n");

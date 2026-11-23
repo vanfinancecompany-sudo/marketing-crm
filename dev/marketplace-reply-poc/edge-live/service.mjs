@@ -78,7 +78,7 @@ const ROUTES = {
   },
   "POST /stop": () => { setMode(state, "off"); logEvent(state, "emergency-stop"); return publicStatus(state); },
   "POST /heartbeat": (body) => { recordHeartbeat(state, body); return { mode: state.mode }; },
-  "POST /inbox": (body) => ({ mode: state.mode, ...inspectInbox(state, body.threads) }),
+  "POST /inbox": (body) => ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false }) }),
   "POST /thread": (body) => handleThread(body),
   "POST /go": (body) => authoriseSend(state, String(body.jobId)),
   "POST /sent": (body) => { recordSendResult(state, String(body.jobId), body); return { ok: true }; },

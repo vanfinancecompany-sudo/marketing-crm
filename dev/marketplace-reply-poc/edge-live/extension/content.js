@@ -157,14 +157,96 @@
     return rows;
   }
 
+  // pos = order within its list, so the service can tell new arrivals (top)
+  // from old conversations Facebook renders lazily further down.
   function scanInbox() {
-    return classify(rowsFromLinks(threadLinks())).map(({ id, unread }) => ({ id, unread }));
+    const counters = new Map();
+    return classify(rowsFromLinks(threadLinks())).map((r) => {
+      const list = landmark(r.row) || r.group;
+      const pos = counters.get(list) ?? 0;
+      counters.set(list, pos + 1);
+      return { id: r.id, unread: r.unread, pos };
+    });
+  }
+
+  // ---- Keeping the conversation list open (list controls only) ----
+  // Real account: Messenger icon (top right) -> Marketplace. Only two kinds of
+  // control are ever clicked: the header Messenger/Chats button and a
+  // "Marketplace" control inside the panel it opens. Anything that is a link to
+  // another page, or sits inside a single conversation's row, is never clicked.
+  // If the page changes or a conversation view appears after a click, the
+  // opener disables itself for this tab.
+  const threadIdOf = (a) => {
+    try { return new URL(a.getAttribute("href"), location.href).pathname.match(THREAD_PATH)?.[1] || null; } catch { return null; }
+  };
+  function namedGrid(pattern) {
+    return [...document.querySelectorAll('[role="grid"][aria-label]')]
+      .find((g) => pattern.test(norm(g.getAttribute("aria-label"))) && [...g.querySelectorAll("a[href]")].some(threadIdOf)) || null;
+  }
+  function safeToClick(el) {
+    const anchor = el.closest("a[href]");
+    if (anchor && !(anchor.getAttribute("href") || "").startsWith("#")) return false;
+    if ([...el.querySelectorAll("a[href]")].some(threadIdOf)) return false;
+    for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+      const ids = new Set([...node.querySelectorAll("a[href]")].map(threadIdOf).filter(Boolean));
+      if (ids.size === 1) return false; // inside one conversation's row
+      if (ids.size > 1) break;          // reached a list of conversations
+    }
+    return true;
+  }
+  const conversationSurfaces = () => [...document.querySelectorAll('[role="log"], [role="textbox"][contenteditable="true"]')].filter(visible).length;
+  const MESSENGER_LABEL = /^(?:messenger|chats|messages)\b/i;
+  function messengerButton() {
+    const found = [...document.querySelectorAll("[aria-label]")].filter((el) => MESSENGER_LABEL.test(norm(el.getAttribute("aria-label")))
+      && el.matches('[role="button"], [role="link"], button, a') && visible(el) && safeToClick(el));
+    return found.find((el) => el.closest('[role="banner"]')) || found[0] || null;
+  }
+  function marketplaceControl() {
+    const grid = namedGrid(/^chats$/i);
+    if (!grid) return null;
+    let scope = grid;
+    for (let i = 0; i < 12 && scope.parentElement && scope.parentElement !== document.body; i++) {
+      scope = scope.parentElement;
+      if (scope.matches('[role="dialog"]') || getComputedStyle(scope).position === "fixed") break;
+    }
+    return [...scope.querySelectorAll('[role="tab"], [role="button"], [role="link"], [role="menuitem"], [role="radio"], [role="option"], button, a')]
+      .find((el) => /^marketplace(?: chats)?$/i.test(norm(el.getAttribute("aria-label") || el.textContent)) && visible(el) && safeToClick(el)) || null;
+  }
+  function listState() {
+    if (namedGrid(/^marketplace$/i)) return "marketplace";
+    if (namedGrid(/^chats$/i)) return openerStatus === "no-marketplace-control" ? "chats-only" : "chats";
+    return "none";
+  }
+  const listReady = (list) => list === "marketplace" || list === "chats-only";
+
+  let openerStatus = "";
+  let lastOpenAt = 0;
+  let messengerMisses = 0;
+  async function ensureChatList() {
+    if (sessionStorage.getItem("r2bOpenerTripped") === "1") return (openerStatus = "disabled: a conversation view appeared after a click");
+    if (namedGrid(/^marketplace$/i)) { messengerMisses = 0; return (openerStatus = "present"); }
+    const backoff = messengerMisses >= 3 ? 600_000 : 15_000;
+    if (Date.now() - lastOpenAt < backoff) return openerStatus;
+    lastOpenAt = Date.now();
+    const before = { path: location.pathname, surfaces: conversationSurfaces() };
+    const chatsOpen = Boolean(namedGrid(/^chats$/i));
+    const target = chatsOpen ? marketplaceControl() : messengerButton();
+    if (!target) return (openerStatus = chatsOpen ? "no-marketplace-control" : "no-messenger-button");
+    target.click();
+    await sleep(2_500);
+    if (location.pathname !== before.path || THREAD_PATH.test(location.pathname) || conversationSurfaces() > before.surfaces) {
+      sessionStorage.setItem("r2bOpenerTripped", "1");
+      return (openerStatus = "tripped: page changed or a conversation view appeared; opener disabled");
+    }
+    if (!chatsOpen) messengerMisses = namedGrid(/^chats$/i) ? 0 : messengerMisses + 1;
+    if (messengerMisses >= 3) return (openerStatus = "messenger-panel-not-found");
+    return (openerStatus = chatsOpen ? "clicked Marketplace" : "clicked Messenger");
   }
 
   // ---- Read-only diagnostics ----
   // Structure only: no message text, names or previews leave the page. Labels
   // keep known UI words; every other word becomes "•".
-  const KEEP = new Set("a as at by chat chats conversation conversations delivered for from in inbox mark marketplace menu message messages more new of on options read seen selling buying sent to unread you your listings actions settings close open search".split(" "));
+  const KEEP = new Set("messenger communities a as at by chat chats conversation conversations delivered for from in inbox mark marketplace menu message messages more new of on options read seen selling buying sent to unread you your listings actions settings close open search".split(" "));
   const redact = (label) => norm(label).slice(0, 80).split(" ").map((w) => (KEEP.has(w.toLowerCase().replace(/[^a-z]/g, "")) ? w : "•")).join(" ");
   function describe(el) {
     if (!el) return null;
@@ -228,6 +310,16 @@
       titleCount: Number(document.title.match(/^\((\d+)\)/)?.[1] || 0),
       visibility: document.visibilityState,
       threadLinkPatterns: [...new Set(links.map((l) => l.pattern))],
+      list: listState(),
+      opener: openerStatus,
+      controls: [...document.querySelectorAll("[aria-label], [role=tab], [role=button], a[href]")]
+        .filter((el) => /^(?:messenger|chats|messages|marketplace)\b/i.test(norm(el.getAttribute("aria-label") || (el.children.length <= 3 ? el.textContent : ""))))
+        .slice(0, 25).map((el) => {
+          const anchor = el.closest("a[href]");
+          let href = null;
+          try { href = anchor ? new URL(anchor.getAttribute("href"), location.href).pathname.replace(/\d{3,}/g, "#") : null; } catch {}
+          return { el: describe(el), text: redact(el.children.length <= 3 ? el.textContent : "").slice(0, 30), href, safe: safeToClick(el), banner: Boolean(el.closest('[role="banner"]')), visible: visible(el) };
+        }),
       linkPatterns: patterns,
       groups: [...groups.values()],
       headings,
@@ -307,31 +399,36 @@
   async function tick() {
     const state = health();
     const threadId = location.pathname.match(THREAD_PATH)?.[1] || null;
-    const inbox = state === "healthy" ? scanInbox() : [];
+    let inbox = state === "healthy" ? scanInbox() : [];
     const beat = await api("/heartbeat", {
       health: state, visibility: document.visibilityState, url: location.pathname,
-      rows: inbox.length, unread: inbox.filter((row) => row.unread).length,
+      rows: inbox.length, unread: inbox.filter((row) => row.unread).length, list: listState(), opener: openerStatus,
     });
     if (beat.mode === "off" || state !== "healthy") return;
 
-    if (beat.mode === "observe") {
-      // Passive: report list and unread indicators only. Never open a
-      // conversation or read its messages. Leaving a conversation page does
-      // not change read status.
-      if (threadId) {
-        if (home && !location.href.startsWith(home)) location.assign(home);
-        return;
-      }
-      await api("/inbox", { threads: inbox });
-      if (Date.now() - lastDiagnosticAt > 60_000) await sendDiagnostics("assistant-tab");
-      return;
-    }
-
     if (threadId) {
+      // Observe never stays on a conversation page; leaving does not change read status.
+      if (beat.mode === "observe") { if (home && !location.href.startsWith(home)) location.assign(home); return; }
       await handleThread(threadId);
       return;
     }
-    const { open } = await api("/inbox", { threads: inbox });
+
+    // Keep the conversation list open: list controls only, never a conversation.
+    if (listState() !== "marketplace") {
+      await ensureChatList();
+      inbox = scanInbox();
+    } else {
+      openerStatus = "present";
+    }
+    const ready = listReady(listState());
+
+    if (beat.mode === "observe") {
+      // Passive: report list and unread indicators only.
+      await api("/inbox", { threads: inbox, listReady: ready });
+      if (Date.now() - lastDiagnosticAt > 60_000) await sendDiagnostics("assistant-tab");
+      return;
+    }
+    const { open } = await api("/inbox", { threads: inbox, listReady: ready });
     if (open) location.assign(threadUrl(open));
   }
 

@@ -87,6 +87,29 @@ test("Observe is passive: it never opens, reads, stores or drafts a conversation
   assert.ok(!JSON.stringify(state).includes("Private text"));
 });
 
+test("nothing is baselined or assessed until the conversation list is fully open", () => {
+  const state = emptyState();
+  setMode(state, "observe");
+  assert.deepEqual(inspectInbox(state, [{ id: "100", unread: true, pos: 0 }], { listReady: false }).open, null);
+  assert.equal(state.inboxBaseline, null);
+  inspectInbox(state, [], { listReady: true });
+  assert.equal(state.inboxBaseline, null, "an empty list is not a baseline");
+  inspectInbox(state, [{ id: "100", unread: true, pos: 0 }]);
+  assert.equal(publicStatus(state).baselineUnread, 1);
+});
+
+test("old unread conversations rendered lazily further down are not new arrivals", () => {
+  const state = emptyState();
+  setMode(state, "observe");
+  inspectInbox(state, [{ id: "1", unread: false, pos: 0 }, { id: "2", unread: true, pos: 1 }]);
+  // Facebook renders more of the list: backlog appears lower down.
+  inspectInbox(state, [{ id: "1", unread: false, pos: 0 }, { id: "2", unread: true, pos: 1 }, { id: "50", unread: true, pos: 40 }, { id: "51", unread: true, pos: 41 }]);
+  assert.equal(state.events.filter((e) => e.type === "unread-observed").length, 0);
+  // A genuinely new conversation arrives at the top, and a read one becomes unread.
+  inspectInbox(state, [{ id: "60", unread: true, pos: 0 }, { id: "1", unread: true, pos: 1 }, { id: "2", unread: true, pos: 2 }, { id: "50", unread: true, pos: 41 }]);
+  assert.deepEqual(state.events.filter((e) => e.type === "unread-observed").map((e) => e.threadId), ["60", "1"]);
+});
+
 test("activating Send after Observe leaves everything already unread for a person", () => {
   const state = emptyState();
   setMode(state, "observe");
