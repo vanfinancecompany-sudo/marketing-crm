@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Rent2Buy Marketplace Assistant (development)",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Answers basic Rent2Buy Marketplace enquiries from a dedicated background tab using the website Ask Me engine. Off by default; local control at http://127.0.0.1:4618/.",
-  "permissions": ["tabs", "storage", "alarms"],
+  "permissions": ["tabs", "storage", "alarms", "idle"],
   "host_permissions": ["https://www.facebook.com/*", "http://127.0.0.1:4618/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [

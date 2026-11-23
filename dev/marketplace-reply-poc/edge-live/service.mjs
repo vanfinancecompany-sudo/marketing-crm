@@ -112,6 +112,7 @@ const ROUTES = {
     };
   },
   "POST /pilot/verify": (body) => verifyPilot(state, body),
+  "POST /assist": (body) => { logEvent(state, "visibility-assist", { opened: Boolean(body.opened) }); return { ok: true }; },
   "POST /inbox": (body) => ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false, list: typeof body.list === "string" ? body.list.slice(0, 40) : null }) }),
   "POST /thread": (body) => handleThread(body),
   "POST /go": (body) => authoriseSend(state, String(body.jobId)),

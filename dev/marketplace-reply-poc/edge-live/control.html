@@ -80,6 +80,7 @@ const EVENT = {
   "send-not-restored": () => "Service restarted: Send was not restored",
   "emergency-stop": () => "STOP pressed",
   health: (e) => "Facebook page problem: " + e.health,
+  "visibility-assist": (e) => "Idle visibility assist: assistant tab shown briefly; Marketplace list " + (e.opened ? "opened" : "did NOT open"),
 };
 function render(s) {
   const m = s.monitoring || { ok: false, reasons: ["Unknown"] };

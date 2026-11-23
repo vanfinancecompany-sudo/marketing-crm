@@ -30,6 +30,11 @@
     }
   });
 
+  // Brought to the front (visibility assist or the owner): act at once.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { lastOpenAt = 0; schedule(0); }
+  });
+
   chrome.runtime.sendMessage({ type: "whoami" }).then((reply) => {
     if (!reply?.assistant) return;
     home = reply.home;
@@ -326,6 +331,8 @@
     if (chatsOpen) {
       if (namedGrid(/^marketplace$/i)) return (openerStatus = "clicked Marketplace (" + strategy + ")");
       marketplaceMisses++;
+      // Rendering is paused in a hidden tab; ask for a brief idle-only assist.
+      if (marketplaceMisses >= 2 && document.hidden) chrome.runtime.sendMessage({ type: "need-visibility" }).catch(() => {});
       return (openerStatus = "Marketplace click had no effect (" + strategy + "), attempt " + marketplaceMisses);
     }
     return (openerStatus = "clicked Messenger");

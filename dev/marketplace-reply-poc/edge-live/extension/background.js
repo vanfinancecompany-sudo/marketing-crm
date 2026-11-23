@@ -79,6 +79,46 @@ async function supervise() {
   }
 }
 
+// ---- Visibility assist (idle only) ----
+// Live (23 Nov 2026, 20:27-20:31): with the assistant tab hidden, every way of
+// clicking the Marketplace entry left the Chats view in place, although the same
+// click worked at 19:31 when the tab had just been brought to the front. When the
+// click has failed repeatedly AND the PC has had no keyboard or mouse input for
+// 2 minutes, bring the assistant tab to the front for at most 12 seconds, then
+// return to the tab that was active. Never while the owner is using the PC; at
+// most once every 10 minutes.
+const ASSIST_IDLE_SECONDS = 120;
+const ASSIST_MAX_MS = 12_000;
+const ASSIST_GAP_MS = 600_000;
+let assistRunning = false;
+async function visibilityAssist(tab) {
+  const { tabId } = await chrome.storage.session.get("tabId");
+  if (!tab || tab.id !== tabId) return { ok: false, why: "not the assistant tab" };
+  const { lastAssistAt = 0 } = await chrome.storage.local.get("lastAssistAt");
+  if (assistRunning || Date.now() - lastAssistAt < ASSIST_GAP_MS) return { ok: false, why: "waiting" };
+  const idle = await chrome.idle.queryState(ASSIST_IDLE_SECONDS);
+  if (idle !== "idle") return { ok: false, why: "the PC is " + idle };
+  const win = await chrome.windows.get(tab.windowId).catch(() => null);
+  if (!win || win.state === "minimized") return { ok: false, why: "the Edge window is minimised" };
+  assistRunning = true;
+  await chrome.storage.local.set({ lastAssistAt: Date.now() });
+  const [previous] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  let opened = false;
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    const end = Date.now() + ASSIST_MAX_MS;
+    while (Date.now() < end && !opened) {
+      await new Promise((r) => setTimeout(r, 700));
+      opened = (await api("/status").catch(() => null))?.heartbeat?.list === "marketplace";
+    }
+  } finally {
+    if (previous && previous.id !== tab.id) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
+    assistRunning = false;
+  }
+  await api("/assist", { opened, ms: ASSIST_MAX_MS }).catch(() => {});
+  return { ok: opened };
+}
+
 // ---- Self-update ----
 // The service reports the extension version on disk in this install. When it is
 // newer than the running one (after a git pull), the extension reloads itself,
@@ -134,6 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return api(message.path, message.body);
     }
     if (message.type === "supervise") { await supervise(); return { ok: true }; }
+    if (message.type === "need-visibility") return visibilityAssist(sender.tab);
     // Popup only: read-only structural snapshot of the Facebook tab you are looking at.
     if (message.type === "diagnose-active" && !sender.tab) {
       const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
