@@ -9,7 +9,7 @@ import { draftMarketplaceReply } from "../assistant.mjs";
 import { liveResponder } from "./askme-live.mjs";
 import {
   authoriseSend, inspectInbox, inspectThread, loadState, logEvent, publicStatus, recordDraft,
-  recordHeartbeat, recordSendResult, resumeThread, saveState, setMode,
+  recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
 } from "./ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -25,6 +25,7 @@ const fixture = process.env.R2B_FIXTURE === "1"
   : null;
 
 let state = loadState(STATE_FILE);
+const sendWasOn = startupMode(state);
 saveState(STATE_FILE, state);
 let queue = Promise.resolve();
 // Serialise every state change so two tabs or retries can never race a claim.
@@ -126,5 +127,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(JSON.stringify({ event: "listening", port: PORT, stateFile: STATE_FILE, mode: state.mode, stub: STUB }));
+  console.log(JSON.stringify({ event: "listening", port: PORT, stateFile: STATE_FILE, mode: state.mode, sendWasOn, stub: STUB }));
 });

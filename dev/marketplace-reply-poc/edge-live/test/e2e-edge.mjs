@@ -91,13 +91,31 @@ try {
   await fb("customer", { threadId: "200", text: "Earlier question, answered by a person" });
   await fb("send", { threadId: "200", text: "Answered earlier by the team." });
   await fb("read", { threadId: "200" });
-  await api("/control", { mode: "send", allowThreads: ["200"] });
+  await api("/control", { mode: "observe" });
   startEdge();
 
   const s0 = await waitFor(async () => { const s = await api("/status"); return s.baselineUnread !== null && s.heartbeat ? s : null; }, "assistant tab baseline", 60_000);
   assert.equal(s0.baselineUnread, 1);
   assert.equal((await assistantTabs()).length, 1);
   pass("extension opened one background assistant tab and baselined 1 already-unread conversation");
+
+  // 0. Observe is passive: a new enquiry is noticed but never opened, read or answered.
+  await fb("customer", { threadId: "300", name: "Jo", text: "Observe-only enquiry" });
+  await waitFor(async () => (await api("/status")).events.some((e) => e.type === "unread-observed" && e.threadId === "300"), "observed unread");
+  await sleep(8_000);
+  const so = await api("/status");
+  const fbo = await fb("state");
+  assert.equal(fbo.threads["300"].unread, true, "conversation must stay unread");
+  assert.ok(!fbo.threads["300"].messages.some((m) => m.out));
+  assert.equal(so.counts.threads, 0);
+  assert.equal(so.recentJobs.length, 0);
+  assert.ok(!(await assistantTabs()).some((t) => t.url.includes("/messages/t/")), "assistant tab never opened a conversation");
+  pass("Observe noticed the new unread conversation without opening it, changing read status, calling Ask Me or replying");
+
+  // Deliberate activation: everything unread now is left for a person.
+  await api("/control", { mode: "send", allowThreads: ["200", "300"] });
+  await waitFor(async () => (await api("/status")).baselineUnread === 2, "send baseline");
+  pass("switching Observe to Send baselined both unread conversations for a person");
 
   // 1. New message in a closed, read conversation while the tab is in the background.
   const t0 = Date.now();
@@ -129,7 +147,10 @@ try {
   assert.equal((await fb("state")).sends, 2);
   pass("STOP: no reply to a message arriving after the stop");
 
-  // 4. Edge restart (graceful by default; E2E_CRASH=1 hard-kills) and service restart.
+  // 4. Send deliberately switched on, then Edge and the service restart.
+  await api("/control", { mode: "send", allowThreads: ["200"] });
+  assert.equal((await api("/status")).mode, "send");
+  // Edge restart (graceful by default; E2E_CRASH=1 hard-kills) and service restart.
   if (process.env.E2E_CRASH === "1") killEdge(); else await closeEdge();
   await stopService();
   await sleep(2_000);
@@ -137,7 +158,8 @@ try {
   const persisted = await api("/status");
   assert.equal(persisted.counts.sent, 1);
   assert.equal(persisted.mode, "off");
-  pass("ledger, history and the Off state survived an Edge and service restart");
+  assert.ok(persisted.events.some((e) => e.type === "send-not-restored"));
+  pass("Send was NOT restored after the restart (came back Off); ledger and history survived");
   await api("/control", { mode: "send", allowThreads: ["200"] });
   profile = join(work, "edge-profile-after-restart");
   startEdge();
@@ -161,6 +183,8 @@ try {
   assert.match(asked, /self-employed/);
   assert.doesNotMatch(asked, /complaint/);
   console.log("Ask Me request for that reply:", JSON.stringify(asked));
+  assert.ok(!fb2.threads["300"].messages.some((m) => m.out));
+  pass("conversation first seen in Observe was never answered automatically");
 } finally {
   killEdge();
   await stopService().catch(() => {});

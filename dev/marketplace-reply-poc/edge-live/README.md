@@ -12,21 +12,28 @@ Marketplace publishing, renewals, Facebook Groups and the existing Marketplace H
 
 | Rule | How |
 | --- | --- |
-| Starts **Off** | Modes: Off, Observe (detect only), Draft (Ask Me drafts, never typed), Send |
+| Starts **Off** | Modes: Off, Observe, Draft (Ask Me drafts, never typed), Send |
+| Observe is passive | Reads only the conversation list and unread indicators. It never opens a conversation, so read status is unchanged. It never reads or stores message text and never calls Ask Me. Enforced in the service and again in the extension |
+| Send is never restored | After any restart of the service, Edge or Windows, the service comes back **Off** (logged as `send-not-restored`). Send must be switched on again in the popup or control page, which asks for confirmation |
 | Send only where allowed | Send mode replies only in allowlisted thread IDs unless "all conversations" is ticked |
 | Immediate stop | **STOP NOW** in the popup or control page, `Alt+Shift+0`, or create a file named `STOP` beside `state.json`. Re-checked between typing and pressing Send |
-| No replies to the backlog | Conversations already unread at switch-on, and messages that arrive while Off, are left for a person |
+| No replies to the backlog | Conversations already unread when Draft or Send is switched on, and messages that arrive while Off or Observing, are left for a person |
 | No duplicates | Each customer message ID is answered once. A claimed reply is never re-sent after a crash, reload or restart; an unconfirmed send pauses that conversation |
 | Escalation | Complaints, application decisions, requests for a person, cross-product questions and unknown products pause the conversation and appear under **Needs a person** |
 | Website redirect | Stock, prices, specs and quotes get the clickable https://www.rent2buyvans.co.uk/ link (existing `reply-policy.mjs`) |
 
-## Run on the Windows PC
+## Install on the Windows PC (permanent folder)
 
-1. Start the service: `node dev/marketplace-reply-poc/edge-live/service.mjs` (or `start-assistant.ps1`).
-2. In Edge, open edge://extensions, switch on **Developer mode**, select **Load unpacked** and choose the `extension` folder.
-3. Open http://127.0.0.1:4618/ and select **Observe**. The extension opens a pinned background tab at https://www.facebook.com/marketplace/inbox/. Keep using Facebook normally in other tabs.
-4. Ask a consenting tester to message one advert. In Observe mode the control page should show `unread` and `incoming` events for that thread within a few seconds. Then try **Draft only** to check the Ask Me reply without sending.
-5. **Live sending requires explicit approval.** Once approved, add only the tester's thread ID to the allowlist and select **Send**.
+Needs Git and Node.js 20 or later. No `npm install` is required: the service uses only Node built-ins.
+
+1. Clone: `git clone --depth 1 --branch codex/marketplace-reply-poc https://github.com/vanfinancecompany-sudo/marketing-crm.git "$env:USERPROFILERent2BuyAssistant"`
+2. Start the service and leave the window open: `node "$env:USERPROFILERent2BuyAssistantdevmarketplace-reply-pocedge-liveservice.mjs"`
+3. In the Edge profile that is signed in to Facebook, open edge://extensions, switch on **Developer mode**, select **Load unpacked** and choose `%USERPROFILE%Rent2BuyAssistantdevmarketplace-reply-pocedge-liveextension`.
+4. Open http://127.0.0.1:4618/ and select **Observe**. A pinned background tab opens at https://www.facebook.com/marketplace/inbox/. Keep using Facebook in other tabs.
+5. The extension's toolbar popup shows "Chats visible" and "unread" counts. When a tester messages an advert, the control page shows an `unread-observed` event, and the conversation stays unread.
+6. Live sending needs explicit approval. Do not select Draft or Send until then.
+
+Update later with `git -C "$env:USERPROFILERent2BuyAssistant" pull`, then select the reload icon on the extension in edge://extensions.
 
 `R2B_DEFAULT_PRODUCT` (default `rent2buy`) sets the product when the listing title does not say. Set it to an empty string to send unknown listings to a person.
 
@@ -51,6 +58,6 @@ These cannot be tested without the signed-in Edge profile and a consenting test 
 2. **Message direction.** Uses "You sent" / "<name> sent" labels (seen in the live inspection) with a bubble-position fallback.
 3. **Sending.** Text is inserted with `execCommand` into the Lexical composer and **Press enter to send** is clicked. Send is confirmed only when a new outgoing message ID with the same text appears.
 4. **Edge restart.** Tab IDs are kept in session storage, and the restored assistant tab is adopted by a page marker. Automated testing of an Edge relaunch on the same profile is blocked because Edge disables command-line-loaded extensions on relaunch. Check once on the PC that the extension stays enabled and there is one pinned tab after restarting Edge. Edge **Sleeping tabs** is countered with `autoDiscardable: false` and a 3-minute stale-heartbeat reload. Also add `facebook.com` to *Never put these sites to sleep*.
-5. **Windows reboot.** `install-startup.ps1` adds a Startup-folder shortcut that starts the service and Edge at logon. It has not been installed. The PC must stay signed in, awake and online.
+5. **Windows reboot.** The service comes back Off after a reboot by design. `install-startup.ps1` adds a Startup-folder shortcut that starts the service and Edge at logon. It has not been installed. The PC must stay signed in, awake and online.
 
 Meta's terms restrict automated access to Facebook. Running this on a personal profile carries a risk of account checks or restrictions. A security checkpoint pauses the assistant (`health: security-challenge`).

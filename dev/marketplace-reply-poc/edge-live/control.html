@@ -53,6 +53,8 @@ function render(s) {
     "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
     "Browser tab: " + (hb ? hb.health + ", " + hb.visibility + ", last seen " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + "s ago" : "not connected"),
     "Unread at switch-on (left for a person): " + (s.baselineUnread ?? "not yet taken"),
+    ...(s.mode === "observe" ? ["Observe (passive): conversations unread now: " + (s.observedUnread.join(", ") || "none")] : []),
+    "Send is never restored after a restart; it must be switched on here each time.",
     "Waiting to open: " + (s.pendingOpen.join(", ") || "none"),
     "Sent: " + s.counts.sent + "   Drafts: " + s.counts.drafts + "   Needs a person: " + s.counts.needsHuman,
   ].join("\n");
@@ -64,7 +66,10 @@ function render(s) {
 }
 const refresh = () => api("/status").then(render).catch(() => { document.getElementById("status").textContent = "Service not reachable."; });
 document.getElementById("stop").onclick = () => api("/stop", {}).then(render);
-document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => api("/control", { mode: b.dataset.mode }).then(render));
+document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
+  if (b.dataset.mode === "send" && !confirm("Switch on LIVE sending to Facebook customers on the allowlist?")) return;
+  api("/control", { mode: b.dataset.mode }).then(render);
+});
 document.getElementById("saveAllow").onclick = () => api("/status").then((s) => api("/control", {
   mode: s.mode, allowThreads: document.getElementById("allow").value.split(/[\s,]+/).filter(Boolean), allowAll: document.getElementById("allowAll").checked,
 })).then(render);

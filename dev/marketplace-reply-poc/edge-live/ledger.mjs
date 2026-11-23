@@ -24,6 +24,7 @@ export function emptyState() {
     enabledAt: null,
     inboxBaseline: null,
     pendingOpen: [],
+    observedUnread: [],
     threads: {},
     events: [],
     heartbeat: null,
@@ -50,6 +51,15 @@ export function loadState(file) {
   }
 }
 
+// Called once when the service starts. Send is never restored from disk: after
+// any restart (service, Edge or Windows) it must be switched on deliberately.
+export function startupMode(state) {
+  if (state.mode !== "send") return false;
+  setMode(state, "off");
+  logEvent(state, "send-not-restored", { reason: "Service restarted; Send must be switched on again" });
+  return true;
+}
+
 export function saveState(file, state) {
   mkdirSync(dirname(file), { recursive: true });
   const pending = file + "." + process.pid + ".next";
@@ -64,14 +74,18 @@ export function logEvent(state, type, detail = {}) {
 
 export function setMode(state, mode, { allowThreads, allowAll } = {}) {
   if (!MODES.includes(mode)) throw new TypeError("Unknown mode");
-  const wasOff = state.mode === "off";
+  // Off and Observe are passive: neither opens conversations nor records
+  // message history. Activating Draft or Send from either takes a fresh
+  // baseline, so nothing that arrived while passive is answered automatically.
+  const wasOff = ["off", "observe"].includes(state.mode) && ["draft", "send"].includes(mode);
   state.mode = mode;
   if (Array.isArray(allowThreads)) state.allowThreads = allowThreads.filter((id) => THREAD_ID.test(String(id))).map(String);
   if (typeof allowAll === "boolean") state.allowAll = allowAll;
-  if (mode === "off") {
-    state.enabledAt = null;
+  if (mode === "off" || mode === "observe") {
+    state.enabledAt = mode === "observe" ? new Date().toISOString() : null;
     state.inboxBaseline = null;
     state.pendingOpen = [];
+    state.observedUnread = [];
   } else if (wasOff) {
     // Everything already unread when the assistant is switched on is left
     // for a person. Only conversations that become unread afterwards count.
@@ -99,6 +113,19 @@ export function inspectInbox(state, threads) {
   if (state.mode === "off") return { open: null };
   const rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 200);
   const unread = rows.filter((row) => row.unread === true).map((row) => String(row.id));
+  if (state.mode === "observe") {
+    // Passive: record that a conversation became unread, nothing more. Nothing
+    // is queued to open, so read status and message content are untouched.
+    const known = new Set(state.observedUnread || []);
+    if (!state.inboxBaseline) {
+      state.inboxBaseline = { at: new Date().toISOString(), unread };
+      state.observedUnread = unread;
+      return { open: null };
+    }
+    for (const id of unread) if (!known.has(id)) logEvent(state, "unread-observed", { threadId: id });
+    state.observedUnread = unread;
+    return { open: null };
+  }
   if (!state.inboxBaseline) {
     state.inboxBaseline = { at: new Date().toISOString(), unread };
     if (unread.length) logEvent(state, "baseline", { excludedUnread: unread.length });
@@ -131,6 +158,8 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   const threadId = String(snapshot?.threadId || "");
   if (!THREAD_ID.test(threadId)) return { action: "none", reason: "No conversation identity" };
   if (state.mode === "off") return { action: "none", reason: "Assistant is off" };
+  // Observe never reads, stores or forwards message content.
+  if (state.mode === "observe") return { action: "none", reason: "Observe mode is passive" };
   const flagged = state.pendingOpen.includes(threadId);
   state.pendingOpen = state.pendingOpen.filter((id) => id !== threadId);
   const messages = (Array.isArray(snapshot.messages) ? snapshot.messages : [])
@@ -282,6 +311,7 @@ export function publicStatus(state) {
     allowThreads: state.allowThreads,
     enabledAt: state.enabledAt,
     baselineUnread: state.inboxBaseline?.unread.length ?? null,
+    observedUnread: state.mode === "observe" ? (state.observedUnread || []) : [],
     pendingOpen: state.pendingOpen,
     heartbeat: state.heartbeat,
     counts: {

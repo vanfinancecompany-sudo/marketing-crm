@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   authoriseSend, emptyState, inspectInbox, inspectThread, loadState, publicStatus, recordDraft,
-  recordSendResult, resumeThread, saveState, setMode,
+  recordSendResult, resumeThread, saveState, setMode, startupMode,
 } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
 import { liveResponder } from "../dev/marketplace-reply-poc/edge-live/askme-live.mjs";
 import { draftMarketplaceReply } from "../dev/marketplace-reply-poc/assistant.mjs";
@@ -71,8 +71,50 @@ test("an unflagged conversation seen for the first time is only a baseline", () 
   assert.equal(inspectThread(state, { threadId: "300", messages: [msg(1, "incoming"), msg(2, "incoming", "New")] }, OPTS).action, "draft");
 });
 
-test("observe and draft modes, and threads off the allowlist, never get a send instruction", () => {
-  for (const [mode, allow] of [["observe", ["200"]], ["draft", ["200"]], ["send", ["999"]]]) {
+test("Observe is passive: it never opens, reads, stores or drafts a conversation", () => {
+  const state = emptyState();
+  setMode(state, "observe", { allowThreads: ["200"] });
+  assert.deepEqual(inspectInbox(state, [{ id: "100", unread: true }]), { open: null }); // baseline
+  for (let i = 0; i < 3; i++) {
+    assert.deepEqual(inspectInbox(state, [{ id: "100", unread: true }, { id: "200", unread: true }]), { open: null });
+  }
+  assert.deepEqual(state.pendingOpen, []);
+  assert.equal(state.events.filter((e) => e.type === "unread-observed").length, 1, "each unread episode is logged once");
+  assert.deepEqual(publicStatus(state).observedUnread, ["100", "200"]);
+  const result = inspectThread(state, { threadId: "200", messages: [msg(1, "incoming", "Private text")] }, OPTS);
+  assert.deepEqual(result, { action: "none", reason: "Observe mode is passive" });
+  assert.deepEqual(state.threads, {});
+  assert.ok(!JSON.stringify(state).includes("Private text"));
+});
+
+test("activating Send after Observe leaves everything already unread for a person", () => {
+  const state = emptyState();
+  setMode(state, "observe");
+  inspectInbox(state, [{ id: "100", unread: false }]);
+  inspectInbox(state, [{ id: "100", unread: true }]); // arrived while observing
+  setMode(state, "send", { allowThreads: ["100"] });
+  assert.equal(inspectInbox(state, [{ id: "100", unread: true }]).open, null);
+  assert.equal(inspectInbox(state, [{ id: "100", unread: true }]).open, null);
+  assert.equal(publicStatus(state).baselineUnread, 1);
+});
+
+test("a service restart never restores Send", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "r2b-ledger-")), "state.json");
+  const state = enabled("send", ["200"]);
+  saveState(file, state);
+  const restored = loadState(file);
+  assert.equal(startupMode(restored), true);
+  assert.equal(restored.mode, "off");
+  assert.equal(restored.events.at(-1).type, "send-not-restored");
+  assert.equal(inspectInbox(restored, [{ id: "200", unread: true }]).open, null);
+  const observing = emptyState();
+  setMode(observing, "observe");
+  assert.equal(startupMode(observing), false);
+  assert.equal(observing.mode, "observe");
+});
+
+test("draft mode and threads off the allowlist never get a send instruction", () => {
+  for (const [mode, allow] of [["draft", ["200"]], ["send", ["999"]]]) {
     const state = enabled(mode, allow);
     flag(state, "200");
     const decision = inspectThread(state, { threadId: "200", messages: [msg(1, "incoming", "Hi")] }, OPTS);

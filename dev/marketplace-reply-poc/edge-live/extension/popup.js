@@ -19,7 +19,10 @@ function render(s) {
 const refresh = () => call("/status").then(render);
 document.getElementById("stop").onclick = () => call("/stop", {}).then(render);
 document.querySelectorAll("[data-mode]").forEach((b) => {
-  b.onclick = () => call("/control", { mode: b.dataset.mode }).then((s) => { render(s); chrome.runtime.sendMessage({ type: "supervise" }); });
+  b.onclick = () => {
+    if (b.dataset.mode === "send" && !confirm("Switch on LIVE sending to Facebook customers on the allowlist?")) return;
+    call("/control", { mode: b.dataset.mode }).then((s) => { render(s); chrome.runtime.sendMessage({ type: "supervise" }); });
+  };
 });
 chrome.storage.local.get("home").then(({ home }) => { document.getElementById("home").value = home || DEFAULT_HOME; });
 document.getElementById("saveHome").onclick = () => {

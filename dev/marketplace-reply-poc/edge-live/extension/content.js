@@ -144,6 +144,18 @@
     });
     if (beat.mode === "off" || state !== "healthy") return;
 
+    if (beat.mode === "observe") {
+      // Passive: report list and unread indicators only. Never open a
+      // conversation or read its messages. Leaving a conversation page does
+      // not change read status.
+      if (threadId) {
+        if (home && !location.href.startsWith(home)) location.assign(home);
+        return;
+      }
+      await api("/inbox", { threads: inbox });
+      return;
+    }
+
     if (threadId) {
       await handleThread(threadId);
       return;
