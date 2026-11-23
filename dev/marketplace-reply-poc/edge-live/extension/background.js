@@ -211,13 +211,19 @@ async function showAssistantTab(tab, seconds) {
   if (!tab || tab.id !== tabId || showing) return { ok: false };
   showing = true;
   const [previous] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  // A tab in a minimised window is never drawn (live, 23:22): restore the window
+  // for these seconds, then minimise it again.
+  const win = await chrome.windows.get(tab.windowId).catch(() => null);
+  const wasMinimized = win?.state === "minimized";
   const ms = Math.min(Math.max(Number(seconds) || 10, 3), 20) * 1000;
-  tabEvent("assistant-tab-shown", { tabId: tab.id, seconds: ms / 1000, previousTabId: previous?.id ?? null });
+  tabEvent("assistant-tab-shown", { tabId: tab.id, seconds: ms / 1000, previousTabId: previous?.id ?? null, windowWasMinimised: wasMinimized });
   try {
     await chrome.tabs.update(tab.id, { active: true });
+    if (wasMinimized) await chrome.windows.update(tab.windowId, { state: "normal", focused: true }).catch(() => {});
     await new Promise((r) => setTimeout(r, ms));
   } finally {
     if (previous && previous.id !== tab.id) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
+    if (wasMinimized) await chrome.windows.update(tab.windowId, { state: "minimized" }).catch(() => {});
     showing = false;
   }
   return { ok: true };
