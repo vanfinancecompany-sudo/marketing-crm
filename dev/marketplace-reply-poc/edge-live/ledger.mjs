@@ -361,6 +361,27 @@ export function finishPilot(state, { snapshot, structure, decision, outcome, ask
   return true;
 }
 
+// ---- Facebook system notices and sender-name lines (live pilot, 23 Nov 2026) ----
+// A Marketplace conversation starts with Facebook's own notices, which carry
+// message IDs like customer messages: "Van started this chat. View buyer
+// profile" and "To help identify and reduce scams and fraud, Meta may use
+// technology to review Marketplace messages." They are never customer text.
+const FACEBOOK_NOTICES = [
+  /\bstarted this chat\b/i,
+  /\bview buyer profile\b/i,
+  /\bmay use technology to review marketplace messages\b/i,
+  /^to help identify and reduce scams\b/i,
+];
+export const isFacebookNotice = (text) => FACEBOOK_NOTICES.some((pattern) => pattern.test(String(text || "")));
+// A bubble's text can begin with the sender's name on its own line ("Van\nWhat's
+// the vehicle's history?"). Drop a short first line with no punctuation.
+export function cleanMessageText(text) {
+  const lines = String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length >= 2 && lines[0].length <= 40 && !/[.?!,:;]/.test(lines[0]) && lines[0].split(" ").length <= 4) lines.shift();
+  return lines.join("\n");
+}
+
+
 export function resolveProduct(listingTitle, defaultProduct) {
   const text = String(listingTitle || "");
   if (/\brent[\s-]*(?:2|to)[\s-]*buy\b/i.test(text)) return "rent2buy";
@@ -379,6 +400,8 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   state.pendingOpen = state.pendingOpen.filter((id) => id !== threadId);
   const messages = (Array.isArray(snapshot.messages) ? snapshot.messages : [])
     .filter((m) => typeof m?.id === "string" && MESSAGE_ID.test(m.id) && ["incoming", "outgoing"].includes(m.direction))
+    .filter((m) => !isFacebookNotice(m.text))
+    .map((m) => ({ ...m, text: cleanMessageText(m.text) }))
     .slice(-120);
   if (!messages.length) {
     if (flagged) logEvent(state, "unreadable", { threadId, reason: "No message IDs visible in the opened conversation" });
