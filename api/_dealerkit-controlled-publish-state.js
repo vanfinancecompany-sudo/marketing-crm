@@ -79,8 +79,10 @@ export async function controlledWixRequest(configuration, path, options = {}) {
 // may return WDE0197 if an existing draft item is patched without this option.
 // Add it before the first write (including rollback), not by replaying a failed write.
 // Respect an explicitly provided includeDraftItems value.
+const WIX_ITEM_PATCH_PATH = new RegExp("^/wix-data/v2/items/[^/?]+$");
+
 export function draftAwareControlledWixBody(path, method, body) {
-  if (method !== "PATCH" || !/^\\/wix-data\\/v2\\/items\\/[^/?]+$/.test(path) ||
+  if (method !== "PATCH" || !WIX_ITEM_PATCH_PATH.test(path) ||
       !body?.dataCollectionId || !body?.patch?.dataItemId ||
       body?.publishPluginOptions?.includeDraftItems !== undefined) {
     return body;
