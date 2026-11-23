@@ -110,6 +110,18 @@ test("old unread conversations rendered lazily further down are not new arrivals
   assert.deepEqual(state.events.filter((e) => e.type === "unread-observed").map((e) => e.threadId), ["60", "1"]);
 });
 
+test("switching from the Chats list to the Marketplace list takes a fresh baseline", () => {
+  const state = emptyState();
+  setMode(state, "observe");
+  inspectInbox(state, [{ id: "1", unread: true, pos: 0 }], { list: "chats-only" });
+  // The Marketplace list opens: its top unread rows are backlog, not arrivals.
+  inspectInbox(state, [{ id: "70", unread: true, pos: 0 }, { id: "71", unread: true, pos: 1 }], { list: "marketplace" });
+  assert.equal(state.events.filter((e) => e.type === "unread-observed").length, 0);
+  assert.equal(state.inboxBaseline.list, "marketplace");
+  inspectInbox(state, [{ id: "72", unread: true, pos: 0 }, { id: "70", unread: true, pos: 1 }], { list: "marketplace" });
+  assert.deepEqual(state.events.filter((e) => e.type === "unread-observed").map((e) => e.threadId), ["72"]);
+});
+
 test("activating Send after Observe leaves everything already unread for a person", () => {
   const state = emptyState();
   setMode(state, "observe");

@@ -201,7 +201,8 @@
       && el.matches('[role="button"], [role="link"], button, a') && visible(el) && safeToClick(el));
     return found.find((el) => el.closest('[role="banner"]')) || found[0] || null;
   }
-  function marketplaceControl() {
+  // The Messenger panel (live: div role=dialog label=Messenger) that holds the Chats grid.
+  function messengerPanel() {
     const grid = namedGrid(/^chats$/i);
     if (!grid) return null;
     let scope = grid;
@@ -209,8 +210,33 @@
       scope = scope.parentElement;
       if (scope.matches('[role="dialog"]') || getComputedStyle(scope).position === "fixed") break;
     }
-    return [...scope.querySelectorAll('[role="tab"], [role="button"], [role="link"], [role="menuitem"], [role="radio"], [role="option"], button, a')]
-      .find((el) => /^marketplace(?: chats)?$/i.test(norm(el.getAttribute("aria-label") || el.textContent)) && visible(el) && safeToClick(el)) || null;
+    return scope;
+  }
+  // The live panel has no control whose whole text is "Marketplace"; the entry
+  // carries extra text (for example a new-message count). Accept any clickable
+  // element inside the panel whose label or text STARTS with "Marketplace".
+  const CLICKABLE = 'a, button, [role="button"], [role="link"], [role="tab"], [role="row"], [role="gridcell"], [role="menuitem"], [role="option"], [role="radio"], [tabindex]';
+  const ROLE_RANK = { tab: 0, button: 1, link: 2, menuitem: 3, option: 4, radio: 5, gridcell: 6, row: 7 };
+  function marketplaceCandidates() {
+    const panel = messengerPanel();
+    if (!panel) return [];
+    const seen = new Set();
+    const out = [];
+    for (const el of panel.querySelectorAll("*")) {
+      const label = norm(el.getAttribute("aria-label"));
+      const text = norm(el.textContent);
+      if (!/^marketplace\b/i.test(label) && !(/^marketplace\b/i.test(text) && text.length <= 80)) continue;
+      const target = el.matches(CLICKABLE) ? el : el.closest(CLICKABLE);
+      if (!target || seen.has(target) || !panel.contains(target) || target === panel || target.matches('[role="grid"], [role="dialog"]')) continue;
+      seen.add(target);
+      out.push(target);
+    }
+    return out;
+  }
+  function marketplaceControl() {
+    return marketplaceCandidates()
+      .filter((el) => visible(el) && el.getBoundingClientRect().height <= 120 && safeToClick(el))
+      .sort((a, b) => (ROLE_RANK[a.getAttribute("role")] ?? 8) - (ROLE_RANK[b.getAttribute("role")] ?? 8))[0] || null;
   }
   function listState() {
     if (namedGrid(/^marketplace$/i)) return "marketplace";
@@ -312,6 +338,14 @@
       threadLinkPatterns: [...new Set(links.map((l) => l.pattern))],
       list: listState(),
       opener: openerStatus,
+      chatWindows: [...document.querySelectorAll('[role="log"]')].filter(visible).length,
+      marketplaceCandidates: marketplaceCandidates().slice(0, 12).map((el) => {
+        const anchor = el.closest("a[href]");
+        let href = null;
+        try { href = anchor ? new URL(anchor.getAttribute("href"), location.href).pathname.replace(/\d{3,}/g, "#") : null; } catch {}
+        const r = el.getBoundingClientRect();
+        return { el: describe(el), text: redact(el.textContent).slice(0, 40), href, size: [Math.round(r.width), Math.round(r.height)], safe: safeToClick(el), visible: visible(el) };
+      }),
       controls: [...document.querySelectorAll("[aria-label], [role=tab], [role=button], a[href]")]
         .filter((el) => /^(?:messenger|chats|messages|marketplace)\b/i.test(norm(el.getAttribute("aria-label") || (el.children.length <= 3 ? el.textContent : ""))))
         .slice(0, 25).map((el) => {
@@ -350,8 +384,11 @@
     await api("/diagnostics", { source, snapshot: diagnose() });
   }
 
+  // Prefer the conversation in the main view: Facebook mirrors docked chat
+  // windows from the owner's other tabs into this one (seen live).
   function chatLog() {
-    return [...document.querySelectorAll('[role="log"], [role="grid"][aria-label*="essages"]')].find(visible) || null;
+    const logs = [...document.querySelectorAll('[role="log"], [role="grid"][aria-label*="essages"]')].filter(visible);
+    return logs.find((el) => el.closest('[role="main"]')) || logs[0] || null;
   }
 
   function direction(node, logRect) {
@@ -424,11 +461,11 @@
 
     if (beat.mode === "observe") {
       // Passive: report list and unread indicators only.
-      await api("/inbox", { threads: inbox, listReady: ready });
+      await api("/inbox", { threads: inbox, listReady: ready, list: listState() });
       if (Date.now() - lastDiagnosticAt > 60_000) await sendDiagnostics("assistant-tab");
       return;
     }
-    const { open } = await api("/inbox", { threads: inbox, listReady: ready });
+    const { open } = await api("/inbox", { threads: inbox, listReady: ready, list: listState() });
     if (open) location.assign(threadUrl(open));
   }
 

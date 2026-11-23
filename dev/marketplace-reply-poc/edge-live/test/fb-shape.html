@@ -21,8 +21,12 @@ main{display:flex;flex-direction:column;height:calc(100vh - 50px)}[role=log]{fle
   <div role="button" aria-label="Messenger" id="messenger" tabindex="0">💬</div>
 </header>
 <div id="panel" role="dialog" aria-label="Chats panel">
-  <div><b>Chats</b> <div role="tab" id="tabChats" tabindex="0">Inbox</div> <div role="tab" id="tabMarket" tabindex="0">Marketplace</div></div>
+  <div><b>Chats</b> <div role="button" id="tabChats" tabindex="0" aria-label="Back to chats">←</div></div>
   <div id="grid"></div>
+</div>
+<!-- A docked chat window mirrored from the owner's other tabs (seen live). -->
+<div role="log" aria-label="Messages in conversation with Friend" style="position:fixed;bottom:0;left:8px;width:200px;height:60px;background:#f6f6f6;border:1px solid #ccc">
+  <div data-message-id="mid.$docked1"><div dir="auto">Docked chat</div></div>
 </div>
 <main role="main" id="main"></main>
 <script>
@@ -32,8 +36,12 @@ const post = (path, body) => fetch("/__fb/api/" + path, { method: "POST", header
 let panelOpen = false;
 let tab = "chats";
 document.getElementById("messenger").onclick = () => { panelOpen = !panelOpen; tab = "chats"; render(); };
-document.getElementById("tabMarket").onclick = () => { tab = "marketplace"; render(); };
 document.getElementById("tabChats").onclick = () => { tab = "chats"; render(); };
+// Live panel: the Marketplace entry is a row in the Chats grid with extra text
+// ("Marketplace · N new messages") and no link.
+document.getElementById("grid").addEventListener("click", (e) => {
+  if (e.target.closest("#marketFolder")) { tab = "marketplace"; render(); }
+});
 
 const row = (id, name, preview, unread) => `<div style="display:flex;align-items:center;height:72px">
   <a href="/__fb/messages/t/${id}/" style="flex:1;text-decoration:none;color:inherit">
@@ -49,7 +57,10 @@ async function render() {
   const grid = document.getElementById("grid");
   if (!panelOpen) grid.innerHTML = "";
   else if (tab === "chats") {
-    grid.innerHTML = `<div role="grid" aria-label="Chats">` + row("778", "Marketplace", "", false)
+    const fresh = Object.values(s.threads).filter((t) => t.unread).length;
+    grid.innerHTML = `<div role="grid" aria-label="Chats">`
+      + `<div role="row"><div role="gridcell"><div role="link" tabindex="0" id="marketFolder" style="height:56px"><span>Marketplace</span> <span>· ${fresh} new messages</span></div></div></div>`
+      + row("778", "Marketplace", "", false)
       + ["901", "902", "903"].map((id) => row(id, "Friend " + id, "See you soon", false)).join("") + `</div>`;
   } else {
     const threads = Object.entries(s.threads).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0));

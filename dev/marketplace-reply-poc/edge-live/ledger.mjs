@@ -120,13 +120,14 @@ const TOP_ROWS = 5;
 // or appears unread for the first time near the top of its list (where new
 // conversations arrive). Old unread conversations that Facebook renders lazily
 // further down never count. Nothing is assessed until the list is fully open.
-export function inspectInbox(state, threads, { listReady = true } = {}) {
+export function inspectInbox(state, threads, { listReady = true, list = null } = {}) {
   if (state.mode === "off") return { open: null };
   if (!listReady) return { open: null, waiting: "Conversation list is not open yet" };
   const rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 600);
   if (!rows.length) return { open: null, waiting: "No conversations visible" };
   const unread = rows.filter((row) => row.unread === true).map((row) => String(row.id));
-  const first = !state.inboxBaseline;
+  // A different list (for example Chats, then Marketplace) gets a fresh baseline.
+  const first = !state.inboxBaseline || (list !== null && state.inboxBaseline.list !== list);
   const seenList = (state.listSeen ??= {});
   const fresh = [];
   for (const row of rows) {
@@ -141,9 +142,9 @@ export function inspectInbox(state, threads, { listReady = true } = {}) {
   for (const id of keys.slice(0, Math.max(0, keys.length - MAX_LIST_SEEN))) delete seenList[id];
 
   if (first) {
-    state.inboxBaseline = { at: new Date().toISOString(), unread };
+    state.inboxBaseline = { at: new Date().toISOString(), unread, list };
     if (state.mode === "observe") state.observedUnread = unread;
-    logEvent(state, "baseline", { rows: rows.length, unreadLeftForPerson: unread.length });
+    logEvent(state, "baseline", { list, rows: rows.length, unreadLeftForPerson: unread.length });
     return { open: null };
   }
   if (state.mode === "observe") {
