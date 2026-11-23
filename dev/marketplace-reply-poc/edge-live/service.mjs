@@ -106,7 +106,9 @@ const ROUTES = {
   "POST /stop": () => { cancelPilot(state); setMode(state, "off"); logEvent(state, "emergency-stop"); return statusWithExtension(); },
   "POST /heartbeat": (body) => {
     recordHeartbeat(state, body);
-    if (state.resetOpenerRequested && !/^(?:tripped|disabled)/.test(String(body.opener || ""))) state.resetOpenerRequested = false;
+    // Clear only once the page reports a real, non-tripped opener status (a fresh
+    // page reports an empty status before it has checked the stop).
+    if (state.resetOpenerRequested && body.opener && !/^(?:tripped|disabled)/.test(String(body.opener))) state.resetOpenerRequested = false;
     pilotTimeout(state);
     findTimeout(state);
     return {
