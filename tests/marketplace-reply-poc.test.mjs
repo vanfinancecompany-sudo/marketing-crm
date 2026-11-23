@@ -254,3 +254,47 @@ test("a later turn waits for confirmation of the earlier turn", async (t) => {
   assert.equal(await observe(simulator, { showReceipt: false }), null);
   assert.match((await observe(simulator)).text, /gearbox/);
 });
+
+test("only trusted incoming identities deduplicate observations across restart", async (t) => {
+  const { simulator, restart } = setup(t);
+  simulator.setEnabled(true);
+  const finance = simulator.addEnquiry("finance", "What documents do I need?");
+  const second = simulator.addEnquiry("finance", "What documents do I need?");
+  const observation = { direction: "incoming", id: "mock-entry:01" };
+  const firstTurn = simulator.addFollowUp(finance.id, "And what paperwork should I bring?", observation);
+
+  const recovered = restart();
+  const replay = recovered.addFollowUp(finance.id, firstTurn.message, observation);
+  assert.equal(replay.id, firstTurn.id);
+  assert.equal(replay.duplicate, true);
+  assert.match(recovered.addFollowUp(finance.id, "Changed content", observation).ignored, /Conflicting/);
+  assert.match(recovered.addFollowUp(finance.id, "This is an outgoing reply", { ...observation, direction: "outgoing" }).ignored, /Direction/);
+  assert.match(recovered.addFollowUp(finance.id, firstTurn.message, { direction: "incoming" }).ignored, /stable/);
+  assert.notEqual(recovered.addFollowUp(finance.id, firstTurn.message, { ...observation, id: "mock-entry:02" }).id, firstTurn.id);
+  assert.notEqual(recovered.addFollowUp(second.id, firstTurn.message, observation).id, firstTurn.id);
+  assert.deepEqual(recovered.snapshot().threads.map((thread) => thread.turns.length), [3, 2]);
+});
+
+test("the benchmark transport uses the same adapter gates and times only local work", async () => {
+  const seen = [];
+  const times = [];
+  const options = {
+    respond: async (request) => {
+      seen.push(request);
+      return { status: "ready", reply: "The team can confirm the details.", actions: [{ type: "contact" }] };
+    },
+    onAdapterTime: (ms) => times.push(ms),
+  };
+  const message = "When can I return it?";
+  const history = [{ role: "user", content: "Can I return my Rent2Buy van early?" }];
+  const result = await draftMarketplaceReply({ product: "rent2buy", message, history }, options);
+  const wrongProduct = await draftMarketplaceReply({ product: "rent2buy", message: "What APR does the lender charge?", history }, options);
+  assert.match(result.reason, /referred/);
+  assert.match(wrongProduct.reason, /boundary/);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].channel, "marketplace");
+  assert.equal(seen[0].product, "rent2buy");
+  assert.deepEqual(seen[0].history, history);
+  assert.equal(times.length, 2);
+  assert.ok(times.every((ms) => Number.isFinite(ms) && ms >= 0));
+});

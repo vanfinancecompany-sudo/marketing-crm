@@ -40,11 +40,16 @@ const FIXTURES = {
 
 const HUMAN = /\b(?:complaint|refund|human|speak to (?:a person|someone|an agent|the team)|my application|application status|personal quote)\b/i;
 
-export async function draftMarketplaceReply({ product, vehicle, message, history }, { requestReply } = {}) {
+export async function draftMarketplaceReply({ product, vehicle, message, history = [] }, { requestReply, respond, onAdapterTime } = {}) {
+  const started = performance.now();
+  const finish = (result, engineMs = 0) => {
+    onAdapterTime?.(performance.now() - started - engineMs);
+    return result;
+  };
   const lane = FIXTURES[product];
-  if (!lane) return { reason: "No verified product match" };
-  if (lane.otherProduct.test(message)) return { reason: "Question crosses the listing's product boundary" };
-  if (HUMAN.test(message)) return { reason: "Customer needs the team" };
+  if (!lane) return finish({ reason: "No verified product match" });
+  if (lane.otherProduct.test(message)) return finish({ reason: "Question crosses the listing's product boundary" });
+  if (HUMAN.test(message)) return finish({ reason: "Customer needs the team" });
 
   const request = buildAskMeRequest({
     channel: "marketplace",
@@ -54,17 +59,32 @@ export async function draftMarketplaceReply({ product, vehicle, message, history
     context: { vehicle },
     capabilities: { buttons: false },
   });
+  const engineStarted = performance.now();
+  const result = respond ? await respond(request) : await fixtureAnswer(request, lane, requestReply);
+  const engineMs = performance.now() - engineStarted;
+
+  if (result?.status !== "ready" || !result.reply || /^(model_error|model_rejected)$/.test(result.diagnostics?.path)
+      || lane.otherProduct.test(result.reply)) {
+    return finish({ reason: "Ask Me could not verify a safe answer" }, engineMs);
+  }
+  if (result.actions?.some((action) => action.type === "contact")) {
+    return finish({ reason: "Ask Me referred this question to the team" }, engineMs);
+  }
+  return finish({ text: result.reply }, engineMs);
+}
+
+async function fixtureAnswer(request, lane, requestReply) {
   const timingFollowUp = /^(?:and\s+)?when\s+is\s+(?:that|it)\s+due\??$/i.test(request.message);
   const reference = referencedKnowledgeQuestion(request.message, request.history)
     || (timingFollowUp ? request.history.findLast((item) => item.role === "user")?.content || "" : "");
   const currentTopic = lane.topics.find((source) => source.terms.test(request.message));
   const topic = currentTopic || lane.topics.find((source) => source.terms.test(reference));
-  const result = await answerCustomerMessage(request, {
+  return answerCustomerMessage(request, {
     environment: {},
     links: { contact: lane.domain },
     checkDistance: async () => { throw new Error("Live postcode checks are disabled in this fixture"); },
     retrieve: async ({ product: requestedProduct }) => ({
-      passages: requestedProduct === product && topic ? [{ ...topic, heading: topic.title, type: "business_faq" }] : [],
+      passages: requestedProduct === request.product && topic ? [{ ...topic, heading: topic.title, type: "business_faq" }] : [],
       pages: [],
     }),
     requestReply: requestReply || (async (prompt) => {
@@ -75,10 +95,4 @@ export async function draftMarketplaceReply({ product, vehicle, message, history
       return { reply, action: "none" };
     }),
   });
-
-  if (result.status !== "ready" || !result.reply || /^(model_error|model_rejected)$/.test(result.diagnostics.path)) {
-    return { reason: "Ask Me could not verify a safe answer" };
-  }
-  if (result.actions.some((action) => action.type === "contact")) return { reason: "Ask Me referred this question to the team" };
-  return { text: result.reply };
 }

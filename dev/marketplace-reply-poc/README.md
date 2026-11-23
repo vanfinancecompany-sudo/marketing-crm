@@ -21,6 +21,16 @@ The starting setting is Off. Enquiries already present before enabling are exclu
 
 The fixture calls the existing Ask Me engine with the product locked to the listing and with recent confirmed exchanges only. It uses local synthetic knowledge and a deterministic model stand-in. It makes no real model, knowledge-store or postcode lookup calls. The extension still only observes and clicks inside the loopback inbox.
 
+## Compare against the live website Ask Me engine
+
+Run the existing simulator tests for effect-free validation. For a labelled synthetic benchmark of the deployed engine, run:
+
+    node dev/marketplace-reply-poc/benchmark.mjs --live-website
+
+The benchmark uses only the existing VFC and Rent2Buy website Ask Me endpoints. It creates ordinary Ask Me QA sessions and telemetry on the live sites. It sends no Marketplace messages, loads no production secrets and does not enable any transport in the local simulator. Each comparison uses separate website sessions with the same questions. The adapter uses its normal product and handoff checks. The public website session retains the conversation. Local adapter time excludes the website call and pacing delays. The measured website request includes transport, CRM session work and model inference.
+
+A simulated inbound observation can provide an explicit direction and stable message ID. The fixture rejects outgoing or identity-less observations and deduplicates the same ID within a thread, including after a restart. Same text with a different verified ID is a new message. This tests the ledger, while Facebook still needs to expose a durable incoming ID.
+
 ## Verify recovery
 
 - Open two simulated inbox tabs to exercise duplicate detection.

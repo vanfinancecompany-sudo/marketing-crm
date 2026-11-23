@@ -152,12 +152,26 @@ export function createReplySimulator(file, now = Date.now, { draftReply = draftM
       });
     },
 
-    addFollowUp(threadId, message) {
+    addFollowUp(threadId, message, observedMessage) {
       const inbound = validateMessage(message);
+      let sourceMessageId;
+      if (observedMessage !== undefined) {
+        if (observedMessage?.direction !== "incoming") return { ignored: "Direction is not verified as incoming" };
+        sourceMessageId = observedMessage.id;
+        if (typeof sourceMessageId !== "string" || !/^[a-z0-9_.:-]{1,128}$/i.test(sourceMessageId)) {
+          return { ignored: "No stable incoming message ID" };
+        }
+      }
       return change((next) => {
         const thread = next.threads.find((candidate) => candidate.id === threadId);
         if (!thread?.turns[0].message) throw new TypeError("Select a simulated Ask Me conversation");
-        return addTurn(thread, inbound, next.enabled);
+        if (sourceMessageId) {
+          const existing = thread.turns.find((turn) => turn.sourceMessageId === sourceMessageId);
+          if (existing) return existing.message === inbound ? { ...existing, duplicate: true } : { ignored: "Conflicting data for an observed message ID" };
+        }
+        const turn = addTurn(thread, inbound, next.enabled);
+        if (sourceMessageId) turn.sourceMessageId = sourceMessageId;
+        return turn;
       });
     },
 

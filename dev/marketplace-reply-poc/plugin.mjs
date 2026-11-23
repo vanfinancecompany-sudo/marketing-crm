@@ -69,8 +69,10 @@ export function createFixtureMiddleware(stateFile) {
           break;
         case "/incoming":
           return json(201, simulator.addEnquiry(input.scenario, input.message));
-        case "/follow-up":
-          return json(201, simulator.addFollowUp(input.threadId, input.message));
+        case "/follow-up": {
+          const turn = simulator.addFollowUp(input.threadId, input.message, input.observedMessage);
+          return json(turn.ignored || turn.duplicate ? 200 : 201, turn);
+        }
         case "/observe":
           if (!Array.isArray(input.rows) || input.rows.some((row) => !row || typeof row.threadId !== "string"
               || !Array.isArray(row.incomingIds) || !Array.isArray(row.outgoingIds))) {
