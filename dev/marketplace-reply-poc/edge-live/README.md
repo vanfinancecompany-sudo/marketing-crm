@@ -106,3 +106,16 @@ The diagnostics on extension 0.2.0 strip names and titles, so its link to the Re
 **Live Ask Me check** (`test/askme-live-check.mjs`, 13 Marketplace questions on the deployed Rent2Buy endpoint): 13 of 13 pass. Three vehicle-specific phrasings had been reaching Ask Me: a van's monthly price, details asked about "it", and requests to hold a van. The Marketplace routing in `reply-policy.mjs` now sends these to the website. Ask Me itself is unchanged.
 
 **Panel recovery fix (0.3.1).** After a page reload, Facebook keeps the Messenger panel in the page, closed and at zero size, with its Chats grid still rendered. The opener treated that hidden grid as an open panel, so it never clicked Messenger again and reported "no-marketplace-control" (live, 20:01). Now only visible lists and rows count. A hidden panel is reopened through Messenger, then Marketplace. The test page reproduces the hidden panel; with the previous code the Edge test gets stuck the same way. The pilot now refuses to start without the Marketplace list. It fails with a plain explanation after 30 s if the list disappears, or after 90 s if Edge does not report the row.
+
+## Keeping the Marketplace list open: live findings (23 Nov 2026, 20:00–21:10)
+
+| Time | Observation on the real account | Change |
+| --- | --- | --- |
+| 20:01 | After a reload, the closed Messenger panel stays in the page at zero size with its Chats grid. The opener took it for an open panel and never clicked Messenger. | 0.3.1: only visible grids and rows count. |
+| 20:15 | Self-update 0.3.0 → 0.3.1 worked with no action from the owner. The panel reopened, but clicking the Marketplace entry had no effect. | 0.3.2: click the element under the entry's centre, escalating the click method. |
+| 20:27 | No click method works while the tab is hidden. The same click worked at 19:31, when the tab had just been brought to the front. Opening the panel works hidden because Facebook pre-renders it; the Marketplace view needs rendering, which is paused in background tabs. | 0.3.3: idle-only visibility assist. |
+| 20:39:57 | Assist: the tab was shown briefly while the PC was idle, the Marketplace list opened and stayed open in the background (74 rows, monitoring yes). | Confirmed. |
+| 20:40 | Pilot on 1761408039328724: the row does not contain "Renault Master", so it was not opened. | 0.3.4: Finder; per-word mismatch report. |
+| 20:52 | Two seconds after a reload, a restored docked chat window tripped the safety stop on a Messenger-button click. The assistant opened nothing. | 0.3.5: settle 10 s after load and 8 s stable before clicking; detailed trip reasons; "Reset safety stop". |
+
+**Visibility assist rules.** It runs only after two failed Marketplace clicks, and only when Windows reports no keyboard or mouse input for 2 minutes and the Edge window is not minimised. It brings the assistant tab to the front for at most 12 s, then returns to the previous tab. It runs at most once every 10 minutes. After any page reload (Edge restart, self-update, Facebook refresh), the Marketplace view returns at the next idle moment. While the owner is actively using the PC, detection pauses until then. The popup and control page show this as "Monitoring: NO" with the reason.
