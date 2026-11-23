@@ -11,7 +11,7 @@ import {
   authoriseSend, inspectInbox, inspectThread, loadState, logEvent, publicStatus, recordDraft,
   recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
   startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot, startFind, recordFind, findTimeout,
-  migrateSafetyStop, resetSafetyStop,
+  migrateSafetyStop, resetSafetyStop, approveSend, approvedSendTimeout,
 } from "./ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -104,6 +104,7 @@ const ROUTES = {
     if (body.mode) { cancelPilot(state); setMode(state, body.mode, body); }
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);
+    if (body.approveSend) approveSend(state, body.approveSend);
     if (body.resetOpener) resetSafetyStop(state);
     return statusWithExtension();
   },
@@ -114,6 +115,7 @@ const ROUTES = {
     // page reports an empty status before it has checked the stop).
     if (state.resetOpenerRequested && body.stopFlag === false) state.resetOpenerRequested = false; // page confirmed the stop is cleared
     pilotTimeout(state);
+    approvedSendTimeout(state);
     findTimeout(state);
     return {
       mode: state.mode,

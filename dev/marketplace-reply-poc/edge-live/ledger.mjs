@@ -393,10 +393,55 @@ export function resolveProduct(listingTitle, defaultProduct) {
 }
 
 // Open-thread snapshot. Returns the customer text to answer, or a reason not to.
+// ---- Supervised send: one approved draft, word for word, to one conversation ----
+// The owner approves an exact draft (by job ID) for one conversation. The
+// assistant switches to Send restricted to that conversation, opens it, types
+// that text, re-checks with the service immediately before pressing Send,
+// confirms the outgoing message appeared, and returns to Observe whatever the
+// outcome. Nothing else is sent; a new customer message cancels it.
+export function approveSend(state, { threadId, jobId, text }) {
+  const id = String(threadId || "");
+  const thread = state.threads[id];
+  const job = thread?.jobs.find((j) => j.id === jobId);
+  if (!job || job.status !== "draft") throw new TypeError("That draft was not found or is not waiting for approval");
+  if (normalise(job.text) !== normalise(text)) throw new TypeError("The approved text does not match the draft exactly");
+  if (state.mode !== "observe") throw new TypeError("Approve the send from Observe mode");
+  if (state.heartbeat?.list !== "marketplace") throw new TypeError("The Marketplace list is not open in the assistant tab yet");
+  setMode(state, "send", { allowThreads: [id], allowAll: false });
+  state.approvedSend = { threadId: id, jobId, at: new Date().toISOString() };
+  state.pendingOpen = [id];
+  logEvent(state, "send-approved", { threadId: id, jobId });
+  return state.approvedSend;
+}
+
+function endApprovedSend(state, outcome) {
+  if (!state.approvedSend) return;
+  logEvent(state, "send-approved-end", { threadId: state.approvedSend.threadId, outcome });
+  state.approvedSend = null;
+  setMode(state, "observe");
+}
+
+export function approvedSendTimeout(state, now = Date.now()) {
+  if (state.approvedSend && now - Date.parse(state.approvedSend.at) > 180_000) endApprovedSend(state, "timed out before sending");
+}
+
 export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   const threadId = String(snapshot?.threadId || "");
   if (!THREAD_ID.test(threadId)) return { action: "none", reason: "No conversation identity" };
   if (state.mode === "off") return { action: "none", reason: "Assistant is off" };
+  const approved = state.approvedSend;
+  if (approved && approved.threadId === threadId && state.mode === "send") {
+    state.pendingOpen = state.pendingOpen.filter((id) => id !== threadId);
+    const thread = state.threads[threadId];
+    const job = thread?.jobs.find((j) => j.id === approved.jobId);
+    const seen = new Set(thread?.seen || []);
+    const newCustomer = (snapshot.messages || []).filter((m) => m?.direction === "incoming" && !seen.has(m.id) && !isFacebookNotice(m.text));
+    if (!job || job.status !== "draft") { endApprovedSend(state, "draft no longer available"); return { action: "none", reason: "Approved draft no longer available" }; }
+    if (newCustomer.length) { endApprovedSend(state, "cancelled: the customer sent a new message"); return { action: "none", reason: "New customer message since the draft" }; }
+    job.status = "claimed";
+    logEvent(state, "claim", { threadId, jobId: job.id, approved: true });
+    return { action: "send", jobId: job.id, text: job.text };
+  }
   // Observe never reads, stores or forwards message content.
   if (state.mode === "observe") return { action: "none", reason: "Observe mode is passive" };
   const flagged = state.pendingOpen.includes(threadId);
@@ -521,6 +566,7 @@ export function authoriseSend(state, jobId) {
 export function recordSendResult(state, jobId, { confirmed, outgoingId, error }) {
   const { thread, job } = findJob(state, jobId);
   if (!job) return;
+  const endApproved = state.approvedSend?.jobId === jobId;
   if (confirmed) {
     job.status = "confirmed";
     job.outgoingId = typeof outgoingId === "string" ? outgoingId.slice(0, 200) : null;
@@ -533,6 +579,7 @@ export function recordSendResult(state, jobId, { confirmed, outgoingId, error })
     thread.needsHuman = "A reply could not be confirmed" + (error ? ": " + String(error).slice(0, 120) : "");
     logEvent(state, "unconfirmed", { threadId: thread.id, jobId, error: String(error || "") });
   }
+  if (endApproved) endApprovedSend(state, confirmed ? "sent and confirmed" : "not confirmed: " + String(error || ""));
 }
 
 export function resumeThread(state, threadId) {
@@ -580,6 +627,7 @@ export function publicStatus(state) {
     monitoring: monitoringVerdict(state),
     pilot: state.pilot || null,
     finder: state.finder || null,
+    approvedSend: state.approvedSend || null,
     safetyStop: state.openerTrip || null,
     mode: state.mode,
     allowAll: state.allowAll,
