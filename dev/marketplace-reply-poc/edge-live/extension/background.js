@@ -13,10 +13,21 @@ async function settings() {
   return { home: home || DEFAULT_HOME, tabId: tabId ?? null };
 }
 
+// Profile lock: each Edge profile's copy of the extension has its own ID. The
+// service accepts monitoring and sending from the one authorised profile only.
+let instanceIdCache = null;
+async function instanceId() {
+  if (instanceIdCache) return instanceIdCache;
+  let { instanceId: id } = await chrome.storage.local.get("instanceId");
+  if (!id) { id = crypto.randomUUID(); await chrome.storage.local.set({ instanceId: id }); }
+  return (instanceIdCache = id);
+}
+let authorisedHere = null; // false when the service has authorised another profile
+
 async function api(path, body) {
   const response = await fetch(SERVICE + path, body === undefined ? { cache: "no-store" } : {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-r2b-assistant": "1" },
+    headers: { "Content-Type": "application/json", "x-r2b-assistant": "1", "x-r2b-instance": await instanceId() },
     body: JSON.stringify(body),
     cache: "no-store",
   });
@@ -93,6 +104,15 @@ async function supervise() {
     status = await api("/status");
   } catch {
     await badge(null, false);
+    return;
+  }
+  // Another Edge profile runs the assistant: this one stays idle (no tabs, no
+  // monitoring). It reports only its presence, so the owner can switch back.
+  authorisedHere = !status.authorisedInstance || status.authorisedInstance === await instanceId();
+  if (!authorisedHere) {
+    await chrome.action.setBadgeText({ text: "IDLE" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#757575" });
+    api("/instance-ping", { ext: chrome.runtime.getManifest().version }).catch(() => {});
     return;
   }
   api("/tab-census", await tabCensus()).catch(() => {});
@@ -345,7 +365,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { home, tabId } = await settings();
       const { replyTabId } = await chrome.storage.session.get("replyTabId");
       const isReply = sender.tab?.id != null && sender.tab.id === replyTabId;
-      return { assistant: sender.tab?.id === tabId || isReply, role: isReply ? "worker" : "monitor", home };
+      return { assistant: authorisedHere !== false && (sender.tab?.id === tabId || isReply), role: isReply ? "worker" : "monitor", home };
     }
     if (message.type === "open-conversation") return openReplyTab(sender.tab, message.url);
     if (message.type === "close-reply-tab") {

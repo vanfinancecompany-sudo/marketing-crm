@@ -105,15 +105,31 @@ function statusWithExtension() {
     ...status,
     // A pre-0.3.0 extension reports no version and cannot update itself.
     tabCensus: state.tabCensus || null,
+    authorisedInstance: state.authorisedInstance || null,
+    instancesSeen: state.instancesSeen || {},
     ...(process.env.R2B_TAB_CREATE_GAP_MS ? { tabCreateGapMs: Number(process.env.R2B_TAB_CREATE_GAP_MS) } : {}),
     extension: { running, expected, updatePending: Boolean(expected && state.heartbeat && running !== expected), manualReloadNeeded: Boolean(state.heartbeat && !running) },
     ...(fixture ? { fixtureHome: "http://127.0.0.1:" + PORT + "/__fb/inbox/" } : {}),
   };
 }
 
+const MONITOR_ROUTES = new Set(["/heartbeat", "/inbox", "/thread", "/go", "/sent", "/opener/permit", "/pilot/verify", "/find/result",
+  "/opener-note", "/tab-event", "/tab-census", "/assist", "/diagnostics", "/instance-ping"]);
+
 const ROUTES = {
   "GET /status": () => statusWithExtension(),
+  "POST /instance-ping": () => ({ ok: true }),
   "POST /control": async (body) => {
+    // Choose which Edge profile runs the assistant (its extension instance ID).
+    if (body.authoriseInstance) {
+      const id = String(body.authoriseInstance);
+      if (!state.instancesSeen?.[id] || id === "none") throw new Error("Unknown Edge profile instance");
+      state.authorisedInstance = id;
+      state.heartbeat = null; // wait for the newly authorised profile's own report
+      state.inboxBaseline = null;
+      state.pendingOpen = [];
+      logEvent(state, "profile-authorised", { instance: id.slice(0, 8) });
+    }
     if (body.resumeThread) resumeThread(state, String(body.resumeThread));
     if (body.cancelPilot) cancelPilot(state);
     if (body.mode === "auto" && state.mode !== "auto") {
@@ -228,6 +244,19 @@ const server = createServer(async (request, response) => {
     // which this server never approves.
     if (request.method === "POST" && request.headers["x-r2b-assistant"] !== "1") return send(response, 403, { error: "Forbidden" });
     const body = request.method === "POST" ? await readJson(request) : {};
+    // Profile lock: only the authorised Edge profile may monitor, open or send.
+    // Any other profile (for example the normal profile signed in to Vansco) is
+    // recorded as seen and told to stay idle; its reports never reach the ledger.
+    if (request.method === "POST" && MONITOR_ROUTES.has(url.pathname)) {
+      const instance = /^[0-9a-f-]{36}$/.test(String(request.headers["x-r2b-instance"] || "")) ? request.headers["x-r2b-instance"] : "none";
+      const seen = (state.instancesSeen ??= {});
+      seen[instance] = { lastAt: new Date().toISOString(), account: body.account ?? seen[instance]?.account ?? null, ext: body.ext ?? seen[instance]?.ext ?? null };
+      if (url.pathname === "/instance-ping") return send(response, 200, { ok: true });
+      if (state.authorisedInstance && instance !== state.authorisedInstance) {
+        const paused = "Another Edge profile runs the assistant";
+        return send(response, 200, url.pathname === "/thread" ? { action: "none", reason: paused } : url.pathname === "/go" ? { go: false, reason: paused } : { mode: state.mode, open: null, paused, ok: false });
+      }
+    }
     const run = async () => {
       enforceStopFile();
       const value = await route(body);
