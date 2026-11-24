@@ -61,6 +61,7 @@ import AIAssistantCompetencePage from "./pages/AIAssistantCompetencePage.jsx";
 import AIKnowledgeOpportunitiesPage from "./pages/AIKnowledgeOpportunitiesPage.jsx";
 import RealCustomerSimulationPage from "./pages/RealCustomerSimulationPage.jsx";
 import AIAssistantHealthPage from "./pages/AIAssistantHealthPage.jsx";
+import ConversationsAIPage from "./pages/ConversationsAIPage.jsx";
 import StockPage from "./pages/StockPage.jsx";
 import VanscoStockWatchPage from "./pages/VanscoStockWatchPage.jsx";
 import VanscoGoogleVehicleAdsPage from "./pages/VanscoGoogleVehicleAdsPage.jsx";
@@ -471,6 +472,7 @@ const VIEW_PATHS = {
   "AI Knowledge Opportunities": "/ai-knowledge-opportunities",
   "Real Customer Simulation": "/ai-customer-simulation",
   "AI Assistant Health": "/ai-assistant-health",
+  "Conversations & AI": "/conversations-ai",
   "Vansco Stock Watch": "/vansco-stock-watch",
   "Vansco Google Vehicle Ads": "/vansco-google-vehicle-ads",
   "Reel Factory": "/reel-factory",
@@ -501,6 +503,7 @@ function viewFromPath() {
   if (path === "/ai-knowledge-opportunities") return "AI Knowledge Opportunities";
   if (path === "/ai-customer-simulation") return "Real Customer Simulation";
   if (path === "/ai-assistant-health") return "AI Assistant Health";
+  if (path === "/conversations-ai") return "Conversations & AI";
   if (path === "/vansco-stock-watch") return "Vansco Stock Watch";
   if (path === "/vansco-google-vehicle-ads") return "Vansco Google Vehicle Ads";
   if (path === "/reel-factory") return "Reel Factory";
@@ -2777,6 +2780,8 @@ async function handleClearTodayReels() {
         return <RealCustomerSimulationPage />;
       case "AI Assistant Health":
         return <AIAssistantHealthPage />;
+      case "Conversations & AI":
+        return <ConversationsAIPage />;
       case "Vansco Stock Watch":
         return <VanscoStockWatchPage />;
       case "Vansco Google Vehicle Ads":

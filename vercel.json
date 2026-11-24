@@ -91,6 +91,10 @@
     {
       "path": "/api/vansco-email-worker",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/conversations-monitor",
+      "schedule": "*/10 * * * *"
     }
   ],
   "functions": {

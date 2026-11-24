@@ -533,6 +533,19 @@ async function continueConversation(supabase, body, environment, simulateConvers
   });
 }
 
+async function recordAskMeFailure(supabaseOverride, environment, error, body) {
+  const supabase = supabaseOverride || getSupabase(environment);
+  const message = clean(error?.message, 240);
+  const product = ["finance", "rent2buy"].includes(body?.product) ? body.product : null;
+  await Promise.race([
+    supabase.from("conversation_events").insert({
+      channel: "ask_me", source_id: `askme-failure-${randomUUID()}`, kind: "ai_failed",
+      occurred_at: new Date().toISOString(), product, reason: message || "Ask Me returned an error",
+    }),
+    new Promise((resolve) => setTimeout(resolve, 1500)),
+  ]);
+}
+
 export async function handleCustomerAssistantRequest(request, response, dependencies = {}) {
   const environment = dependencies.environment || process.env;
   const origin = requestOrigin(request);
@@ -564,6 +577,11 @@ export async function handleCustomerAssistantRequest(request, response, dependen
       exception_type: error?.name || "Error",
       message: clean(error?.message, 1000),
     });
+    // Conversations & AI monitoring: record service failures (not visitors'
+    // own rate limits or bad requests). Best effort; never changes the reply.
+    if (!known || error.statusCode >= 500) {
+      await recordAskMeFailure(dependencies.supabase, environment, error, body).catch(() => {});
+    }
     return response.status(known ? error.statusCode : 503).json(safeCustomerPayload({
       conversationId,
       status: known ? error.safeStatus : "unavailable",
