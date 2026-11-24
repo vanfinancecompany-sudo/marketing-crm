@@ -49,14 +49,17 @@ Example (`/api/muse/stock?limit=1`, values illustrative):
 }
 ```
 
-Example (`/api/muse/opportunities?limit=1`):
+Example (`/api/muse/opportunities`):
 
 ```json
 {
   "resource": "opportunities",
   "data": {
-    "count": 1,
-    "items": [{ "product": "finance", "topic": "Finance with bad credit", "priority_level": "high", "questions": 12, "unanswered": 3, "recommended_action": "create_faq" }]
+    "count": 2,
+    "items": [
+      { "product": "finance", "theme": "credit_eligibility", "topic": "Finance applications with credit difficulties", "priority_level": "high", "questions": 12, "unanswered": 3, "recommended_actions": ["create_faq"] },
+      { "product": "rent2buy", "theme": "other", "topic": "Rent2Buy: other customer questions", "questions": 5 }
+    ]
   }
 }
 ```
@@ -70,6 +73,11 @@ Example (`/api/muse/opportunities?limit=1`):
 - Rate limit: 60 requests per minute per client (per serverless instance).
 - Tests: `tests/muse-connector.test.mjs` (auth, read-only, no PII from PII-laden fixtures).
 
-Known limit: demand-theme titles are generated summaries of customer questions.
-They are scrubbed for contact details, but a person's first name typed into a
-question could in theory survive in a theme title. Report any case and it will be filtered.
+Theme titles: Muse only ever sees titles from a fixed, business-written list of
+eight themes per product (coverage, upfront costs, how it works, credit,
+applying, documents, monthly costs, vehicle choice). Intents that the learning
+engine built from a customer's own words are merged into "other customer
+questions". Knowledge Hub search text is replaced the same way (`no_result_themes`).
+Action and status fields are passed through only if they match a fixed list of values.
+
+The Muse key is used only by `/api/muse/*`. Every other CRM endpoint checks its own key, and refuses the Muse key.

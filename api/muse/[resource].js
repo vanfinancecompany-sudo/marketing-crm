@@ -9,8 +9,9 @@ import websiteAnalyticsSummary from "../website-analytics-summary.js";
 import financeApplicationFunnel from "../finance-application-funnel.js";
 import {
   RESOURCES, MUSE_KEY_HEADER, museAuthorised, rateLimited, scrubForMuse, containsPii, clampInt,
-  buildStock, buildConversationVolumes, buildOpportunities, buildCampaigns,
+  buildStock, buildConversationVolumes, buildOpportunities, buildCampaigns, searchGapThemes,
 } from "../../lib/museConnector.js";
+import { classifyLearningIntent } from "../../lib/knowledgeLearningEngine.js";
 
 const readJson = (relative) => JSON.parse(readFileSync(new URL(relative, import.meta.url), "utf8"));
 
@@ -73,6 +74,12 @@ const loaders = {
       (req, res) => handleMarketingAssistantAnalyticsRequest(req, res, { supabase, environment: { ...environment, MARKETING_CUSTOMER_DATABASE_API_KEY: nonce } }),
       { headers: { "x-marketing-customer-database-key": nonce }, query: { days: String(clampInt(query.days, 28, 1, 90)) } },
     );
+    // Search text is typed by customers: replace it with fixed themes.
+    const search = result?.summary?.knowledge_hub_search;
+    if (search) {
+      search.no_result_themes = searchGapThemes(search.top_no_result_queries, (text) => classifyLearningIntent(text, "finance").key);
+      delete search.top_no_result_queries;
+    }
     return result;
   },
 
@@ -88,10 +95,10 @@ const loaders = {
 
   async opportunities({ supabase, query }) {
     let q = supabase.from("knowledge_assistant_opportunities")
-      .select("product,title,category,status,priority_level,priority_score,question_count,unanswered_count,weak_answer_count,first_seen_at,last_seen_at,recommended_action,suggested_article_title")
+      .select("product,normalised_intent,status,priority_level,priority_score,question_count,unanswered_count,weak_answer_count,first_seen_at,last_seen_at,recommended_action")
       .neq("status", "dismissed")
       .order("priority_score", { ascending: false })
-      .limit(clampInt(query.limit, 50, 1, 200));
+      .limit(clampInt(query.limit, 200, 1, 500));
     if (["finance", "rent2buy"].includes(query.product)) q = q.eq("product", query.product);
     return buildOpportunities(rows(await q));
   },
