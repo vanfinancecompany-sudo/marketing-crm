@@ -100,7 +100,7 @@ export function permitOpenerClick(state, now = Date.now()) {
   const a = (state.openerAttempts ??= { count: 0, lastAt: 0 });
   const delay = a.count ? Math.min(20_000 * 2 ** (a.count - 1), 600_000) : 0;
   // During an owner-requested show the delay is skipped; the attempt still counts.
-  const ownerShow = state.showUntil && now < Date.parse(state.showUntil);
+  const ownerShow = (state.showUntil && now < Date.parse(state.showUntil)) || state.heartbeat?.visibility === "visible";
   if (!ownerShow && now - a.lastAt < delay) return { ok: false, reason: "waiting for the retry delay" };
   if (a.count >= OPENER_MAX_ATTEMPTS) {
     state.openerHold = { at: new Date(now).toISOString(), reason: "The Marketplace list could not be opened after " + OPENER_MAX_ATTEMPTS + " attempts. Press \"Reset safety stop\" to try again." };
