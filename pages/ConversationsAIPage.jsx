@@ -27,6 +27,12 @@ export default function ConversationsAIPage() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
   const [days, setDays] = useState(7);
+  const [viewAll, setViewAll] = useState(false);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [activityPage, setActivityPage] = useState(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState("");
 
   async function refresh(range = days) {
     setError("");
@@ -63,6 +69,40 @@ export default function ConversationsAIPage() {
     return [...facebook, ...askMe].filter((e) => filter === "all" || e.channel === filter).sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at))).slice(0, 80);
   }, [data, filter]);
 
+  // Detailed history is loaded only when requested. Search and paging run on
+  // the server across retained Ask Me turns and Facebook events, not the
+  // dashboard's short recent-activity preview.
+  useEffect(() => {
+    if (!viewAll || accessStatus !== "unlocked") return undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setActivityLoading(true);
+      setActivityError("");
+      try {
+        const params = new URLSearchParams({ days: String(days), page: String(page), channel: filter, search });
+        const response = await fetch(`/api/conversations-activity?${params}`, {
+          headers: { [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey() },
+          signal: controller.signal,
+        });
+        if (response.status === 401) { clearMarketingAccessKey(); setAccessStatus("locked"); return; }
+        if (!response.ok) throw new Error("Conversation history could not be loaded.");
+        if (!controller.signal.aborted) setActivityPage(await response.json());
+      } catch (caught) {
+        if (!controller.signal.aborted) setActivityError(caught.message);
+      } finally {
+        if (!controller.signal.aborted) setActivityLoading(false);
+      }
+    }, search ? 300 : 0);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [viewAll, accessStatus, filter, days, page, search, data?.generatedAt]);
+
+  function collapseActivity() {
+    setViewAll(false);
+    setSearch("");
+    setPage(1);
+    setActivityPage(null);
+  }
+
   if (accessStatus !== "unlocked") return <div className="page-stack"><section className="operations-summary competence-hero"><div><div className="eyebrow">Protected internal tool</div><h2>Conversations &amp; AI</h2><p>Use the established Marketing CRM access key.</p></div></section><form className="panel" onSubmit={unlock}><label className="field"><span className="field__label">Marketing CRM access key</span><input className="field__input" type="password" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} /></label><button className="button button--primary">Unlock</button>{error ? <div className="notice notice--error">{error}</div> : null}</form></div>;
 
   const ch = data?.channels;
@@ -88,9 +128,57 @@ export default function ConversationsAIPage() {
       <section className="panel"><div className="panel__header"><div><div className="eyebrow">Facebook · Marketplace assistant</div><h3>Automatic replies</h3></div></div>
         <div className="competence-metrics"><Metric label="Received" value={num(fb.counts.received)} /><Metric label="Answered (delivery confirmed)" value={num(fb.counts.answered)} /><Metric label="Needing a person" value={num(fb.counts.needs_human)} /><Metric label="Send / confirmation failures" value={num(fb.counts.send_failed)} /><Metric label="Ask Me failures" value={num(fb.counts.ai_failed)} /><Metric label="Auto replies today (assistant)" value={num(fb.detail?.autoRepliesToday)} /></div>
       </section>
-      <section className="panel"><div className="panel__header"><div><div className="eyebrow">Recent activity</div><h3>Questions and AI replies</h3></div>
-        <select className="field__input" style={{ maxWidth: 240 }} value={filter} onChange={(e) => setFilter(e.target.value)}><option value="all">All channels</option><option value="ask_me">Ask Me</option><option value="facebook_marketplace">Facebook Marketplace</option></select></div>
-        {activity.length ? <div className="competence-report-list">{activity.map((e, i) => <div key={i}><strong>{fmt(e.occurred_at)} · {CHANNEL_LABELS[e.channel] || e.channel} · {KIND_TEXT[e.kind] || e.kind}{e.product ? ` · ${e.product === "rent2buy" ? "Rent2Buy" : "Finance"}` : ""}</strong>{e.question_excerpt ? <p><b>Customer:</b> {e.question_excerpt}</p> : null}{e.reply_excerpt ? <p><b>AI reply:</b> {e.reply_excerpt}</p> : null}{e.reason ? <p><b>Note:</b> {e.reason}</p> : null}</div>)}</div> : <div className="notice">No activity in this period.</div>}
+      <section className="panel">
+        <div className="panel__header">
+          <div><div className="eyebrow">Recent activity</div><h3>Questions and AI replies</h3></div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input className="field__input" aria-label="Search conversation questions and replies"
+              style={{ width: 240, maxWidth: "100%" }} placeholder="Search questions or replies"
+              value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); setViewAll(true); }} />
+            <select className="field__input" style={{ maxWidth: 220 }} value={filter}
+              onChange={(e) => { setFilter(e.target.value); setPage(1); }}>
+              <option value="all">All channels</option>
+              <option value="ask_me">Ask Me</option>
+              <option value="facebook_marketplace">Facebook Marketplace</option>
+            </select>
+          </div>
+        </div>
+        {viewAll && activityError ? <div className="notice notice--error">{activityError}</div> : null}
+        {viewAll && activityLoading && !activityPage ? <div className="notice">Loading conversation history…</div> : null}
+        {(() => {
+          const visible = viewAll ? (activityPage?.entries || []) : activity.slice(0, 5);
+          return visible.length ?
+            <div className="competence-report-list">{visible.map((e, i) =>
+              <div key={`${e.channel}-${e.occurred_at}-${e.sequence || 0}-${i}`}>
+                <strong>{fmt(e.occurred_at)} · {CHANNEL_LABELS[e.channel] || e.channel} · {KIND_TEXT[e.kind] || e.kind}{e.product ? ` · ${e.product === "rent2buy" ? "Rent2Buy" : "Finance"}` : ""}</strong>
+                {e.question_excerpt ? <p><b>Customer:</b> {e.question_excerpt}</p> : null}
+                {e.reply_excerpt ? <p><b>AI reply:</b> {e.reply_excerpt}</p> : null}
+                {e.reason ? <p><b>Note:</b> {e.reason}</p> : null}
+              </div>
+            )}</div> :
+            <div className="notice">{viewAll && activityLoading ? "Loading…" : "No matching activity in this period."}</div>;
+        })()}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 16 }}>
+          {!viewAll ? <button type="button" className="button" onClick={() => { setPage(1); setViewAll(true); }}>View all conversations</button> : <>
+            <button type="button" className="button" onClick={collapseActivity}>Show less (latest 5)</button>
+            {activityPage ? <>
+              <span className="muted">{activityPage.total.toLocaleString()} matching entries · 20 per page</span>
+              <button type="button" className="button" disabled={page <= 1 || activityLoading}
+                onClick={() => setPage(Math.max(1, page - 1))}>Previous</button>
+              {Array.from({ length: Math.min(5, activityPage.totalPages) }, (_, i) => {
+                const first = Math.max(1, Math.min(activityPage.totalPages - 4, page - 2));
+                const number = first + i;
+                return <button type="button" key={number} className={number === page ? "button button--primary" : "button"}
+                  aria-label={`Page ${number}`} disabled={activityLoading}
+                  onClick={() => setPage(number)}>{number}</button>;
+              })}
+              <button type="button" className="button" disabled={page >= activityPage.totalPages || activityLoading}
+                onClick={() => setPage(Math.min(activityPage.totalPages, page + 1))}>Next</button>
+              <span className="muted">Page {activityPage.page} of {activityPage.totalPages}</span>
+              {activityPage.truncated ? <span className="notice notice--warning">History limit reached. Narrow the date range to see older entries.</span> : null}
+            </> : null}
+          </>}
+        </div>
       </section>
       <p className="muted">Updated {fmt(data.generatedAt)}. Excerpts are shortened and contact details are removed. Meta Muse and Facebook Page Messenger are future additions.</p>
     </>}
