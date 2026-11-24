@@ -196,3 +196,16 @@ test("the Muse key is used by the Muse endpoint only", async () => {
   walk(".");
   assert.deepEqual(hits.sort(), ["api/muse.js", "lib/museConnector.js"]);
 });
+
+test("website analytics keeps numbers and fixed step names only", async () => {
+  const { pickWebsiteAnalytics } = await import("../lib/museConnector.js");
+  const out = pickWebsiteAnalytics(
+    { current: { startDate: "2026-11-17", endDate: "2026-11-23", summary: { "traffic.sessions_count": 120 } }, notes: ["x"] },
+    { reaches: 10, starts: 5, completions: 2, failureReasons: { [`Invalid email ${PII.email}`]: 1 }, unresolvedFailures: [{ reason: PII.phone }],
+      steps: [{ name: "About you", viewed: 4, blocked: 1, reachedPct: 0.8 }, { name: PII.name, viewed: 1 }], blockedDevices: { mobile: 1, [PII.email]: 1 } },
+  );
+  assert.equal(out.traffic_last_7_days.summary.sessions_count, 120);
+  assert.deepEqual(out.finance_application_funnel_today.steps.map((s) => s.step), ["About you"]);
+  assert.ok(!containsPii(out));
+  assert.ok(!JSON.stringify(out).includes("Jane"));
+});

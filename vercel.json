@@ -98,6 +98,9 @@
     }
   ],
   "functions": {
+    "api/muse.js": {
+      "includeFiles": "docs/{muse-connector.openapi.json,JASMIN_MARKETING_CRM_CAPABILITY_MAP_V1.json}"
+    },
     "api/application-received-event-retry.js": {
       "maxDuration": 30
     },

@@ -9,7 +9,7 @@ import websiteAnalyticsSummary from "./website-analytics-summary.js";
 import financeApplicationFunnel from "./finance-application-funnel.js";
 import {
   RESOURCES, MUSE_KEY_HEADER, museAuthorised, rateLimited, scrubForMuse, containsPii, clampInt,
-  buildStock, buildConversationVolumes, buildOpportunities, buildCampaigns, searchGapThemes,
+  buildStock, buildConversationVolumes, buildOpportunities, buildCampaigns, searchGapThemes, pickWebsiteAnalytics,
 } from "../lib/museConnector.js";
 import { classifyLearningIntent } from "../lib/knowledgeLearningEngine.js";
 
@@ -63,7 +63,7 @@ const loaders = {
 
   async "website-analytics"() {
     const [traffic, funnel] = await Promise.all([callHandler(websiteAnalyticsSummary), callHandler(financeApplicationFunnel)]);
-    return { traffic, finance_application_funnel_today: funnel };
+    return pickWebsiteAnalytics(traffic, funnel);
   },
 
   async "ask-me"({ supabase, query, environment }) {
