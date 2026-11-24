@@ -16,11 +16,12 @@ function allowed(request, environment) {
 }
 
 async function email(environment, subject, lines) {
-  const to = environment.CONVERSATIONS_ALERT_EMAIL;
+  // Existing SendGrid set-up: the alert address, else the configured SendGrid recipient.
+  const to = environment.CONVERSATIONS_ALERT_EMAIL || environment.SENDGRID_TEST_RECIPIENT_EMAIL;
   if (!to || !environment.SENDGRID_API_KEY) return false;
   await sendSendGridEmail({
     apiKey: environment.SENDGRID_API_KEY, to, subject: `[Conversations & AI] ${subject}`,
-    html: `<p>${lines.map(esc).join("</p><p>")}</p><p><a href="https://crm-roan-rho.vercel.app/conversations-ai">Open Conversations &amp; AI</a></p>`,
+    html: `<p>${lines.map(esc).join("</p><p>")}</p><p><a href="https://${esc(environment.VERCEL_PROJECT_PRODUCTION_URL || "marketing-crm-six.vercel.app")}/conversations-ai">Open Conversations &amp; AI</a></p>`,
     text: lines.join("\n"), categories: ["conversations-monitor"],
   });
   return true;
