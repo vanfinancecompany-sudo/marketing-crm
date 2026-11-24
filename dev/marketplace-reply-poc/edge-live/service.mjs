@@ -173,7 +173,7 @@ const ROUTES = {
     return { ok: true };
   },
   "POST /tab-census": (body) => {
-    const census = { at: new Date().toISOString(), tabs: Number(body.tabs) || 0, facebookTabs: Number(body.facebookTabs) || 0, pinnedFacebookTabs: Number(body.pinnedFacebookTabs) || 0, assistantTabId: body.assistantTabId ?? null, assistantTitleMarked: body.assistantTitleMarked ?? null };
+    const census = { at: new Date().toISOString(), tabs: Number(body.tabs) || 0, facebookTabs: Number(body.facebookTabs) || 0, pinnedFacebookTabs: Number(body.pinnedFacebookTabs) || 0, assistantTabId: body.assistantTabId ?? null, assistantTitleMarked: body.assistantTitleMarked ?? null, assistantUrl: typeof body.assistantUrl === "string" ? body.assistantUrl.slice(0, 120) : null, assistantStatus: typeof body.assistantStatus === "string" ? body.assistantStatus.slice(0, 20) : null };
     const prev = state.tabCensus;
     if (prev && (prev.facebookTabs !== census.facebookTabs || prev.pinnedFacebookTabs !== census.pinnedFacebookTabs)) {
       logEvent(state, "tab-census-change", { facebookTabs: prev.facebookTabs + " -> " + census.facebookTabs, pinnedFacebookTabs: prev.pinnedFacebookTabs + " -> " + census.pinnedFacebookTabs });

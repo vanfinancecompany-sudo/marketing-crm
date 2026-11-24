@@ -107,8 +107,27 @@ async function supervise() {
   if (!tab) return;
   // Nudge the content script; background timers are throttled by the browser.
   chrome.tabs.sendMessage(tab.id, { type: "tick" }).catch(() => {});
-  if (hb && Date.now() - Date.parse(hb.at) > STALE_HEARTBEAT_MS && !tab.status?.includes("loading")) {
-    await chrome.tabs.reload(tab.id);
+  // Silent tab (no report for 3 minutes). Live (24 Nov 13:38): after a Facebook
+  // sign-out and sign-in in the assistant tab, its page script stopped and the
+  // tab was never revived. Now: a tab that left Facebook goes back to the
+  // Marketplace page; otherwise it is reloaded, even if Edge still reports it as
+  // loading once it has been silent for 6 minutes. At most once every 90 s.
+  const silentMs = hb ? Date.now() - Date.parse(hb.at) : 0;
+  if (silentMs > STALE_HEARTBEAT_MS) {
+    const { lastRecoverAt = 0 } = await chrome.storage.session.get("lastRecoverAt");
+    if (Date.now() - lastRecoverAt > 90_000) {
+      const { home } = await settings();
+      const onFacebook = /^https:\/\/www\.facebook\.com\/|^http:\/\/127\.0\.0\.1:\d+\/__fb\//.test(tab.url || tab.pendingUrl || "");
+      if (!onFacebook) {
+        await chrome.storage.session.set({ lastRecoverAt: Date.now() });
+        await chrome.tabs.update(tab.id, { url: home });
+        tabEvent("assistant-tab-recovered", { tabId: tab.id, how: "returned to the Marketplace page", url: urlPattern(tab.url || tab.pendingUrl || "") });
+      } else if (!tab.status?.includes("loading") || silentMs > 2 * STALE_HEARTBEAT_MS) {
+        await chrome.storage.session.set({ lastRecoverAt: Date.now() });
+        await chrome.tabs.reload(tab.id);
+        tabEvent("assistant-tab-recovered", { tabId: tab.id, how: "reloaded", status: tab.status || "", url: urlPattern(tab.url || "") });
+      }
+    }
   }
 }
 
@@ -236,7 +255,8 @@ async function tabCensus() {
   const { tabId } = await chrome.storage.session.get("tabId");
   const assistant = tabs.find((t) => t.id === tabId);
   return { tabs: tabs.length, facebookTabs: facebook.length, pinnedFacebookTabs: facebook.filter((t) => t.pinned).length, assistantTabId: tabId ?? null,
-    assistantTitleMarked: assistant ? (assistant.title || "").startsWith("[Assistant]") : null };
+    assistantTitleMarked: assistant ? (assistant.title || "").startsWith("[Assistant]") : null,
+    assistantUrl: assistant ? urlPattern(assistant.url || assistant.pendingUrl || "") : null, assistantStatus: assistant?.status || null };
 }
 
 // ---- Owner-requested: show the assistant tab for a few seconds ----
