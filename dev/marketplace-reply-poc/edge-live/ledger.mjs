@@ -93,8 +93,8 @@ export function accountProblem(state) {
 
 // ---- Retry limit for opening the Marketplace list ----
 // Every list-opening click needs the service's permission. Delays grow from 20 s
-// to 10 min; after 8 failed attempts the opener is on hold until the owner resets
-// it. Counted here, so reloads and restarts cannot start a fresh series.
+// to 10 min; after 8 failed attempts the opener retries on a 30-minute hold.
+// Counted here, so reloads and restarts cannot start a fresh series.
 const OPENER_MAX_ATTEMPTS = 8;
 const OPENER_HOLD_RETRY_MS = 1_800_000;
 export function permitOpenerClick(state, now = Date.now()) {
@@ -220,6 +220,12 @@ export function recordHeartbeat(state, { health, visibility, url, rows, unread, 
   if (/^tripped: /.test(String(opener || "")) && !state.openerTrip) {
     state.openerTrip = { at: new Date().toISOString(), reason: String(opener).replace(/^tripped: /, "").replace(/; opener disabled$/, "").slice(0, 200) };
     logEvent(state, "safety-stop", { reason: state.openerTrip.reason });
+  }
+  if (state.openerHold && !state.openerTrip && !/^disabled/.test(state.heartbeat.opener) &&
+      state.heartbeat.health === "healthy" && state.heartbeat.list === "marketplace" &&
+      state.heartbeat.rows > 0 && !accountProblem(state)) {
+    state.openerHold = null;
+    logEvent(state, "opener-hold-resolved", { rows: state.heartbeat.rows });
   }
   if (state.mode !== "off" && opener && opener !== previous?.opener && !/^(?:present|waiting)/.test(opener)) {
     const last = state.events.findLast((e) => e.type === "list-opener");

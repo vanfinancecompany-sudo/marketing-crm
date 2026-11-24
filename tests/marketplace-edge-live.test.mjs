@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  authoriseSend, emptyState, inspectInbox, inspectThread, loadState, publicStatus, recordDraft,
+  authoriseSend, emptyState, inspectInbox, inspectThread, loadState, publicStatus, recordDraft, recordHeartbeat,
   recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict, pilotTimeout,
 } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
 import { liveResponder } from "../dev/marketplace-reply-poc/edge-live/askme-live.mjs";
@@ -256,6 +256,31 @@ test("the monitoring verdict explains in plain words why monitoring is not worki
   inspectInbox(state, [{ id: "1", unread: false, pos: 0 }], { list: "marketplace" });
   assert.deepEqual(monitoringVerdict(state), { ok: true, reasons: [] });
   assert.match(monitoringVerdict(state, Date.now() + 300_000).reasons[0], /No report from the Edge assistant tab/);
+});
+
+test("a healthy Marketplace list for the locked account clears only the retry hold", () => {
+  const state = enabled("observe");
+  state.authorisedAccount = "111";
+  state.openerHold = { at: new Date().toISOString(), reason: "Retry hold" };
+  const recovered = { health: "healthy", account: "111", list: "marketplace", rows: 12, visibility: "hidden", opener: "present" };
+
+  recordHeartbeat(state, { ...recovered, account: "222" });
+  assert.ok(state.openerHold);
+  recordHeartbeat(state, { ...recovered, rows: 0 });
+  assert.ok(state.openerHold);
+  recordHeartbeat(state, { ...recovered, opener: "tripped: conversation opened" });
+  assert.ok(state.openerHold);
+  recordHeartbeat(state, recovered);
+  assert.ok(state.openerTrip, "a later ready list must preserve a real safety stop");
+  assert.ok(state.openerHold);
+
+  const retryOnly = enabled("observe");
+  retryOnly.authorisedAccount = "111";
+  retryOnly.openerHold = { at: new Date().toISOString(), reason: "Retry hold" };
+  recordHeartbeat(retryOnly, recovered);
+  assert.equal(retryOnly.openerHold, null);
+  assert.equal(monitoringVerdict(retryOnly).ok, true);
+  assert.ok(retryOnly.events.some((event) => event.type === "opener-hold-resolved"));
 });
 
 test("switching off between the claim and the send control cancels the send", () => {
