@@ -311,6 +311,58 @@ setInterval(() => {
   saveState(STATE_FILE, state);
 }, 60_000);
 
+// CRM reporting (Conversations & AI page): every minute, push a heartbeat and
+// new ledger events to the hosted CRM. Read-only use of the ledger; failures
+// are ignored and can never affect replies. Configured by crm-report.json
+// ({ "url": ".../api/conversations-report", "token": "..." }) next to the state
+// file; without it nothing is sent.
+const CRM_REPORT_FILE = join(dirname(STATE_FILE), "crm-report.json");
+const REPORT_KIND = { incoming: "received", sent: "answered", unconfirmed: "send_failed", escalate: "needs_human" };
+function crmReportPayload() {
+  const status = statusWithExtension();
+  const cursor = state.crmReportCursor || new Date(Date.now() - 6 * 3_600_000).toISOString();
+  const findJob = (thread, jobId) => thread?.jobs?.find((j) => j.id === jobId);
+  const events = state.events.filter((e) => e.at > cursor && REPORT_KIND[e.type] && e.threadId).map((e) => {
+    const thread = state.threads[e.threadId];
+    const job = e.jobId ? findJob(thread, e.jobId) : null;
+    return {
+      id: `fbm:${e.type}:${e.at}:${e.threadId}`, kind: REPORT_KIND[e.type], at: e.at, product: thread?.product || null,
+      conversation: String(e.threadId).slice(-6), question: job?.customer || null, reply: e.type === "sent" ? job?.text || null : null,
+      reason: e.reason || e.error || null,
+    };
+  });
+  return {
+    cursor: state.events.at(-1)?.at || cursor,
+    body: {
+      heartbeat: {
+        monitoring: status.monitoring.ok, reasons: status.monitoring.reasons, mode: status.mode,
+        list: status.heartbeat?.list, tabVisibility: status.heartbeat?.visibility, tabReportedAt: status.heartbeat?.at,
+        extension: status.extension?.running, accountLocked: Boolean(status.account?.authorised && !status.account?.problem),
+        accountProblem: status.account?.problem || null, safetyStop: status.safetyStop?.reason || null,
+        openerHold: status.openerHold?.reason || null, autoRepliesToday: status.auto?.sentToday ?? null,
+        needsHuman: status.counts?.needsHuman ?? null,
+      },
+      events,
+    },
+  };
+}
+setInterval(async () => {
+  try {
+    if (fixture || !existsSync(CRM_REPORT_FILE)) return;
+    const { url, token } = JSON.parse(readFileSync(CRM_REPORT_FILE, "utf8"));
+    if (!/^https:\/\//.test(String(url)) || !token) return;
+    const { cursor, body } = crmReportPayload();
+    const response = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10_000),
+    });
+    state.crmReportLast = { at: new Date().toISOString(), ok: response.ok, status: response.status };
+    if (response.ok) state.crmReportCursor = cursor;
+  } catch (error) {
+    state.crmReportLast = { at: new Date().toISOString(), ok: false, error: String(error?.message || error).slice(0, 120) };
+  }
+}, 60_000);
+
 server.listen(PORT, "127.0.0.1", () => {
   console.log(JSON.stringify({ event: "listening", port: PORT, stateFile: STATE_FILE, mode: state.mode, sendWasOn, stub: STUB }));
 });
