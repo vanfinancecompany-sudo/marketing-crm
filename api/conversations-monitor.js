@@ -51,7 +51,7 @@ export async function runConversationsMonitor(db, { environment = process.env, n
     // Email significant problems once, after they persist for a second check
     // (avoids alerts for momentary blips such as a page reload).
     if (item.severity === "critical" && !row.emailed_at && previous) {
-      if (await sendEmail(environment, `Problem: ${item.title}`, [item.title, item.detail || "", `First seen ${row.first_seen_at}`]).catch(() => false)) row.emailed_at = stamp;
+      if (await sendEmail(environment, `Problem: ${item.title}`, [item.title, item.detail || "", `First seen ${row.first_seen_at}`]).catch((error) => { console.error("CONVERSATIONS ALERT EMAIL FAILED", String(error?.message || error).slice(0, 300), error?.providerStatusCode || ""); return false; })) row.emailed_at = stamp;
       opened.push(item.fingerprint);
     }
     await db.from("conversation_monitor_alerts").upsert(row, { onConflict: "fingerprint" });
@@ -60,7 +60,7 @@ export async function runConversationsMonitor(db, { environment = process.env, n
   for (const row of open.values()) {
     const update = { status: "resolved", resolved_at: stamp };
     if (row.emailed_at && !row.recovery_emailed_at) {
-      if (await sendEmail(environment, `Recovered: ${row.title}`, [`Back to normal: ${row.title}`, `Problem lasted from ${row.first_seen_at} to ${stamp}`]).catch(() => false)) update.recovery_emailed_at = stamp;
+      if (await sendEmail(environment, `Recovered: ${row.title}`, [`Back to normal: ${row.title}`, `Problem lasted from ${row.first_seen_at} to ${stamp}`]).catch((error) => { console.error("CONVERSATIONS ALERT EMAIL FAILED", String(error?.message || error).slice(0, 300), error?.providerStatusCode || ""); return false; })) update.recovery_emailed_at = stamp;
       recovered.push(row.fingerprint);
     }
     await db.from("conversation_monitor_alerts").update(update).eq("fingerprint", row.fingerprint);
