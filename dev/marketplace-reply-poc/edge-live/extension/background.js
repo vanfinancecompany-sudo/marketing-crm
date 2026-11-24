@@ -44,52 +44,135 @@ async function isMarked(tabId) {
   }
 }
 
-// After an Edge restart tab IDs change. Adopt the restored assistant tab (it
-// carries a session marker) instead of opening a duplicate.
-// A tab the assistant created or adopted earlier in this Edge session is
-// re-adopted even if its page does not answer (busy or reloading). The marker
-// check is retried, and at most one new tab is created per 10 minutes.
+// The fragment lets Edge restore the designation before the content script can
+// answer (for example, in a discarded tab). The browser never sends it in HTTP
+// requests. Only IDs returned by our own create calls qualify for auto-close.
 const CREATE_GAP_MS = 600_000;
+function monitorUrl(home, key) {
+  if (!key) return home;
+  const url = new URL(home);
+  url.hash = "r2b-monitor=" + key;
+  return url.href;
+}
+
+function isMonitorUrl(url, home) {
+  try {
+    const actual = new URL(url);
+    const expected = new URL(home);
+    return actual.origin === expected.origin && actual.pathname.replace(/\/$/, "") === expected.pathname.replace(/\/$/, "");
+  } catch {
+    return false;
+  }
+}
+
+async function restoreMonitorTab(home, key) {
+  // Requery each time so tabs materialising during session restore can be found.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 1_500));
+    const candidates = (await chrome.tabs.query({ windowType: "normal" }))
+      .filter((tab) => !tab.incognito && isMonitorUrl(tab.pendingUrl || tab.url, home));
+    const marker = "#r2b-monitor=" + key;
+    const keyed = key ? candidates.filter((tab) => new URL(tab.pendingUrl || tab.url).hash === marker) : [];
+    if (keyed.length === 1) return keyed[0];
+    // A copied URL or cloned tab can make the designation ambiguous.
+    if (keyed.length > 1) continue;
+    const marked = await Promise.all(candidates.filter((tab) => tab.pinned && !tab.discarded)
+      .map(async (tab) => (await isMarked(tab.id)) ? tab : null));
+    const matches = marked.filter(Boolean);
+    if (matches.length === 1) return matches[0];
+  }
+  return null;
+}
+
+async function closeDuplicateMonitorTabs(tabs, keep, home, replyTabId) {
+  const owned = [];
+  for (const candidate of tabs) {
+    const { id } = candidate;
+    const tab = id === keep.id || id === replyTabId ? null : await chrome.tabs.get(id).catch(() => null);
+    if (!tab?.pinned || !isMonitorUrl(tab.url, home) || (tab.pendingUrl && !isMonitorUrl(tab.pendingUrl, home))) {
+      owned.push(id);
+      continue;
+    }
+    const win = await chrome.windows.get(tab.windowId).catch(() => null);
+    if (win?.type !== "normal" || tab.incognito) {
+      owned.push(id);
+      continue;
+    }
+    try {
+      await chrome.tabs.remove(id);
+      tabEvent("assistant-tab-duplicate-closed", { tabId: id, keptTabId: keep.id });
+    } catch {
+      owned.push(id); // A later pass can retry without losing ownership.
+    }
+  }
+  return owned;
+}
+
 async function ensureTab(status = {}) {
-  const { home, tabId } = await settings();
-  let tab = tabId === null ? null : await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab) {
-    const { ourTabs = [] } = await chrome.storage.session.get("ourTabs");
-    for (const id of ourTabs.slice().reverse()) {
-      tab = await chrome.tabs.get(id).catch(() => null);
-      if (tab) { tabEvent("assistant-tab-adopted", { tabId: tab.id, previousTabId: tabId, how: "tab the assistant created or adopted earlier" }); break; }
-    }
+  const { home } = await settings();
+  const { tabId, createdMonitorTabIds = [], replyTabId } = await chrome.storage.session.get(["tabId", "createdMonitorTabIds", "replyTabId"]);
+  const dedicated = status.dedicatedProfile === true;
+  let { monitorTabKey } = dedicated ? await chrome.storage.local.get("monitorTabKey") : {};
+  const normalTabs = (await chrome.tabs.query({ windowType: "normal" })).filter((tab) => !tab.incognito);
+  const ownedTabs = normalTabs.filter((tab) => createdMonitorTabIds.includes(tab.id));
+  let tab = normalTabs.find((candidate) => candidate.id === tabId && candidate.id !== replyTabId) ||
+    ownedTabs.find((candidate) => candidate.id !== replyTabId);
+  if (!tab && tabId == null) {
+    tab = await restoreMonitorTab(home, monitorTabKey);
   }
+  const adopted = tab && tab.id !== tabId;
   if (!tab) {
-    const candidates = await chrome.tabs.query({ pinned: true, url: ["https://www.facebook.com/*", "http://127.0.0.1:4618/__fb/*"] });
-    for (let attempt = 0; attempt < 3 && !tab; attempt++) {
-      if (attempt) await new Promise((r) => setTimeout(r, 1_500));
-      for (const candidate of candidates) {
-        if (candidate.discarded) continue;
-        if (await isMarked(candidate.id)) { tab = candidate; break; }
-      }
-    }
-    if (tab) tabEvent("assistant-tab-adopted", { tabId: tab.id, previousTabId: tabId, how: "pinned tab carrying the assistant marker", candidates: candidates.length });
-  }
-  if (!tab) {
-    const { lastTabCreatedAt = 0 } = await chrome.storage.local.get("lastTabCreatedAt");
-    if (Date.now() - lastTabCreatedAt < (status.tabCreateGapMs ?? CREATE_GAP_MS)) {
+    const { lastTabCreatedAt: previousCreation = 0 } = await chrome.storage.local.get("lastTabCreatedAt");
+    if (Date.now() - previousCreation < (status.tabCreateGapMs ?? CREATE_GAP_MS)) {
       tabEvent("assistant-tab-not-created", { previousTabId: tabId, why: "a tab was created less than 10 minutes ago" });
       return null;
     }
-    await chrome.storage.local.set({ lastTabCreatedAt: Date.now() });
+    const lastTabCreatedAt = Date.now();
+    // Use a fresh designation for a replacement so copies of the old tab
+    // cannot be claimed as the monitor on a later restoration.
+    if (dedicated) {
+      monitorTabKey = crypto.randomUUID();
+      await chrome.storage.local.set({ lastTabCreatedAt, monitorTabKey });
+    } else {
+      await chrome.storage.local.set({ lastTabCreatedAt });
+    }
+    await chrome.storage.session.remove("tabId");
     // The only place the assistant ever creates a tab.
     const reason = tabId === null ? "no assistant tab recorded in this Edge session" : "recorded assistant tab " + tabId + " no longer exists";
-    creatingTab = { reason, at: Date.now() };
-    // In the dedicated assistant profile the tab is the active one in its window.
-    tab = await chrome.tabs.create({ url: home, pinned: true, active: status.dedicatedProfile === true });
+    const url = monitorUrl(home, monitorTabKey);
+    creatingTab = { reason, url, at: Date.now() };
+    const windows = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter((win) => win.type === "normal" && !win.incognito);
+    const window = windows.find((win) => win.focused) || windows[0];
+    if (window) {
+      tab = await chrome.tabs.create({ windowId: window.id, url, pinned: true, active: dedicated });
+    } else {
+      // A running Facebook desktop app is a different window type.
+      const created = await chrome.windows.create({ type: "normal", url, focused: false });
+      [tab] = created.tabs || await chrome.tabs.query({ windowId: created.id });
+    }
+    ownedTabs.push(tab);
     tabEvent("assistant-tab-created", { tabId: tab.id, reason });
   }
-  await chrome.storage.session.set({ tabId: tab.id });
-  const { ourTabs = [] } = await chrome.storage.session.get("ourTabs");
-  if (!ourTabs.includes(tab.id)) await chrome.storage.session.set({ ourTabs: [...ourTabs, tab.id].slice(-10) });
-  if (tab.discarded) await chrome.tabs.reload(tab.id);
-  await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  const owned = ownedTabs.map((ownedTab) => ownedTab.id);
+  // Commit designation before loading or waking the tab's content script.
+  await chrome.storage.session.set({ tabId: tab.id, createdMonitorTabIds: owned });
+  if (!tab.pinned) await chrome.tabs.update(tab.id, { pinned: true }).catch(() => {});
+  if (adopted) tabEvent("assistant-tab-adopted", { tabId: tab.id, previousTabId: tabId ?? null, how: "restored monitoring tab" });
+
+  if (dedicated) {
+    const ids = await closeDuplicateMonitorTabs(ownedTabs, tab, home, replyTabId);
+    if (ids.length !== owned.length) await chrome.storage.session.set({ createdMonitorTabIds: ids });
+    const url = tab.pendingUrl || tab.url;
+    if (isMonitorUrl(url, home) && !new URL(url).hash) {
+      if (!monitorTabKey) {
+        monitorTabKey = crypto.randomUUID();
+        await chrome.storage.local.set({ monitorTabKey });
+      }
+      await chrome.tabs.update(tab.id, { url: monitorUrl(url, monitorTabKey) }).catch(() => {});
+    }
+  }
+  if (adopted || tab.discarded) await chrome.tabs.reload(tab.id).catch(() => {});
+  if (tab.autoDiscardable !== false) await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
   return tab;
 }
 
@@ -99,7 +182,14 @@ async function badge(mode, healthy) {
   await chrome.action.setBadgeBackgroundColor({ color: !healthy ? "#c62828" : mode === "send" ? "#2e7d32" : mode === "off" ? "#757575" : "#1b74e4" });
 }
 
-async function supervise() {
+// Startup, installation, alarms and popup requests share one recovery pass.
+let supervision = null;
+function supervise() {
+  if (!supervision) supervision = superviseOnce().finally(() => { supervision = null; });
+  return supervision;
+}
+
+async function superviseOnce() {
   let status;
   try {
     status = await api("/status");
@@ -124,6 +214,7 @@ async function supervise() {
   if (status.fixtureHome) await chrome.storage.local.set({ home: status.fixtureHome });
   if (await selfUpdateIfNeeded(status.extension?.expected)) return;
   if (status.mode === "off") return;
+  await restoreAfterUpdate();
   const tab = await ensureTab(status);
   if (!tab) return;
   // Dedicated assistant profile (nothing else lives there): keep the assistant
@@ -137,7 +228,8 @@ async function supervise() {
     const { home: stored } = await chrome.storage.local.get("home");
     if (stored !== status.assistantHome) {
       await chrome.storage.local.set({ home: status.assistantHome });
-      await chrome.tabs.update(tab.id, { url: status.assistantHome }).catch(() => {});
+      const { monitorTabKey } = await chrome.storage.local.get("monitorTabKey");
+      await chrome.tabs.update(tab.id, { url: monitorUrl(status.assistantHome, status.dedicatedProfile ? monitorTabKey : null) }).catch(() => {});
       tabEvent("assistant-tab-home", { tabId: tab.id, url: urlPattern(status.assistantHome) });
     }
   }
@@ -171,7 +263,8 @@ async function supervise() {
       const onFacebook = /^https:\/\/www\.facebook\.com\/|^http:\/\/127\.0\.0\.1:\d+\/__fb\//.test(tab.url || tab.pendingUrl || "");
       if (!onFacebook) {
         await chrome.storage.session.set({ lastRecoverAt: Date.now() });
-        await chrome.tabs.update(tab.id, { url: home });
+        const { monitorTabKey } = await chrome.storage.local.get("monitorTabKey");
+        await chrome.tabs.update(tab.id, { url: monitorUrl(home, status.dedicatedProfile ? monitorTabKey : null) });
         tabEvent("assistant-tab-recovered", { tabId: tab.id, how: "returned to the Marketplace page", url: urlPattern(tab.url || tab.pendingUrl || "") });
       } else if (!tab.status?.includes("loading") || silentMs > 2 * STALE_HEARTBEAT_MS) {
         await chrome.storage.session.set({ lastRecoverAt: Date.now() });
@@ -329,7 +422,7 @@ function tabEvent(kind, detail) { api("/tab-event", { kind, ...detail }).catch((
 chrome.tabs.onCreated.addListener(async (tab) => {
   const { tabId: assistantTabId } = await chrome.storage.session.get("tabId");
   const byAssistant = creatingReplyTab ? "assistant reply tab for one conversation"
-    : creatingTab && Date.now() - creatingTab.at < 5_000 ? creatingTab.reason : null;
+    : creatingTab && (tab.pendingUrl || tab.url) === creatingTab.url && Date.now() - creatingTab.at < 5_000 ? creatingTab.reason : null;
   creatingReplyTab = false;
   if (byAssistant) creatingTab = null;
   const win = await chrome.windows.get(tab.windowId).catch(() => null);
@@ -356,8 +449,14 @@ chrome.tabs.onRemoved.addListener(async (id) => {
   if (id === tabId) tabEvent("assistant-tab-removed", { tabId: id });
 });
 chrome.tabs.onReplaced.addListener(async (added, removed) => {
-  const { tabId } = await chrome.storage.session.get("tabId");
-  if (removed === tabId) { await chrome.storage.session.set({ tabId: added }); tabEvent("assistant-tab-replaced", { tabId: added, previousTabId: removed }); }
+  await supervision?.catch(() => {});
+  const { tabId, createdMonitorTabIds = [] } = await chrome.storage.session.get(["tabId", "createdMonitorTabIds"]);
+  if (!createdMonitorTabIds.includes(removed) && tabId !== removed) return;
+  await chrome.storage.session.set({
+    tabId: tabId === removed ? added : tabId,
+    createdMonitorTabIds: createdMonitorTabIds.map((id) => id === removed ? added : id),
+  });
+  if (tabId === removed) tabEvent("assistant-tab-replaced", { tabId: added, previousTabId: removed });
 });
 chrome.windows.onCreated.addListener((win) => tabEvent("window-created", { windowId: win.id, windowType: win.type }));
 async function tabCensus() {
@@ -431,21 +530,29 @@ async function selfUpdateIfNeeded(expected) {
   return true;
 }
 
-chrome.runtime.onInstalled.addListener(async (details) => {
+async function restoreAfterUpdate() {
+  const { reloadTabAfterUpdate, lastSelfUpdate } = await chrome.storage.local.get(["reloadTabAfterUpdate", "lastSelfUpdate"]);
+  if (reloadTabAfterUpdate == null || lastSelfUpdate?.version !== chrome.runtime.getManifest().version) return;
+  await chrome.storage.local.remove("reloadTabAfterUpdate");
+  if (Date.now() - lastSelfUpdate.at >= CREATE_GAP_MS) return;
+  const { home } = await settings();
+  const tabs = await chrome.tabs.query({ pinned: true, windowType: "normal" });
+  const tab = tabs.find((candidate) => candidate.id === reloadTabAfterUpdate && !candidate.incognito &&
+    isMonitorUrl(candidate.pendingUrl || candidate.url, home) && candidate.title?.startsWith("[Assistant] "));
+  if (!tab) return;
+  await chrome.storage.session.set({ tabId: tab.id });
+  await chrome.tabs.reload(tab.id).catch(() => {});
+}
+
+function startSupervision() {
   chrome.alarms.create("supervise", { periodInMinutes: 0.5 });
-  if (details.reason === "update") {
-    const { reloadTabAfterUpdate } = await chrome.storage.local.get("reloadTabAfterUpdate");
-    await chrome.storage.local.remove("reloadTabAfterUpdate");
-    const tab = reloadTabAfterUpdate == null ? null : await chrome.tabs.get(reloadTabAfterUpdate).catch(() => null);
-    if (tab) {
-      await chrome.storage.session.set({ tabId: tab.id });
-      await chrome.tabs.reload(tab.id);
-    }
-  }
-  supervise();
+  supervise().catch((error) => console.warn("[r2b-assistant] supervision failed", error.message));
+}
+chrome.runtime.onInstalled.addListener(startSupervision);
+chrome.runtime.onStartup.addListener(startSupervision);
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "supervise") supervise().catch((error) => console.warn("[r2b-assistant] supervision failed", error.message));
 });
-chrome.runtime.onStartup.addListener(() => { chrome.alarms.create("supervise", { periodInMinutes: 0.5 }); supervise(); });
-chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "supervise") supervise(); });
 chrome.commands.onCommand.addListener((command) => {
   if (command === "emergency-stop") api("/stop", {}).then((s) => badge(s.mode, true)).catch(() => {});
 });
@@ -453,6 +560,8 @@ chrome.commands.onCommand.addListener((command) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message.type === "whoami") {
+      // A newly created page can ask before tabs.create has committed its ID.
+      await supervision?.catch(() => {});
       const { home, tabId } = await settings();
       const { replyTabId } = await chrome.storage.session.get("replyTabId");
       const isReply = sender.tab?.id != null && sender.tab.id === replyTabId;
