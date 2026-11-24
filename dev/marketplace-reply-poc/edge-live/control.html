@@ -102,6 +102,8 @@ const EVENT = {
   "show-tab-requested": (e) => "Requested: show the assistant tab for " + e.seconds + " s",
   "account-authorised": (e) => "Facebook account authorised: " + e.account,
   "opener-hold": (e) => "OPENER ON HOLD: " + e.reason,
+  "reply-tab-opened": (e) => "Opened a background reply tab for one conversation (" + e.url + ")",
+  "reply-tab-closed": (e) => "Closed the reply tab (" + e.why + ")",
   "safety-reset": () => "Safety stop reset requested by the owner",
   "visibility-assist": (e) => "Idle visibility assist: assistant tab shown briefly; Marketplace list " + (e.opened ? "opened" : "did NOT open"),
 };

@@ -41,6 +41,7 @@
   chrome.runtime.sendMessage({ type: "whoami" }).then((reply) => {
     if (!reply?.assistant) return;
     home = reply.home;
+    if (reply.role === "worker") { runReplyTab(); return; }
     sessionStorage.setItem("r2bAssistantTab", "1");
     // Mark the dedicated tab "[Assistant]" in its title only (Facebook's page is
     // untouched). Facebook rewrites the title (unread counts), so re-apply it.
@@ -664,7 +665,10 @@
       return;
     }
     const { open } = await api("/inbox", { threads: inbox, listReady: ready, list: listState() });
-    if (open) location.assign(threadUrl(open));
+    // The monitoring tab stays on the Marketplace list; a separate background
+    // reply tab opens the conversation (live, 24 Nov: navigating this tab away
+    // closed the list, and reopening it needs the tab on screen).
+    if (open) chrome.runtime.sendMessage({ type: "open-conversation", url: threadUrl(open) }).catch(() => {});
   }
 
   // Structure of the opened conversation (no text): proves which identity and
@@ -696,7 +700,21 @@
     };
   }
 
-  async function handleThread(threadId) {
+  // ---- Reply tab: open one conversation, let the service decide, then close ----
+  async function runReplyTab() {
+    const mark = () => { if (!document.title.startsWith("[Assistant reply] ")) document.title = "[Assistant reply] " + document.title.replace(/^\[Assistant\] /, ""); };
+    mark();
+    new MutationObserver(mark).observe(document.head || document.documentElement, { childList: true, subtree: true, characterData: true });
+    const threadId = location.pathname.match(THREAD_PATH)?.[1] || null;
+    try {
+      for (let i = 0; i < 30 && document.readyState !== "complete"; i++) await sleep(500);
+      if (threadId && health() === "healthy") await handleThread(threadId, { replyTab: true });
+    } finally {
+      chrome.runtime.sendMessage({ type: "close-reply-tab" }).catch(() => {});
+    }
+  }
+
+  async function handleThread(threadId, { replyTab = false } = {}) {
     let log = null;
     for (let i = 0; i < 20 && !(log = chatLog())?.querySelector("[data-message-id]"); i++) await sleep(500);
     // Live (23:38): the listing link can render after the messages. Wait up to
@@ -715,7 +733,7 @@
       if (decision.action === "send") await sendReply(decision, log);
       await sleep(2_000);
     }
-    if (home && !location.href.startsWith(home)) location.assign(home);
+    if (!replyTab && home && !location.href.startsWith(home)) location.assign(home);
   }
 
   // Live (23:34): typing line by line did not insert cleanly into Facebook's

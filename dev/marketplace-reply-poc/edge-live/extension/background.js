@@ -96,6 +96,8 @@ async function supervise() {
     return;
   }
   api("/tab-census", await tabCensus()).catch(() => {});
+  const { replyTabId, replyTabAt = 0 } = await chrome.storage.session.get(["replyTabId", "replyTabAt"]);
+  if (replyTabId != null && Date.now() - replyTabAt > REPLY_TAB_MAX_MS) await closeReplyTab("time limit");
   const hb = status.heartbeat;
   await badge(status.mode, status.mode === "off" || (hb?.health === "healthy" && Date.now() - Date.parse(hb.at) < STALE_HEARTBEAT_MS));
   if (status.fixtureHome) await chrome.storage.local.set({ home: status.fixtureHome });
@@ -150,6 +152,37 @@ async function visibilityAssist(tab) {
   return { ok: opened };
 }
 
+// ---- Reply tab ----
+// Conversations are opened in a separate, unpinned, background tab so the
+// monitoring tab never leaves the Marketplace list. One reply tab at a time; it
+// closes itself when done and is closed after 3 minutes at the latest.
+const REPLY_TAB_MAX_MS = 180_000;
+async function openReplyTab(monitorTab, url) {
+  const { tabId } = await chrome.storage.session.get("tabId");
+  if (!monitorTab || monitorTab.id !== tabId) return { ok: false };
+  if (!/^https:\/\/www\.facebook\.com\/messages\/t\/\d+\/?$|^http:\/\/127\.0\.0\.1:\d+\/__fb\/messages\/t\/\d+\/?$/.test(String(url))) return { ok: false };
+  const { replyTabId, replyTabAt = 0 } = await chrome.storage.session.get(["replyTabId", "replyTabAt"]);
+  const existing = replyTabId == null ? null : await chrome.tabs.get(replyTabId).catch(() => null);
+  if (existing) return { ok: true, already: true };
+  creatingReplyTab = true;
+  const tab = await chrome.tabs.create({ url, active: false, pinned: false, windowId: monitorTab.windowId, index: monitorTab.index + 1 });
+  await chrome.storage.session.set({ replyTabId: tab.id, replyTabAt: Date.now() });
+  tabEvent("reply-tab-opened", { tabId: tab.id, url: urlPattern(url) });
+  return { ok: true };
+}
+let creatingReplyTab = false;
+async function closeReplyTab(why) {
+  const { replyTabId } = await chrome.storage.session.get("replyTabId");
+  if (replyTabId == null) return;
+  await chrome.storage.session.remove(["replyTabId", "replyTabAt"]);
+  await chrome.tabs.remove(replyTabId).catch(() => {});
+  tabEvent("reply-tab-closed", { tabId: replyTabId, why });
+}
+chrome.tabs.onRemoved.addListener(async (id) => {
+  const { replyTabId } = await chrome.storage.session.get("replyTabId");
+  if (id === replyTabId) await chrome.storage.session.remove(["replyTabId", "replyTabAt"]);
+});
+
 // ---- Tab diagnostics ----
 // Every new tab is recorded with who created it: the assistant's own tab
 // recovery (ensureTab, with its reason), a page in the assistant tab (Edge's
@@ -162,7 +195,9 @@ const urlPattern = (url) => {
 function tabEvent(kind, detail) { api("/tab-event", { kind, ...detail }).catch(() => {}); }
 chrome.tabs.onCreated.addListener(async (tab) => {
   const { tabId: assistantTabId } = await chrome.storage.session.get("tabId");
-  const byAssistant = creatingTab && Date.now() - creatingTab.at < 5_000 ? creatingTab.reason : null;
+  const byAssistant = creatingReplyTab ? "assistant reply tab for one conversation"
+    : creatingTab && Date.now() - creatingTab.at < 5_000 ? creatingTab.reason : null;
+  creatingReplyTab = false;
   if (byAssistant) creatingTab = null;
   const win = await chrome.windows.get(tab.windowId).catch(() => null);
   tabEvent("tab-created", {
@@ -285,12 +320,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message.type === "whoami") {
       const { home, tabId } = await settings();
-      return { assistant: sender.tab?.id === tabId, home };
+      const { replyTabId } = await chrome.storage.session.get("replyTabId");
+      const isReply = sender.tab?.id != null && sender.tab.id === replyTabId;
+      return { assistant: sender.tab?.id === tabId || isReply, role: isReply ? "worker" : "monitor", home };
+    }
+    if (message.type === "open-conversation") return openReplyTab(sender.tab, message.url);
+    if (message.type === "close-reply-tab") {
+      const { replyTabId } = await chrome.storage.session.get("replyTabId");
+      if (sender.tab?.id === replyTabId) await closeReplyTab("finished");
+      return { ok: true };
     }
     if (message.type === "api" && typeof message.path === "string" && message.path.startsWith("/")) {
       // Only the assistant tab and the popup may talk to the service.
       const { tabId } = await settings();
-      if (sender.tab && sender.tab.id !== tabId) throw new Error("Not the assistant tab");
+      const { replyTabId } = await chrome.storage.session.get("replyTabId");
+      if (sender.tab && sender.tab.id !== tabId && sender.tab.id !== replyTabId) throw new Error("Not the assistant tab");
       return api(message.path, message.body);
     }
     if (message.type === "supervise") { await supervise(); return { ok: true }; }
