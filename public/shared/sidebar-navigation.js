@@ -9,6 +9,7 @@
     { id: "marketing-centre", label: "Marketing Centre", path: "/marketing-centre", paths: ["/marketing-centre"], navigation: "react", view: "Marketing Centre" },
     { id: "knowledge-hub", label: "Knowledge Hub", path: "/knowledge-hub", paths: ["/knowledge-hub"], navigation: "react", view: "Knowledge Hub" },
     { id: "content-factory", label: "Content Factory", path: "/content-factory", paths: ["/content-factory"], navigation: "react", view: "Content Factory" },
+    { id: "conversations-ai", label: "Conversations & AI", path: "/conversations-ai", paths: ["/conversations-ai"], navigation: "react", view: "Conversations & AI" },
     { id: "ai-control-centre", label: "AI Control Centre", path: "/ai-control-centre/", paths: ["/ai-control-centre/"], navigation: "document" },
     { id: "ai-knowledge-opportunities", label: "Knowledge Opportunities", path: "/ai-knowledge-opportunities", paths: ["/ai-knowledge-opportunities"], navigation: "react", view: "AI Knowledge Opportunities" },
     { id: "suppression-centre", label: "Suppression Centre", path: "/suppression-centre/", paths: ["/suppression-centre/"], navigation: "document" },
