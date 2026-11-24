@@ -115,7 +115,14 @@ const ROUTES = {
   "POST /control": async (body) => {
     if (body.resumeThread) resumeThread(state, String(body.resumeThread));
     if (body.cancelPilot) cancelPilot(state);
-    if (body.mode) { cancelPilot(state); setMode(state, body.mode, body); }
+    if (body.mode === "auto" && state.mode !== "auto") {
+      // Automatic replies start only from a healthy, monitored Observe state.
+      if (state.mode !== "observe") throw new Error("Switch on automatic replies from Observe mode");
+      if (accountProblem(state)) throw new Error(accountProblem(state));
+      if (state.openerTrip || state.openerHold) throw new Error("Clear the safety stop first");
+      if (state.heartbeat?.list !== "marketplace") throw new Error("The Marketplace list is not open in the assistant tab yet");
+    }
+    if (body.mode) { cancelPilot(state); setMode(state, body.mode, body.mode === "auto" ? { allowAll: false } : body); }
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);
     if (body.approveSend) approveSend(state, body.approveSend);

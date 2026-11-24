@@ -30,6 +30,8 @@ main{display:flex;flex-direction:column;height:calc(100vh - 50px)}[role=log]{fle
 </div>
 <main role="main" id="main"></main>
 <script>
+// Test account identity, as Facebook's c_user cookie (for the account lock).
+document.cookie = "c_user=100000000000001; path=/";
 const threadId = location.pathname.match(/\/messages\/t\/(\d+)/)?.[1] || null;
 const esc = (v) => String(v).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const post = (path, body) => fetch("/__fb/api/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

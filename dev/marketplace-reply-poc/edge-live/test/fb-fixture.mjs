@@ -16,8 +16,11 @@ export function createFixture(file) {
 
   const routes = {
     "GET /__fb/api/state": () => fb,
-    "POST /__fb/api/customer": ({ threadId, text, name, listing }) => {
+    "POST /__fb/api/customer": ({ threadId, text, name, listing, notice }) => {
+      const isNew = !fb.threads[String(threadId)];
       const t = thread(String(threadId), name, listing);
+      // Facebook opens every new Marketplace chat with this notice (as a message).
+      if (isNew && notice) t.messages.push({ id: "mid.$notice" + fb.seq++, out: false, text: t.name + " started this chat. View buyer profile" });
       t.messages.push({ id: "mid.$in" + fb.seq++, out: false, text: String(text) });
       t.updated = fb.seq;
       t.unread = true;

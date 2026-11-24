@@ -35,6 +35,7 @@
   <button data-mode="observe">Observe</button>
   <button data-mode="draft">Draft only</button>
   <button data-mode="send">Send</button>
+  <button data-mode="auto" title="Automatic replies to brand-new Rent2Buy enquiries only, one per conversation, at most 20 a day">Auto: new enquiries</button>
   <button id="resetOpener" title="Use only after checking that no customer conversation was opened">Reset safety stop</button>
   <button id="authoriseAccount" title="Lock the assistant to the Facebook account signed in to the assistant tab">Authorise signed-in account</button>
 </div>
@@ -73,7 +74,10 @@ const fbLink = (id) => id ? `<a href="https://www.facebook.com/messages/t/${esc(
 const REASON = { "read-to-unread": "a read conversation became unread", "new-at-top": "new conversation at the top", "moved-to-top": "another message in an unanswered conversation" };
 const EVENT = {
   "unread-observed": (e) => "New Marketplace message detected (" + (REASON[e.reason] || e.reason || "unread") + ")",
-  "unread-not-opened": (e) => "New message detected; not opened (not on the allowlist)",
+  "unread-not-opened": (e) => "New message detected; not opened (" + (e.why || "not on the allowlist") + ")",
+  "left-for-person": (e) => "Conversation left for a person (" + e.why + ")",
+  "auto-stopped": (e) => "Automatic replies switched off: " + e.reason,
+  "auto-not-restored": () => "Service restarted: automatic replies are off until switched on again",
   unread: (e) => "New message detected; opening (" + (REASON[e.reason] || "") + ")",
   baseline: (e) => "Starting snapshot of the " + (e.list || "") + " list: " + e.rows + " conversations, " + e.unreadLeftForPerson + " already unread (left for a person)",
   "list-opener": (e) => "List opener: " + e.status,
@@ -121,6 +125,7 @@ function render(s) {
     "Facebook account: " + (s.account?.signedIn ? "signed in as " + s.account.signedIn : "not identified") + " | authorised: " + (s.account?.authorised || "none") + (s.account?.problem ? "  <-- " + s.account.problem : "  (OK)"),
     ...(s.openerHold ? ["Opener ON HOLD: " + s.openerHold.reason] : ["Opener attempts in this series: " + (s.openerAttempts || 0) + " of 8"]),
     "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
+    "Automatic replies today: " + (s.auto ? s.auto.sentToday + " of " + s.auto.dailyCap : "-"),
     "Edge assistant tab: " + (hb ? hb.health + ", " + hb.visibility + ", last report " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + " s ago" : "not connected"),
     "Conversation list: " + (hb ? hb.list + " (" + hb.rows + " rows checked, " + hb.unread + " unread), opener: " + (hb.opener || "-") : "-"),
     "Extension: running " + (ext.running || "unknown") + ", installed " + (ext.expected || "unknown") + (ext.manualReloadNeeded ? "  <-- an older extension is running: click Reload on it once in edge://extensions (later updates are automatic)" : ext.updatePending ? "  <-- will update itself within a minute; if not, reload it in edge://extensions" : ""),
@@ -168,7 +173,8 @@ const refresh = () => api("/status").then(render).catch(() => {
 document.getElementById("stop").onclick = () => api("/stop", {}).then(render);
 document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
   if (b.dataset.mode === "send" && !confirm("Switch on LIVE sending to Facebook customers on the allowlist?")) return;
-  api("/control", { mode: b.dataset.mode }).then(render);
+  if (b.dataset.mode === "auto" && !confirm("Switch on LIVE automatic replies to brand-new Rent2Buy enquiries (one per conversation, at most 20 a day)?")) return;
+  api("/control", { mode: b.dataset.mode }).then((r) => r.error ? alert(r.error) : render(r));
 });
 document.getElementById("saveAllow").onclick = () => api("/status").then((s) => api("/control", {
   mode: s.mode, allowThreads: document.getElementById("allow").value.split(/[\s,]+/).filter(Boolean), allowAll: document.getElementById("allowAll").checked,

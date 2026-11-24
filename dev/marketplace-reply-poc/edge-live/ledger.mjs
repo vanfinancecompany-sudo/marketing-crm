@@ -7,8 +7,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { RENT2BUY_WEBSITE } from "../reply-policy.mjs";
 
-export const MODES = ["off", "observe", "draft", "send"];
+// "auto": automatic replies to brand-new Rent2Buy conversations only (see the
+// Automatic replies section). Never restored after a restart.
+export const MODES = ["off", "observe", "draft", "send", "auto"];
 const THREAD_ID = /^\d{1,32}$/;
 const MESSAGE_ID = /^[\w.:$-]{1,200}$/;
 const MAX_SEEN = 400;
@@ -122,6 +125,11 @@ export function resetSafetyStop(state) {
 }
 
 export function startupMode(state) {
+  if (state.mode === "auto") {
+    setMode(state, "observe");
+    logEvent(state, "auto-not-restored", { reason: "Service restarted; automatic replies must be switched on again" });
+    return true;
+  }
   if (state.mode !== "send") return false;
   setMode(state, "off");
   logEvent(state, "send-not-restored", { reason: "Service restarted; Send must be switched on again" });
@@ -145,7 +153,8 @@ export function setMode(state, mode, { allowThreads, allowAll } = {}) {
   // Off and Observe are passive: neither opens conversations nor records
   // message history. Activating Draft or Send from either takes a fresh
   // baseline, so nothing that arrived while passive is answered automatically.
-  const wasOff = ["off", "observe"].includes(state.mode) && ["draft", "send"].includes(mode);
+  const wasOff = ["off", "observe"].includes(state.mode) && ["draft", "send", "auto"].includes(mode);
+  if (mode === "auto" && state.mode !== "auto") state.autoFailures = 0;
   state.mode = mode;
   if (Array.isArray(allowThreads)) state.allowThreads = allowThreads.filter((id) => THREAD_ID.test(String(id))).map(String);
   if (typeof allowAll === "boolean") state.allowAll = allowAll;
@@ -262,6 +271,25 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
     for (const f of fresh) logEvent(state, "unread-observed", { threadId: f.id, reason: f.reason, pos: f.pos, list });
     state.observedUnread = unread;
     return { open: null };
+  }
+  if (state.mode === "auto") {
+    // Only a conversation never seen before (not in the list history, not in the
+    // ledger) that appears unread at the top is opened. A further message in an
+    // existing chat, or an old chat becoming unread again, is left for a person.
+    for (const f of fresh) {
+      if (f.reason !== "new-at-top" || state.threads[f.id]) {
+        logEvent(state, "unread-not-opened", { threadId: f.id, reason: f.reason, why: "Not a new conversation: left for a person" });
+        continue;
+      }
+      if (autoSentToday(state) >= AUTO_DAILY_CAP) {
+        logEvent(state, "unread-not-opened", { threadId: f.id, reason: f.reason, why: "Daily automatic reply limit reached: left for a person" });
+        continue;
+      }
+      if (state.pendingOpen.includes(f.id)) continue;
+      state.pendingOpen.push(f.id);
+      logEvent(state, "unread", { threadId: f.id, reason: f.reason, auto: true });
+    }
+    return { open: state.pendingOpen[0] || null };
   }
   for (const f of fresh) {
     // Draft and Send open only allowlisted conversations (or all, when the
@@ -555,6 +583,24 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   for (const m of fresh.filter((item) => item.direction === "outgoing")) confirmByObservation(thread, m);
 
   let customer;
+  // Automatic replies: the opened conversation must itself prove it is new. The
+  // whole chat is visible from Facebook's "started this chat" notice, the seller
+  // has never replied, and the customer has sent at most 3 messages.
+  let auto = false;
+  if (state.mode === "auto" && flagged) {
+    const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
+    const why = existing ? "Conversation already known to the assistant"
+      : !raw.some((m) => /\bstarted this chat\b/i.test(String(m?.text || ""))) ? "Start of the conversation not visible"
+      : messages.some((m) => m.direction === "outgoing") ? "The conversation already has a reply"
+      : messages.filter((m) => m.direction === "incoming").length > AUTO_MAX_CUSTOMER_MESSAGES ? "More than " + AUTO_MAX_CUSTOMER_MESSAGES + " customer messages"
+      : null;
+    if (why) {
+      logEvent(state, "left-for-person", { threadId, why });
+      thread.rebaseline = false;
+      return { action: "none", reason: "Not answered automatically: " + why };
+    }
+    auto = true;
+  }
   if (!existing || existing.rebaseline) {
     thread.rebaseline = false;
     // First sight. Only a conversation that became unread after the assistant
@@ -583,7 +629,36 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   }
   const text = customer.map((m) => String(m.text || "").trim()).filter(Boolean).join("\n").slice(0, 3000);
   if (!text) return { action: "none", reason: "Customer message has no text (photo or sticker)" };
-  return { action: "draft", threadId, product: thread.product, message: text, messageIds: customer.map((m) => m.id) };
+  return { action: "draft", threadId, product: thread.product, message: text, messageIds: customer.map((m) => m.id), ...(auto ? { auto: true } : {}) };
+}
+
+// ---- Automatic replies (mode "auto") ----
+// One reply per brand-new conversation, at most AUTO_DAILY_CAP a day (UK date),
+// only for a listing whose title names Rent2Buy and only with an ordinary Ask Me
+// or website answer containing the Rent2Buy link. Anything else goes to a person.
+const AUTO_DAILY_CAP = 20;
+const AUTO_MAX_CUSTOMER_MESSAGES = 3;
+const AUTO_MAX_FAILURES = 2;
+const ukDate = (value) => new Date(value).toLocaleDateString("en-GB", { timeZone: "Europe/London" });
+export function autoSentToday(state, now = Date.now()) {
+  const today = ukDate(now);
+  return (state.autoLog || []).filter((entry) => ukDate(entry.at) === today).length;
+}
+// Titles look like "2023 Ford Deliver 9 - Visit us at Rent2BuyVans.co.uk".
+// Any mention of finance (for example Van Finance adverts) is not confident.
+export function confidentRent2Buy(listingTitle) {
+  const text = String(listingTitle || "");
+  return /rent\s*(?:2|to)\s*buy/i.test(text) && !/finance/i.test(text);
+}
+function autoSendBlock(state, thread, decision, job) {
+  if (!decision.auto) return "Not a new conversation";
+  if (thread.product !== "rent2buy" || !confidentRent2Buy(thread.listingTitle)) return "Listing not confidently identified as Rent2Buy";
+  if (!thread.listingId) return "Listing not verified in the conversation";
+  if (!String(job.text).includes(RENT2BUY_WEBSITE)) return "Reply does not contain the Rent2Buy website link";
+  if (thread.jobs.some((other) => other !== job)) return "Conversation already has a reply or draft";
+  if (autoSentToday(state) >= AUTO_DAILY_CAP) return "Daily automatic reply limit reached";
+  if (accountProblem(state)) return accountProblem(state);
+  return null;
 }
 
 function confirmByObservation(thread, outgoing) {
@@ -617,6 +692,20 @@ export function recordDraft(state, decision, draft) {
   };
   thread.jobs.push(job);
   thread.history.push({ role: "user", content: decision.message });
+  if (state.mode === "auto") {
+    const blocked = autoSendBlock(state, thread, decision, job);
+    if (blocked) {
+      thread.needsHuman = "Not sent automatically: " + blocked;
+      logEvent(state, "draft", { threadId: thread.id, jobId: job.id, sendBlocked: blocked });
+      return { action: "none", reason: thread.needsHuman, draft: draft.text };
+    }
+    job.auto = true;
+    job.status = "claimed";
+    (state.autoLog ??= []).push({ at: job.at, threadId: thread.id, jobId: job.id });
+    state.autoLog = state.autoLog.slice(-200);
+    logEvent(state, "claim", { threadId: thread.id, jobId: job.id, auto: true });
+    return { action: "send", jobId: job.id, text: draft.text };
+  }
   const allowed = state.allowAll || state.allowThreads.includes(thread.id);
   if (state.mode !== "send" || !allowed) {
     logEvent(state, "draft", { threadId: thread.id, jobId: job.id, sendBlocked: state.mode === "send" ? "thread not on allowlist" : "mode " + state.mode });
@@ -639,7 +728,10 @@ function findJob(state, jobId) {
 export function authoriseSend(state, jobId) {
   const { thread, job } = findJob(state, jobId);
   if (!job || job.status !== "claimed") return { go: false, reason: "Unknown or already used send claim" };
-  if (state.mode !== "send" || !(state.allowAll || state.allowThreads.includes(thread.id)) || thread.needsHuman) {
+  const sendAllowed = state.mode === "send" && (state.allowAll || state.allowThreads.includes(thread.id));
+  const autoAllowed = state.mode === "auto" && job.auto === true && !accountProblem(state)
+    && !thread.jobs.some((other) => other !== job && ["typed", "confirmed", "unconfirmed"].includes(other.status));
+  if (!(sendAllowed || autoAllowed) || thread.needsHuman) {
     job.status = "cancelled";
     logEvent(state, "cancel", { threadId: thread.id, jobId });
     return { go: false, reason: "Sending was switched off" };
@@ -663,6 +755,14 @@ export function recordSendResult(state, jobId, { confirmed, outgoingId, error })
     job.status = job.status === "claimed" ? "cancelled" : "unconfirmed";
     thread.needsHuman = "A reply could not be confirmed" + (error ? ": " + String(error).slice(0, 120) : "");
     logEvent(state, "unconfirmed", { threadId: thread.id, jobId, error: String(error || "") });
+  }
+  // Automatic replies stop (back to Observe) after 2 failed sends in a row.
+  if (job.auto) {
+    state.autoFailures = confirmed ? 0 : (state.autoFailures || 0) + 1;
+    if (state.autoFailures >= AUTO_MAX_FAILURES && state.mode === "auto") {
+      setMode(state, "observe");
+      logEvent(state, "auto-stopped", { reason: AUTO_MAX_FAILURES + " automatic replies in a row could not be confirmed" });
+    }
   }
   if (endApproved) endApprovedSend(state, confirmed ? "sent and confirmed" : "not confirmed: " + String(error || ""));
 }
@@ -724,6 +824,7 @@ export function publicStatus(state) {
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,
     enabledAt: state.enabledAt,
+    auto: { sentToday: autoSentToday(state), dailyCap: AUTO_DAILY_CAP },
     baselineUnread: state.inboxBaseline?.unread.length ?? null,
     observedUnread: state.mode === "observe" ? (state.observedUnread || []) : [],
     pendingOpen: state.pendingOpen,

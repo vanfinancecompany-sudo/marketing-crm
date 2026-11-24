@@ -471,3 +471,106 @@ test("monitoring continues across an approved send: an enquiry arriving during o
   const reported = state.events.filter((e) => ["unread-observed", "unread-not-opened"].includes(e.type)).map((e) => e.threadId);
   assert.deepEqual(reported, ["3", "4"]);
 });
+
+// ---- Automatic replies to brand-new Rent2Buy conversations ----
+import { recordHeartbeat as beatAuto, autoSentToday, confidentRent2Buy } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
+const R2B_TITLE = "Marketplace £535 – 2023 Ford Deliver 9 - Visit us at Rent2BuyVans.co.uk View buyer More Options";
+const LINK = "https://www.rent2buyvans.co.uk/";
+const notice = (id) => ({ id: "mid.$n" + id, direction: "incoming", text: "Van started this chat. View buyer profile" });
+function autoState() {
+  const state = emptyState();
+  state.authorisedAccount = "1";
+  beatAuto(state, { health: "healthy", list: "marketplace", account: "1", rows: 3 });
+  setMode(state, "observe");
+  inspectInbox(state, [{ id: "100", unread: true }, { id: "300", unread: false }]); // seen while observing
+  setMode(state, "auto");
+  inspectInbox(state, [{ id: "100", unread: true }, { id: "300", unread: false }]); // auto baseline
+  return state;
+}
+const newChat = (state, id) => inspectInbox(state, [{ id, unread: true, pos: 0 }, { id: "100", unread: true, pos: 1 }, { id: "300", unread: false, pos: 2 }]);
+const openChat = (state, id, { title = R2B_TITLE, messages } = {}) =>
+  inspectThread(state, { threadId: id, listingId: "1784523559333260", listingTitle: title, messages: messages || [notice(id), msg(id + "a", "incoming", "how does it work?")] }, OPTS);
+
+test("auto opens only brand-new conversations; existing or old unread ones stay with a person", () => {
+  const state = autoState();
+  assert.equal(newChat(state, "500").open, "500");
+  // An old conversation becoming unread again, or moving to the top, is not opened.
+  inspectInbox(state, [{ id: "300", unread: true, pos: 0 }, { id: "500", unread: true, pos: 1 }, { id: "100", unread: true, pos: 2 }]);
+  assert.deepEqual(state.pendingOpen, ["500"]);
+  assert.equal(state.events.at(-1).type, "unread-not-opened");
+  assert.match(state.events.at(-1).why, /Not a new conversation/);
+});
+
+test("auto sends one reply to a new Rent2Buy enquiry, confirms it, and never replies twice", () => {
+  const state = autoState();
+  newChat(state, "500");
+  const decision = openChat(state, "500");
+  assert.equal(decision.action, "draft");
+  assert.equal(decision.auto, true);
+  const send = recordDraft(state, decision, { text: "Rent2Buy answer.\n\nYou can browse current vans and apply online at " + LINK });
+  assert.equal(send.action, "send");
+  assert.deepEqual(authoriseSend(state, send.jobId), { go: true });
+  recordSendResult(state, send.jobId, { confirmed: true, outgoingId: "mid.$out1" });
+  assert.equal(autoSentToday(state), 1);
+  assert.equal(state.mode, "auto");
+  // The customer writes again: the conversation is known, so it is not opened.
+  inspectInbox(state, [{ id: "500", unread: false, pos: 0 }]);
+  inspectInbox(state, [{ id: "500", unread: true, pos: 0 }]);
+  assert.ok(!state.pendingOpen.includes("500"));
+  // Even if it were opened, no second automatic reply is allowed.
+  state.pendingOpen.push("500");
+  const again = inspectThread(state, { threadId: "500", listingId: "1784523559333260", listingTitle: R2B_TITLE, messages: [notice("500"), msg("500a", "incoming"), msg("out1", "outgoing", "Rent2Buy answer."), msg("500b", "incoming", "thanks")] }, OPTS);
+  assert.notEqual(again.action, "draft");
+});
+
+test("auto never sends for an unclear listing, an old chat, a handover, an Ask Me error or a reply without the link", () => {
+  const cases = [
+    ["no start notice", { messages: [msg("x1", "incoming", "how does it work?")] }, null],
+    ["seller already replied", { messages: [notice("x"), msg("x1", "incoming"), msg("x2", "outgoing", "Hi"), msg("x3", "incoming")] }, null],
+    ["many messages", { messages: [notice("x"), msg("x1", "incoming"), msg("x2", "incoming"), msg("x3", "incoming"), msg("x4", "incoming")] }, null],
+    ["Van Finance advert", { title: "2019 Ford Transit - Visit us at vanfinancecompany.co.uk" }, { text: "Answer " + LINK }],
+    ["no Rent2Buy in title", { title: "2019 Ford Transit Custom" }, { text: "Answer " + LINK }],
+    ["human handover", {}, { reason: "Customer needs the team" }],
+    ["Ask Me error", {}, { reason: "Ask Me unavailable: Ask Me returned HTTP 503" }],
+    ["no link", {}, { text: "Answer without the website." }],
+  ];
+  for (const [name, chat, draft] of cases) {
+    const state = autoState();
+    newChat(state, "600");
+    const decision = openChat(state, "600", chat);
+    if (decision.action === "draft") {
+      const result = recordDraft(state, decision, draft);
+      assert.equal(result.action, "none", name);
+    } else assert.equal(draft, null, name);
+    assert.equal(state.events.some((e) => e.type === "claim"), false, name);
+  }
+  assert.equal(confidentRent2Buy(R2B_TITLE), true);
+  assert.equal(confidentRent2Buy("Rent2Buy - Van Finance Company"), false);
+});
+
+test("auto stops at 20 replies a day, after 2 unconfirmed sends, on STOP, and after a restart", () => {
+  const state = autoState();
+  state.autoLog = Array.from({ length: 20 }, (_, i) => ({ at: new Date().toISOString(), threadId: "9" + i, jobId: "j" + i }));
+  assert.equal(newChat(state, "700").open, null);
+  assert.match(state.events.at(-1).why, /Daily automatic reply limit/);
+
+  const failing = autoState();
+  for (const id of ["801", "802"]) {
+    newChat(failing, id);
+    const send = recordDraft(failing, openChat(failing, id), { text: "Answer " + LINK });
+    assert.equal(send.action, "send", id);
+    recordSendResult(failing, send.jobId, { confirmed: false, error: "No message appeared" });
+  }
+  assert.equal(failing.mode, "observe");
+  assert.equal(failing.events.at(-1).type, "auto-stopped");
+
+  const stopped = autoState();
+  newChat(stopped, "900");
+  const send = recordDraft(stopped, openChat(stopped, "900"), { text: "Answer " + LINK });
+  setMode(stopped, "off"); // STOP between the claim and the send control
+  assert.equal(authoriseSend(stopped, send.jobId).go, false);
+
+  const restarted = autoState();
+  assert.equal(startupMode(restarted), true);
+  assert.equal(restarted.mode, "observe");
+});
