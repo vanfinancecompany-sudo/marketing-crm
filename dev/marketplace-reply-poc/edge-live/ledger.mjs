@@ -212,6 +212,9 @@ const PRIMARY_LIST = "marketplace";
 // count. Nothing is assessed until the list is fully open.
 export function inspectInbox(state, threads, { listReady = true, list = null } = {}) {
   if (state.mode === "off") return { open: null };
+  // An owner-approved send goes straight to its verified conversation; reopening
+  // the Marketplace list is not needed (that step needs the tab on screen).
+  if (state.mode === "send" && state.approvedSend) return { open: state.approvedSend.threadId };
   if (!listReady) return { open: null, waiting: "Conversation list is not open yet" };
   let rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 600);
   if (rows.some((row) => typeof row.grid === "string")) rows = rows.filter((row) => row.grid === PRIMARY_LIST);
@@ -460,7 +463,6 @@ export function approveSend(state, { threadId, jobId, text }) {
   if (normalise(job.text) !== normalise(text)) throw new TypeError("The approved text does not match the draft exactly");
   if (state.mode !== "observe") throw new TypeError("Approve the send from Observe mode");
   if (accountProblem(state)) throw new TypeError(accountProblem(state));
-  if (state.heartbeat?.list !== "marketplace") throw new TypeError("The Marketplace list is not open in the assistant tab yet");
   // A draft cancelled before Send was pressed (never sent) is re-issued as a
   // fresh copy of the identical text: the extension never presses Send twice
   // for the same claim.
