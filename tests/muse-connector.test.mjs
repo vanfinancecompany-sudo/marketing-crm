@@ -209,3 +209,9 @@ test("website analytics keeps numbers and fixed step names only", async () => {
   assert.ok(!containsPii(out));
   assert.ok(!JSON.stringify(out).includes("Jane"));
 });
+
+test("privacy check ignores numbers but catches contact details in keys and values", () => {
+  assert.equal(containsPii({ rate: 0.4444444444, count: 7700900123 }), false);
+  assert.equal(containsPii({ note: "ring 07700 900123" }), true);
+  assert.equal(containsPii({ [PII.email]: 1 }), true);
+});
