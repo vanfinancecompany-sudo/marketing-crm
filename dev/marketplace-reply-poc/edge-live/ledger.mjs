@@ -447,6 +447,11 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
     const seen = new Set(thread?.seen || []);
     const newCustomer = (snapshot.messages || []).filter((m) => m?.direction === "incoming" && !seen.has(m.id) && !isFacebookNotice(m.text));
     if (!job || job.status !== "draft") { endApprovedSend(state, "draft no longer available"); return { action: "none", reason: "Approved draft no longer available" }; }
+    // Duplicate guard: if the conversation already shows our approved reply, record
+    // it as delivered and send nothing.
+    const head = normalise(job.text).slice(0, 40);
+    const already = (snapshot.messages || []).find((m) => m?.direction === "outgoing" && normalise(m.text).startsWith(head));
+    if (already) { job.status = "confirmed"; job.outgoingId = already.id; endApprovedSend(state, "already in the conversation; not sent again"); return { action: "none", reason: "Approved reply already sent" }; }
     if (newCustomer.length) { endApprovedSend(state, "cancelled: the customer sent a new message"); return { action: "none", reason: "New customer message since the draft" }; }
     // Send-time verification: the open conversation must show the listing the pilot verified.
     if (!snapshot.listingId || (thread.listingId && snapshot.listingId !== thread.listingId)) { endApprovedSend(state, "cancelled: the open conversation does not show the verified listing"); return { action: "none", reason: "Listing does not match the verified conversation" }; }

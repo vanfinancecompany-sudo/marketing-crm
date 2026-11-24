@@ -691,6 +691,9 @@
   async function handleThread(threadId) {
     let log = null;
     for (let i = 0; i < 20 && !(log = chatLog())?.querySelector("[data-message-id]"); i++) await sleep(500);
+    // Live (23:38): the listing link can render after the messages. Wait up to
+    // 10 s for it; the service still cancels if it is missing or different.
+    for (let i = 0; i < 20 && !listing().listingId; i++) await sleep(500);
     // An open conversation marks new messages as read, so the inbox will never
     // flag them. Keep reporting until the message IDs stop changing.
     let lastIds = null;
