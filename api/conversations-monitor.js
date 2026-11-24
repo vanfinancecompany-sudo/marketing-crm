@@ -1,6 +1,6 @@
 // Independent cloud monitor for Conversations & AI (Vercel cron, every 10
 // minutes; no AI calls). Opens one alert per problem, emails significant new
-// problems and recoveries once, and resolves alerts when problems clear.
+// sustained problems once, and resolves alerts automatically when clear.
 import { createClient } from "@supabase/supabase-js";
 import { buildMonitorIssues } from "../lib/conversationsMonitor.js";
 import { sendSendGridEmail } from "../lib/emailProviders/sendgrid.js";
@@ -33,7 +33,7 @@ export async function runConversationsMonitor(db, { environment = process.env, n
   const since = new Date(now.getTime() - 2 * 3_600_000).toISOString();
   const [statusRes, eventsRes, alertsRes] = await Promise.all([
     db.from("conversation_channel_status").select("*").eq("channel", "facebook_marketplace").maybeSingle(),
-    db.from("conversation_events").select("channel,kind,occurred_at,reason").gte("occurred_at", since).limit(2000),
+    db.from("conversation_events").select("source_id,channel,kind,occurred_at,reason").gte("occurred_at", since).limit(2000),
     db.from("conversation_monitor_alerts").select("*").eq("status", "open"),
   ]);
   if (statusRes.error || eventsRes.error || alertsRes.error) throw new Error("Monitoring tables are not available");
@@ -60,10 +60,13 @@ export async function runConversationsMonitor(db, { environment = process.env, n
   }
   for (const row of open.values()) {
     const update = { status: "resolved", resolved_at: stamp };
-    if (row.emailed_at && !row.recovery_emailed_at) {
+    // Recovery is automatic and visible on the dashboard. Avoid routine
+    // recovery emails: these multiply noise after a temporary outage.
+    // Operators can opt in explicitly if they need email confirmations.
+    if (row.emailed_at && !row.recovery_emailed_at && environment.CONVERSATIONS_RECOVERY_EMAILS === "true") {
       if (await sendEmail(environment, `Recovered: ${row.title}`, [`Back to normal: ${row.title}`, `Problem lasted from ${row.first_seen_at} to ${stamp}`]).catch((error) => { console.error("CONVERSATIONS ALERT EMAIL FAILED", String(error?.message || error).slice(0, 300), error?.providerStatusCode || ""); return false; })) update.recovery_emailed_at = stamp;
-      recovered.push(row.fingerprint);
     }
+    recovered.push(row.fingerprint);
     await db.from("conversation_monitor_alerts").update(update).eq("fingerprint", row.fingerprint);
   }
   return { checkedAt: stamp, issues: issues.length, emailedProblems: opened, emailedRecoveries: recovered };

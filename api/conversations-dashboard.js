@@ -1,6 +1,6 @@
 // Data for the Conversations & AI page. Protected by the CRM access key.
 import { createClient } from "@supabase/supabase-js";
-import { countEvents, summariseAskMeSessions, withoutFacebookSessions, HEARTBEAT_STALE_MS } from "../lib/conversationsMonitor.js";
+import { countEvents, summariseAskMeSessions, withoutFacebookSessions, isMonitorTestEvent, HEARTBEAT_STALE_MS } from "../lib/conversationsMonitor.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 
@@ -17,14 +17,14 @@ export async function buildConversationsDashboard(db, { days = 7, now = new Date
   const since = new Date(now.getTime() - days * 86_400_000).toISOString();
   const [statusRes, eventsRes, alertsRes, sessionsRes] = await Promise.all([
     db.from("conversation_channel_status").select("*"),
-    db.from("conversation_events").select("channel,kind,occurred_at,product,conversation_ref,question_excerpt,reply_excerpt,reason").gte("occurred_at", since).order("occurred_at", { ascending: false }).limit(2000),
+    db.from("conversation_events").select("source_id,channel,kind,occurred_at,product,conversation_ref,question_excerpt,reply_excerpt,reason").gte("occurred_at", since).order("occurred_at", { ascending: false }).limit(2000),
     db.from("conversation_monitor_alerts").select("*").order("last_seen_at", { ascending: false }).limit(50),
     db.from("ai_customer_sessions").select("product_lock,conversation_history,message_count,last_activity_at,created_at").gte("last_activity_at", since).order("last_activity_at", { ascending: false }).limit(1000),
   ]);
   const monitoringReady = !missing(statusRes.error) && !missing(eventsRes.error) && !missing(alertsRes.error);
   const facebook = (statusRes.data || []).find((row) => row.channel === "facebook_marketplace") || null;
   const hbAge = facebook?.last_heartbeat_at ? now.getTime() - Date.parse(facebook.last_heartbeat_at) : null;
-  const events = eventsRes.data || [];
+  const events = (eventsRes.data || []).filter((e) => !isMonitorTestEvent(e));
   const counts = countEvents(events);
   const askMe = sessionsRes.error ? null : summariseAskMeSessions(withoutFacebookSessions(sessionsRes.data || [], events.filter((e) => e.channel === "facebook_marketplace")));
   const fbStatus = !monitoringReady ? "not_configured"
