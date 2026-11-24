@@ -215,15 +215,20 @@ async function showAssistantTab(tab, seconds) {
   // for these seconds, then minimise it again.
   const win = await chrome.windows.get(tab.windowId).catch(() => null);
   const wasMinimized = win?.state === "minimized";
+  // Live (08:01): the window was not minimised but behind other windows, so the
+  // tab stayed hidden. Always bring the window to the front for these seconds.
+  const wasFocused = win?.focused === true;
   const ms = Math.min(Math.max(Number(seconds) || 10, 3), 20) * 1000;
   tabEvent("assistant-tab-shown", { tabId: tab.id, seconds: ms / 1000, previousTabId: previous?.id ?? null, windowWasMinimised: wasMinimized });
   try {
     await chrome.tabs.update(tab.id, { active: true });
     if (wasMinimized) await chrome.windows.update(tab.windowId, { state: "normal", focused: true }).catch(() => {});
+    else if (!wasFocused) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
     await new Promise((r) => setTimeout(r, ms));
   } finally {
     if (previous && previous.id !== tab.id) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
     if (wasMinimized) await chrome.windows.update(tab.windowId, { state: "minimized" }).catch(() => {});
+    else if (!wasFocused) await chrome.windows.update(tab.windowId, { focused: false }).catch(() => {});
     showing = false;
   }
   return { ok: true };
