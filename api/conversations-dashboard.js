@@ -1,6 +1,6 @@
 // Data for the Conversations & AI page. Protected by the CRM access key.
 import { createClient } from "@supabase/supabase-js";
-import { countEvents, summariseAskMeSessions, HEARTBEAT_STALE_MS } from "../lib/conversationsMonitor.js";
+import { countEvents, summariseAskMeSessions, withoutFacebookSessions, HEARTBEAT_STALE_MS } from "../lib/conversationsMonitor.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 
@@ -26,7 +26,7 @@ export async function buildConversationsDashboard(db, { days = 7, now = new Date
   const hbAge = facebook?.last_heartbeat_at ? now.getTime() - Date.parse(facebook.last_heartbeat_at) : null;
   const events = eventsRes.data || [];
   const counts = countEvents(events);
-  const askMe = sessionsRes.error ? null : summariseAskMeSessions(sessionsRes.data || []);
+  const askMe = sessionsRes.error ? null : summariseAskMeSessions(withoutFacebookSessions(sessionsRes.data || [], events.filter((e) => e.channel === "facebook_marketplace")));
   const fbStatus = !monitoringReady ? "not_configured"
     : !facebook ? "never_reported"
     : hbAge > HEARTBEAT_STALE_MS ? "offline"
@@ -44,7 +44,7 @@ export async function buildConversationsDashboard(db, { days = 7, now = new Date
         byProduct: askMe?.byProduct ?? null,
         failures: counts.ask_me?.ai_failed ?? 0,
         recent: askMe?.recent ?? [],
-        note: "Website conversations retained by Ask Me sessions (both sites). Human hand-offs are not recorded separately by Ask Me.",
+        note: "Website conversations retained by Ask Me sessions (both sites), excluding the Facebook assistant's own Ask Me calls. Human hand-offs are not recorded separately by Ask Me.",
       },
       facebook_marketplace: {
         status: fbStatus,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { redactExcerpt, normaliseReport, buildMonitorIssues, summariseAskMeSessions, countEvents } from "../lib/conversationsMonitor.js";
+import { redactExcerpt, normaliseReport, buildMonitorIssues, summariseAskMeSessions, countEvents, withoutFacebookSessions } from "../lib/conversationsMonitor.js";
 import { handleConversationsReport } from "../api/conversations-report.js";
 import { runConversationsMonitor } from "../api/conversations-monitor.js";
 
@@ -94,4 +94,14 @@ test("monitor: one alert per problem, email once after it persists, recovery ema
   await runConversationsMonitor(fakeDb(state), { now: new Date(now.getTime() + 1_800_000), sendEmail });
   assert.equal(sent.filter((s) => s.startsWith("Recovered")).length, 1, "recovery emailed once");
   assert.equal(state.conversation_monitor_alerts[0].status, "resolved");
+});
+
+test("Ask Me sessions created by the Facebook assistant are not counted as website conversations", () => {
+  const sessions = [
+    { last_activity_at: ago(30), conversation_history: [{ role: "user", content: "Do I need a deposit?" }] },
+    { last_activity_at: ago(30), conversation_history: [{ role: "user", content: "Different website question" }] },
+    { last_activity_at: ago(300), conversation_history: [{ role: "user", content: "Do I need a deposit?" }] },
+  ];
+  const kept = withoutFacebookSessions(sessions, [{ question_excerpt: "Do I need a deposit?", occurred_at: ago(31) }]);
+  assert.equal(kept.length, 2, "only the matching session in the 10-minute window is excluded");
 });
