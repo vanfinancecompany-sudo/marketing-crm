@@ -422,7 +422,7 @@
     const target = chatsOpen ? marketplaceControl() : messengerButton();
     if (!target) return (openerStatus = chatsOpen ? "no-marketplace-control" : "no-messenger-button");
     // Every click needs the service's permission (strict retry limit, survives reloads).
-    const permit = await api("/opener/permit", {});
+    const permit = await api("/opener/permit", { stage: chatsOpen ? "marketplace" : "messenger" });
     if (!permit.ok) return (openerStatus = permit.hold ? "on hold: " + permit.reason : "waiting for the retry delay");
     const strategy = CLICK_STRATEGIES[marketplaceMisses % CLICK_STRATEGIES.length];
     if (chatsOpen) clickLikeMouse(target, strategy);
@@ -453,7 +453,11 @@
       sessionStorage.setItem("r2bOpenerTripped", "1");
       return (openerStatus = "tripped: " + why + "; opener disabled");
     }
-    if (!chatsOpen) messengerMisses = namedGrid(/^chats$/i) ? 0 : messengerMisses + 1;
+    if (!chatsOpen) {
+      const opened = Boolean(namedGrid(/^chats$/i));
+      messengerMisses = opened ? 0 : messengerMisses + 1;
+      if (opened && permit.recoveryWindow) lastOpenAt = 0;
+    }
     if (messengerMisses >= 3) return (openerStatus = "messenger-panel-not-found");
     if (chatsOpen) {
       if (namedGrid(/^marketplace$/i)) return (openerStatus = "clicked Marketplace (" + strategy + ")");

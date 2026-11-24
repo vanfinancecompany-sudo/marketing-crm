@@ -219,8 +219,8 @@ async function superviseOnce() {
   if (!tab) return;
   // Dedicated assistant profile (nothing else lives there): keep the assistant
   // tab the active tab of its window, so Facebook keeps drawing the Marketplace
-  // list without anyone bringing it forward. A minimised window is restored,
-  // without taking focus, only when the PC has been idle for 2 minutes.
+  // list without anyone bringing it forward. In Auto, the local service
+  // briefly restores a minimized window when it approves an opener attempt.
   // The service supplies the assistant tab's page (the one proven to open the
   // Messenger panel), so a newly authorised profile uses it too. When it
   // changes, the assistant tab goes there once.
@@ -239,7 +239,7 @@ async function superviseOnce() {
       tabEvent("assistant-tab-activated", { tabId: tab.id, why: "dedicated profile: keep the assistant tab active in its window" });
     }
     const win = await chrome.windows.get(tab.windowId).catch(() => null);
-    if (win?.state === "minimized" && (await chrome.idle.queryState(120)) !== "active") {
+    if (status.mode !== "auto" && win?.state === "minimized" && (await chrome.idle.queryState(120)) !== "active") {
       await chrome.windows.update(tab.windowId, { state: "normal", focused: false }).catch(() => {});
       tabEvent("assistant-window-restored", { tabId: tab.id, why: "dedicated profile window was minimised; PC idle" });
     }
@@ -287,6 +287,7 @@ const PANEL_RETRY_WINDOW_MS = 60 * 60_000;
 const PANEL_RETRIES_PER_WINDOW = 3;
 
 async function recoverMissingMessengerPanel(tab, status, hb) {
+  if (status.panelWindowActive) return;
   const eligible = status.dedicatedProfile === true &&
     status.mode === "auto" &&
     status.monitoring?.ok === false &&
@@ -580,6 +581,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (sender.tab && sender.tab.id !== tabId && sender.tab.id !== replyTabId) throw new Error("Not the assistant tab");
       // Monitoring reports come from the monitoring tab only, never the reply tab.
       if (sender.tab && sender.tab.id === replyTabId && MONITOR_ONLY.test(message.path)) throw new Error("Monitoring report from the reply tab");
+      if (message.path === "/opener/permit" && sender.tab?.id === tabId) {
+        const win = await chrome.windows.get(sender.tab.windowId, { populate: true }).catch(() => null);
+        const minimized = win?.type === "normal" && win.state === "minimized" &&
+          win.tabs?.length === 1 && win.tabs[0].id === tabId && win.tabs[0].pinned;
+        return api(message.path, { stage: message.body?.stage, monitorTabId: tabId, minimized });
+      }
       return api(message.path, message.body);
     }
     if (message.type === "supervise") { await supervise(); return { ok: true }; }

@@ -8,6 +8,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { draftMarketplaceReply } from "../assistant.mjs";
 import { liveResponder } from "./askme-live.mjs";
+import { openPanelWindow, preparePanelWindowHelper } from "./panel-window.mjs";
 import {
   authoriseSend, inspectInbox, inspectThread, loadState, logEvent, publicStatus, recordDraft,
   recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
@@ -108,6 +109,7 @@ function statusWithExtension() {
     tabCensus: state.tabCensus || null,
     authorisedInstance: state.authorisedInstance || null,
     dedicatedProfile: Boolean(state.authorisedInstance && state.dedicatedInstance === state.authorisedInstance),
+    panelWindowActive: Boolean(panelWindow),
     // Proven on the live account: opening Messenger from this page shows the
     // chat panel (the default marketplace/inbox page does not, 24 Nov 14:51).
     assistantHome: process.env.R2B_ASSISTANT_HOME || (fixture ? null : "https://www.facebook.com/marketplace/you/selling"),
@@ -116,6 +118,54 @@ function statusWithExtension() {
     extension: { running, expected, updatePending: Boolean(expected && state.heartbeat && running !== expected), manualReloadNeeded: Boolean(state.heartbeat && !running) },
     ...(fixture ? { fixtureHome: "http://127.0.0.1:" + PORT + "/__fb/inbox/" } : {}),
   };
+}
+
+// The native helper uses Windows' no-activation show commands. Edge's
+// windows.update restores first and deactivates second, which can steal focus.
+let panelWindow = null;
+let panelWindowHelper = null;
+if (!fixture && PORT === 4618) {
+  try { panelWindowHelper = preparePanelWindowHelper(STATE_FILE); }
+  catch (error) { console.warn(error.message); }
+}
+
+async function permitPanelOpener(body) {
+  const eligible = body.monitorTabId != null && body.monitorTabId === state.tabCensus?.assistantTabId &&
+    state.mode === "auto" && state.authorisedInstance && state.dedicatedInstance === state.authorisedInstance;
+  if (!eligible) return permitOpenerClick(state);
+  if (state.openerTrip || accountProblem(state)) return { ok: false, hold: true, reason: "The account or opener safety guard is active" };
+  if (panelWindow) {
+    // A single attempt can progress from Messenger to Marketplace. Repeated
+    // clicks and attempts that made no progress still use the existing limits.
+    if (panelWindow.tabId === body.monitorTabId && panelWindow.stage === "messenger" && panelWindow.ready &&
+        body.stage === "marketplace" && state.heartbeat?.list === "chats" &&
+        Date.parse(state.heartbeat.at) >= panelWindow.startedAt) {
+      panelWindow.stage = "marketplace";
+      return { ok: true, recoveryWindow: true };
+    }
+    return { ok: false, reason: "waiting for the recovery window" };
+  }
+  const permit = permitOpenerClick(state);
+  if (!permit.ok || !body.minimized || !panelWindowHelper || !["messenger", "marketplace"].includes(body.stage)) return permit;
+  const attempt = { tabId: body.monitorTabId, stage: body.stage, startedAt: Date.now(), ready: false };
+  panelWindow = attempt;
+  attempt.ready = await openPanelWindow(panelWindowHelper, attempt.tabId, (report) => {
+    if (report.outcome !== "restored" && report.outcome !== "finished") return;
+    logEvent(state, "assistant-panel-window-" + report.outcome, {
+      tabId: attempt.tabId, recovered: report.recovered, minimized: report.minimized, focused: report.focused,
+      foregroundPreserved: report.foregroundPreserved, foregroundUnchanged: report.foregroundUnchanged,
+      rows: report.rows, list: report.list,
+    });
+    saveState(STATE_FILE, state);
+  }, (code) => {
+    panelWindow = null;
+    if (code !== 0) logEvent(state, "assistant-panel-window-incomplete", { tabId: attempt.tabId, code });
+  });
+  if (!attempt.ready || state.mode !== "auto" || state.openerTrip || accountProblem(state) ||
+      state.tabCensus?.assistantTabId !== attempt.tabId) {
+    return { ok: false, reason: "the recovery window could not safely be used" };
+  }
+  return { ...permit, recoveryWindow: true };
 }
 
 const MONITOR_ROUTES = new Set(["/heartbeat", "/inbox", "/thread", "/go", "/sent", "/opener/permit", "/pilot/verify", "/find/result",
@@ -216,7 +266,7 @@ const ROUTES = {
     return { ok: true };
   },
   "POST /assist": (body) => { logEvent(state, "visibility-assist", { opened: Boolean(body.opened) }); return { ok: true }; },
-  "POST /opener/permit": () => permitOpenerClick(state),
+  "POST /opener/permit": (body) => permitPanelOpener(body),
   "POST /inbox": (body) => accountProblem(state) ? { mode: state.mode, open: null, paused: accountProblem(state) } : ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false, list: typeof body.list === "string" ? body.list.slice(0, 40) : null }) }),
   "POST /thread": (body) => accountProblem(state) ? { action: "none", reason: accountProblem(state) } : handleThread(body),
   "POST /go": (body) => authoriseSend(state, String(body.jobId)),
