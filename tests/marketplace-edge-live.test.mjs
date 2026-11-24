@@ -574,3 +574,33 @@ test("auto stops at 20 replies a day, after 2 unconfirmed sends, on STOP, and af
   assert.equal(startupMode(restarted), true);
   assert.equal(restarted.mode, "observe");
 });
+
+test("auto test restriction: only the named test buyer's new conversation is opened and answered", async () => {
+  const { recordAutoCheck, autoCheckThread, autoCheckTimeout } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
+  const state = autoState();
+  setMode(state, "auto", { testBuyer: "Van" });
+  newChat(state, "910");
+  assert.deepEqual(state.pendingOpen, [], "nothing opened before the row check");
+  assert.equal(autoCheckThread(state), "910");
+  recordAutoCheck(state, { threadId: "910", found: true, rowText: "Kim · 2023 Ford Deliver 9 - Visit us at Rent2BuyVans.co.uk · 1m" });
+  assert.deepEqual(state.pendingOpen, []);
+  assert.match(state.events.at(-1).why, /Not the test buyer/);
+  newChat(state, "920");
+  assert.equal(recordAutoCheck(state, { threadId: "920", found: true, rowText: "" }).waiting, "row not rendered yet");
+  recordAutoCheck(state, { threadId: "920", found: true, rowText: "Van · 2021 Ford Transit Connect - Visit us at Rent2BuyVans.co.uk Unread message: Van: hi · 1m" });
+  assert.deepEqual(state.pendingOpen, ["920"]);
+  const decision = openChat(state, "920");
+  assert.equal(decision.auto, true);
+  // A conversation that passes the row check but whose notice names someone else is not answered.
+  newChat(state, "930");
+  recordAutoCheck(state, { threadId: "930", found: true, rowText: "Van · listing" });
+  const other = openChat(state, "930", { messages: [{ id: "mid.$n930", direction: "incoming", text: "Vanessa started this chat. View buyer profile" }, msg("930a", "incoming")] });
+  assert.equal(other.action, "none");
+  // Row checks time out without opening; leaving Auto clears the restriction.
+  newChat(state, "940");
+  autoCheckTimeout(state, Date.now() + 61_000);
+  assert.ok(!state.pendingOpen.includes("940"));
+  assert.throws(() => setMode(state, "auto", { testBuyer: "V<an>" }), /Invalid test buyer/);
+  setMode(state, "observe");
+  assert.equal(state.autoTestBuyer, null);
+});

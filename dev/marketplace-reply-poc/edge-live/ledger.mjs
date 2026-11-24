@@ -148,8 +148,19 @@ export function logEvent(state, type, detail = {}) {
   if (state.events.length > MAX_EVENTS) state.events.splice(0, state.events.length - MAX_EVENTS);
 }
 
-export function setMode(state, mode, { allowThreads, allowAll } = {}) {
+const TEST_BUYER_NAME = /^\p{L}[\p{L} '.-]{1,39}$/u;
+export function setMode(state, mode, { allowThreads, allowAll, testBuyer } = {}) {
   if (!MODES.includes(mode)) throw new TypeError("Unknown mode");
+  // Auto may be limited to one named test buyer (for example "Van"). Cleared
+  // whenever Auto ends.
+  if (mode === "auto") {
+    // An invalid name is refused, never silently widened to everyone.
+    if (testBuyer && !TEST_BUYER_NAME.test(String(testBuyer).trim())) throw new TypeError("Invalid test buyer name");
+    if (testBuyer !== undefined) state.autoTestBuyer = testBuyer ? String(testBuyer).trim() : null;
+  } else {
+    state.autoTestBuyer = null;
+    state.autoCheck = [];
+  }
   // Off and Observe are passive: neither opens conversations nor records
   // message history. Activating Draft or Send from either takes a fresh
   // baseline, so nothing that arrived while passive is answered automatically.
@@ -286,6 +297,14 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
         continue;
       }
       if (state.pendingOpen.includes(f.id)) continue;
+      if (state.autoTestBuyer) {
+        // Test restriction: check the row's sender name before opening anything.
+        if (!(state.autoCheck ??= []).some((c) => c.threadId === f.id)) {
+          state.autoCheck.push({ threadId: f.id, at: new Date().toISOString() });
+          logEvent(state, "auto-check", { threadId: f.id, reason: f.reason });
+        }
+        continue;
+      }
       state.pendingOpen.push(f.id);
       logEvent(state, "unread", { threadId: f.id, reason: f.reason, auto: true });
     }
@@ -591,6 +610,7 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
     const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
     const why = existing ? "Conversation already known to the assistant"
       : !raw.some((m) => /\bstarted this chat\b/i.test(String(m?.text || ""))) ? "Start of the conversation not visible"
+      : state.autoTestBuyer && !raw.some((m) => normalise(m?.text).startsWith(normalise(state.autoTestBuyer) + " started this chat")) ? "Not the test buyer"
       : messages.some((m) => m.direction === "outgoing") ? "The conversation already has a reply"
       : messages.filter((m) => m.direction === "incoming").length > AUTO_MAX_CUSTOMER_MESSAGES ? "More than " + AUTO_MAX_CUSTOMER_MESSAGES + " customer messages"
       : null;
@@ -630,6 +650,37 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   const text = customer.map((m) => String(m.text || "").trim()).filter(Boolean).join("\n").slice(0, 3000);
   if (!text) return { action: "none", reason: "Customer message has no text (photo or sticker)" };
   return { action: "draft", threadId, product: thread.product, message: text, messageIds: customer.map((m) => m.id), ...(auto ? { auto: true } : {}) };
+}
+
+// ---- Auto test restriction: only the named test buyer ----
+// For each new conversation the extension reports its list-row text (as for the
+// pilot) BEFORE anything is opened. Facebook starts the row with the sender's
+// name ("Van · 2023 Ford ..."). Any other sender's conversation is never opened.
+const AUTO_CHECK_MS = 60_000;
+export function autoCheckThread(state) {
+  return state.mode === "auto" && state.autoTestBuyer ? state.autoCheck?.[0]?.threadId || null : null;
+}
+export function recordAutoCheck(state, { threadId, found, rowText }) {
+  const check = state.autoCheck?.[0];
+  if (!autoCheckThread(state) || String(threadId) !== check.threadId) return { ok: false };
+  const text = normalise(rowText);
+  if (found && !text) return { ok: false, waiting: "row not rendered yet" };
+  state.autoCheck.shift();
+  if (found && text.startsWith(normalise(state.autoTestBuyer) + " ·")) {
+    if (!state.pendingOpen.includes(check.threadId)) state.pendingOpen.push(check.threadId);
+    logEvent(state, "unread", { threadId: check.threadId, auto: true, testBuyer: state.autoTestBuyer });
+    return { ok: true };
+  }
+  // Another sender's row text is not stored.
+  logEvent(state, "left-for-person", { threadId: check.threadId, why: found ? "Not the test buyer (not opened)" : "Row not visible (not opened)" });
+  return { ok: false };
+}
+export function autoCheckTimeout(state, now = Date.now()) {
+  const check = state.autoCheck?.[0];
+  if (check && now - Date.parse(check.at) > AUTO_CHECK_MS) {
+    state.autoCheck.shift();
+    logEvent(state, "left-for-person", { threadId: check.threadId, why: "Row check timed out (not opened)" });
+  }
 }
 
 // ---- Automatic replies (mode "auto") ----
@@ -824,7 +875,7 @@ export function publicStatus(state) {
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,
     enabledAt: state.enabledAt,
-    auto: { sentToday: autoSentToday(state), dailyCap: AUTO_DAILY_CAP },
+    auto: { sentToday: autoSentToday(state), dailyCap: AUTO_DAILY_CAP, testBuyer: state.autoTestBuyer || null },
     baselineUnread: state.inboxBaseline?.unread.length ?? null,
     observedUnread: state.mode === "observe" ? (state.observedUnread || []) : [],
     pendingOpen: state.pendingOpen,

@@ -12,6 +12,7 @@ import {
   recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
   startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot, startFind, recordFind, findTimeout,
   migrateSafetyStop, resetSafetyStop, approveSend, approvedSendTimeout,
+  autoCheckThread, recordAutoCheck, autoCheckTimeout,
   authoriseAccount, accountProblem, permitOpenerClick,
 } from "./ledger.mjs";
 
@@ -122,7 +123,7 @@ const ROUTES = {
       if (state.openerTrip || state.openerHold) throw new Error("Clear the safety stop first");
       if (state.heartbeat?.list !== "marketplace") throw new Error("The Marketplace list is not open in the assistant tab yet");
     }
-    if (body.mode) { cancelPilot(state); setMode(state, body.mode, body.mode === "auto" ? { allowAll: false } : body); }
+    if (body.mode) { cancelPilot(state); setMode(state, body.mode, body.mode === "auto" ? { allowAll: false, testBuyer: body.testBuyer ?? null } : body); }
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);
     if (body.approveSend) approveSend(state, body.approveSend);
@@ -141,12 +142,13 @@ const ROUTES = {
     pilotTimeout(state);
     approvedSendTimeout(state);
     findTimeout(state);
+    autoCheckTimeout(state);
     // Paused in any account problem: the page does nothing at all.
     const paused = state.mode === "off" ? null : accountProblem(state);
     if (paused) return { mode: state.mode, paused, extensionVersion: expectedExtensionVersion() };
     return {
       mode: state.mode,
-      verifyThread: state.pilot?.status === "verifying" ? state.pilot.threadId : null,
+      verifyThread: state.pilot?.status === "verifying" ? state.pilot.threadId : autoCheckThread(state),
       findWords: state.finder?.status === "searching" ? state.finder.words : null,
       resetOpener: state.resetOpenerRequested === true,
       safetyStop: state.openerTrip?.reason || null,
@@ -155,7 +157,7 @@ const ROUTES = {
       extensionVersion: expectedExtensionVersion(),
     };
   },
-  "POST /pilot/verify": (body) => verifyPilot(state, body),
+  "POST /pilot/verify": (body) => autoCheckThread(state) === String(body.threadId) ? recordAutoCheck(state, body) : verifyPilot(state, body),
   "POST /find/result": (body) => recordFind(state, body),
   "POST /opener-note": (body) => { logEvent(state, "opener-note", { note: String(body.note || "").slice(0, 200) }); return { ok: true }; },
   "POST /tab-event": (body) => {

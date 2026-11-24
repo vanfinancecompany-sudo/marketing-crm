@@ -90,6 +90,23 @@ try {
   assert.equal((await outgoing("800")).length, 0);
   pass("STOP: no reply to a new enquiry after the stop");
 
+  // Test restriction: Auto limited to the buyer "Van".
+  await api("/control", { mode: "observe" });
+  await waitFor(async () => { const s = await api("/status"); return s.heartbeat?.list === "marketplace" && s.baselineUnread !== null ? s : null; }, "Observe baseline");
+  const limited = await api("/control", { mode: "auto", testBuyer: "Van" });
+  assert.equal(limited.auto?.testBuyer, "Van", JSON.stringify(limited.error || ""));
+  await waitFor(async () => (await api("/status")).baselineUnread !== null, "auto baseline (test buyer)");
+  await fb("customer", { threadId: "960", name: "Kim", listing: R2B, notice: true, text: "how does it work?" });
+  await waitFor(async () => (await api("/status")).events.some((e) => e.type === "left-for-person" && e.threadId === "960"), "other buyer left for a person", 60_000);
+  await fb("customer", { threadId: "970", name: "Van", listing: R2B, notice: true, text: "how does it work?" });
+  await waitFor(async () => (await outgoing("970")).length === 1, "reply to the test buyer", 90_000);
+  await sleep(3_000);
+  const kim = (await fb("state")).threads["960"];
+  assert.equal(kim.unread, true, "the other buyer's conversation was never opened");
+  assert.equal(kim.messages.filter((m) => m.out).length, 0);
+  await api("/control", { mode: "observe" });
+  pass("test restriction: another buyer's new enquiry was never opened (still unread, no reply); Van's was answered once");
+
   watching = false;
   assert.deepEqual([...lists], ["marketplace"], "monitoring tab reported only the Marketplace list while Auto was on");
   pass("monitoring tab stayed on the Marketplace list throughout; no report from the reply tab (0.3.20 fix)");
