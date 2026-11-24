@@ -15,6 +15,8 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const norm = (value) => String(value || "").replace(/\s+/g, " ").trim();
   let home = null;
+  // "monitor" only in the monitoring tab; the reply tab never runs monitoring.
+  let role = null;
   let busy = false;
   let queued = false;
   let debounce = null;
@@ -35,13 +37,16 @@
 
   // Brought to the front (visibility assist or the owner): act at once.
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) { lastOpenAt = 0; schedule(0); }
+    // Live (24 Nov 08:59): this fired in the reply tab and ran the monitoring
+    // tick there (heartbeat from its Chats list). Monitoring tab only.
+    if (role === "monitor" && !document.hidden) { lastOpenAt = 0; schedule(0); }
   });
 
   chrome.runtime.sendMessage({ type: "whoami" }).then((reply) => {
     if (!reply?.assistant) return;
     home = reply.home;
     if (reply.role === "worker") { runReplyTab(); return; }
+    role = "monitor";
     sessionStorage.setItem("r2bAssistantTab", "1");
     // Mark the dedicated tab "[Assistant]" in its title only (Facebook's page is
     // untouched). Facebook rewrites the title (unread counts), so re-apply it.
@@ -60,6 +65,7 @@
   }
 
   async function run() {
+    if (role !== "monitor") return;
     if (busy) { queued = true; return; }
     busy = true;
     lastRunAt = Date.now();

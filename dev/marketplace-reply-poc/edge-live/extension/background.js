@@ -157,6 +157,9 @@ async function visibilityAssist(tab) {
 // monitoring tab never leaves the Marketplace list. One reply tab at a time; it
 // closes itself when done and is closed after 3 minutes at the latest.
 const REPLY_TAB_MAX_MS = 180_000;
+// Service paths only the monitoring tab may use (the reply tab reads one
+// conversation through /thread, /go and /sent, nothing else).
+const MONITOR_ONLY = /^\/(?:heartbeat|inbox|opener\/permit|opener-note|pilot\/verify|find\/result|diagnostics)(?:[/?]|$)/;
 async function openReplyTab(monitorTab, url) {
   const { tabId } = await chrome.storage.session.get("tabId");
   if (!monitorTab || monitorTab.id !== tabId) return { ok: false };
@@ -335,6 +338,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { tabId } = await settings();
       const { replyTabId } = await chrome.storage.session.get("replyTabId");
       if (sender.tab && sender.tab.id !== tabId && sender.tab.id !== replyTabId) throw new Error("Not the assistant tab");
+      // Monitoring reports come from the monitoring tab only, never the reply tab.
+      if (sender.tab && sender.tab.id === replyTabId && MONITOR_ONLY.test(message.path)) throw new Error("Monitoring report from the reply tab");
       return api(message.path, message.body);
     }
     if (message.type === "supervise") { await supervise(); return { ok: true }; }
