@@ -2,6 +2,7 @@
 //   node dev/marketplace-reply-poc/edge-live/service.mjs
 // Listens on 127.0.0.1 only. Starts in Off mode unless the saved state says otherwise.
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,6 +134,13 @@ const ROUTES = {
       state.inboxBaseline = null;
       state.pendingOpen = [];
       logEvent(state, "profile-authorised", { instance: id.slice(0, 8) });
+    }
+    // Edge profile folder of the dedicated profile, for the reopen watchdog.
+    if (body.dedicatedProfileDir) {
+      const dir = String(body.dedicatedProfileDir);
+      if (!/^(?:Default|Profile \d{1,3})$/.test(dir)) throw new Error("Invalid Edge profile folder");
+      state.dedicatedProfileDir = dir;
+      logEvent(state, "dedicated-profile-dir", { dir });
     }
     // The authorised profile is a dedicated assistant profile (its window holds
     // only the assistant), so its tab may be kept active there.
@@ -281,6 +289,27 @@ const server = createServer(async (request, response) => {
     send(response, 400, { error: error.message });
   }
 });
+
+// Dedicated profile watchdog (live, 24 Nov 15:21): closing the dedicated
+// profile's window stops its extension. If the authorised dedicated profile has
+// been silent for 3 minutes, reopen it (its extension then restores the
+// assistant tab and catches up). At most once every 10 minutes; never another
+// profile; not in Off mode or in tests.
+const EDGE_EXE = process.env.R2B_EDGE_EXE || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+setInterval(() => {
+  const dir = state.dedicatedProfileDir;
+  if (!dir || fixture || state.mode === "off" || !state.authorisedInstance || state.dedicatedInstance !== state.authorisedInstance) return;
+  const last = Date.parse(state.instancesSeen?.[state.authorisedInstance]?.lastAt || "") || 0;
+  if (Date.now() - last < 180_000 || Date.now() - (state.lastProfileLaunchAt || 0) < 600_000) return;
+  state.lastProfileLaunchAt = Date.now();
+  try {
+    spawn(EDGE_EXE, ["--profile-directory=" + dir], { detached: true, stdio: "ignore" }).unref();
+    logEvent(state, "profile-reopened", { profile: dir, silentFor: Math.round((Date.now() - last) / 1000) + " s" });
+  } catch (error) {
+    logEvent(state, "profile-reopen-failed", { profile: dir, error: String(error.message).slice(0, 120) });
+  }
+  saveState(STATE_FILE, state);
+}, 60_000);
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(JSON.stringify({ event: "listening", port: PORT, stateFile: STATE_FILE, mode: state.mode, sendWasOn, stub: STUB }));
