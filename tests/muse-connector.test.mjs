@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createMuseHandler } from "../api/muse/[resource].js";
+import { createMuseHandler } from "../api/muse.js";
 import { scrubForMuse, containsPii, museAuthorised, rateLimited } from "../lib/museConnector.js";
 
 const KEY = "k".repeat(40);
@@ -194,5 +194,5 @@ test("the Muse key is used by the Muse endpoint only", async () => {
     }
   };
   walk(".");
-  assert.deepEqual(hits.sort(), ["api/muse/[resource].js", "lib/museConnector.js"]);
+  assert.deepEqual(hits.sort(), ["api/muse.js", "lib/museConnector.js"]);
 });

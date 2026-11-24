@@ -3,15 +3,15 @@
 // GET /api/muse/openapi is public (description only, no data).
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
-import { loadJasminMarketingSnapshot } from "../jasmin-readonly.js";
-import { handleMarketingAssistantAnalyticsRequest } from "../marketing-ai-assistant-analytics.js";
-import websiteAnalyticsSummary from "../website-analytics-summary.js";
-import financeApplicationFunnel from "../finance-application-funnel.js";
+import { loadJasminMarketingSnapshot } from "./jasmin-readonly.js";
+import { handleMarketingAssistantAnalyticsRequest } from "./marketing-ai-assistant-analytics.js";
+import websiteAnalyticsSummary from "./website-analytics-summary.js";
+import financeApplicationFunnel from "./finance-application-funnel.js";
 import {
   RESOURCES, MUSE_KEY_HEADER, museAuthorised, rateLimited, scrubForMuse, containsPii, clampInt,
   buildStock, buildConversationVolumes, buildOpportunities, buildCampaigns, searchGapThemes,
-} from "../../lib/museConnector.js";
-import { classifyLearningIntent } from "../../lib/knowledgeLearningEngine.js";
+} from "../lib/museConnector.js";
+import { classifyLearningIntent } from "../lib/knowledgeLearningEngine.js";
 
 const readJson = (relative) => JSON.parse(readFileSync(new URL(relative, import.meta.url), "utf8"));
 
@@ -116,7 +116,7 @@ const loaders = {
   },
 
   async capabilities() {
-    const map = readJson("../../docs/JASMIN_MARKETING_CRM_CAPABILITY_MAP_V1.json");
+    const map = readJson("../docs/JASMIN_MARKETING_CRM_CAPABILITY_MAP_V1.json");
     return {
       system: "Marketing CRM (Van Finance Company and Rent2Buy Vans)",
       principles: map.principles,
@@ -140,7 +140,7 @@ export function createMuseHandler({ environment = process.env, supabase: injecte
       response.setHeader("Allow", "GET");
       return response.status(405).json({ error: "Read-only: GET only." });
     }
-    if (resource === "openapi") return response.status(200).json(readJson("../../docs/muse-connector.openapi.json"));
+    if (resource === "openapi") return response.status(200).json(readJson("../docs/muse-connector.openapi.json"));
     if (!museAuthorised(request, environment)) return response.status(401).json({ error: `Unauthorised. Send the Muse key in the ${MUSE_KEY_HEADER} header.` });
     const client = String(request.headers?.["x-forwarded-for"] || "").split(",")[0].trim() || "unknown";
     if (rateLimited(client)) {

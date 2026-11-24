@@ -305,6 +305,10 @@
       "destination": "/api/marketing-template-campaign-sends-resilient"
     },
     {
+      "source": "/api/muse/:resource",
+      "destination": "/api/muse?resource=:resource"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
