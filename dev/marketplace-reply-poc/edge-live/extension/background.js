@@ -201,7 +201,7 @@ async function recoverMissingMessengerPanel(tab, status, hb) {
     !status.account?.problem &&
     status.account?.authorised &&
     status.account.signedIn === status.account.authorised &&
-    hb?.health === "healthy" && hb?.list === "none" &&
+    hb?.health === "healthy" && (hb?.list === "none" || hb?.list === "chats") &&
     Number.isFinite(Date.parse(hb.at)) &&
     Date.now() - Date.parse(hb.at) < STALE_HEARTBEAT_MS &&
     /^https:\/\/www\.facebook\.com\/marketplace\//.test(tab.url || tab.pendingUrl || "");
