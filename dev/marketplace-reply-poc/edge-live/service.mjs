@@ -123,6 +123,13 @@ const ROUTES = {
       if (state.openerTrip || state.openerHold) throw new Error("Clear the safety stop first");
       if (state.heartbeat?.list !== "marketplace") throw new Error("The Marketplace list is not open in the assistant tab yet");
     }
+    // Catch-up start for automatic replies (default 12:00 UK, 24 Nov 2026).
+    if (body.autoFrom) {
+      const at = Date.parse(body.autoFrom);
+      if (!Number.isFinite(at) || at > Date.now()) throw new Error("Invalid catch-up start");
+      state.autoFrom = new Date(at).toISOString();
+      logEvent(state, "auto-from", { from: state.autoFrom });
+    }
     if (body.mode) { cancelPilot(state); setMode(state, body.mode, body.mode === "auto" ? { allowAll: false, testBuyer: body.testBuyer ?? null } : body); }
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);

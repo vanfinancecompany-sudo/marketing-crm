@@ -56,9 +56,6 @@ export function rent2BuyWebsiteReply(reply, actions, history) {
     return WEBSITE_GUIDANCE + "\n\n" + RENT2BUY_WEBSITE;
   }
   if (reply.includes(RENT2BUY_WEBSITE)) return reply;
-  if (!history.some((entry) => entry.role === "assistant")
-      || actions?.some((action) => ["apply", "browse_stock"].includes(action?.type))) {
-    return reply + "\n\n" + BROWSE_AND_APPLY;
-  }
-  return reply;
+  // Owner's rule (24 Nov 2026): every reply, follow-ups included, carries the link.
+  return reply + "\n\n" + BROWSE_AND_APPLY;
 }

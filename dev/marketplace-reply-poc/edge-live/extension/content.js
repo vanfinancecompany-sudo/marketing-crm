@@ -205,8 +205,19 @@
     }
     return classify(limited);
   }
+  // Per row, besides unread: Facebook's last-activity age at the end of the row
+  // ("· 5m", "· 2h", "· 3d", "· 1w"; "now") and whether the last message is ours
+  // ("You: ..."). Only these two derived values leave the page, never text.
+  function rowActivity(row) {
+    const text = norm(row.innerText || "");
+    const age = text.match(/·\s*(\d{1,4})\s*(m|h|d|w)\s*$/i);
+    return {
+      age: age ? age[1] + age[2].toLowerCase() : /·\s*(?:just\s+)?now\s*$/i.test(text) ? "now" : null,
+      you: /(?:^|\s)You:\s/.test(text),
+    };
+  }
   function scanInbox() {
-    return inboxRows().map(({ id, unread, pos, grid }) => ({ id, unread, pos, grid }));
+    return inboxRows().map(({ id, unread, pos, grid, row }) => ({ id, unread, pos, grid, ...(grid === "marketplace" ? rowActivity(row) : {}) }));
   }
 
   // Pilot check: the visible list-row text of ONE named conversation, so the

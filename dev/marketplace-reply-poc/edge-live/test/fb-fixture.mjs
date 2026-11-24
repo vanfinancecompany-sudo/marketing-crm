@@ -3,6 +3,11 @@
 // realtime channel does, so a background tab updates without polling.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
+// Facebook-format message ID ("mid.$" + 29 base64url chars) carrying the send
+// time in milliseconds at bits 111-151, as real IDs do.
+let salt = 1;
+const mid = (ms) => "mid.$" + Buffer.from(((0x80n << 160n) | (BigInt(ms) << 16n) | BigInt(salt++ & 0xffff)).toString(16).padStart(42, "0"), "hex").toString("base64url") + "x";
+
 export function createFixture(file) {
   let fb = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : { threads: {}, seq: 1, sends: 0 };
   const clients = new Set();
@@ -16,12 +21,14 @@ export function createFixture(file) {
 
   const routes = {
     "GET /__fb/api/state": () => fb,
-    "POST /__fb/api/customer": ({ threadId, text, name, listing, notice }) => {
+    "POST /__fb/api/customer": ({ threadId, text, name, listing, notice, at }) => {
+      const when = Number(at) || Date.now();
       const isNew = !fb.threads[String(threadId)];
       const t = thread(String(threadId), name, listing);
       // Facebook opens every new Marketplace chat with this notice (as a message).
-      if (isNew && notice) t.messages.push({ id: "mid.$notice" + fb.seq++, out: false, text: t.name + " started this chat. View buyer profile" });
-      t.messages.push({ id: "mid.$in" + fb.seq++, out: false, text: String(text) });
+      if (isNew && notice) t.messages.push({ id: mid(when - 1000), at: when - 1000, out: false, text: t.name + " started this chat. View buyer profile" });
+      t.messages.push({ id: mid(when), at: when, out: false, text: String(text) });
+      fb.seq++;
       t.updated = fb.seq;
       t.unread = true;
       commit();
@@ -31,7 +38,8 @@ export function createFixture(file) {
     "POST /__fb/api/command": ({ cmd }) => { if (["reload", "closepanel", "popupnext", "dockednext"].includes(cmd)) push(cmd); return { ok: true }; },
     "POST /__fb/api/read": ({ threadId }) => { if (fb.threads[threadId]) fb.threads[threadId].unread = false; commit(); return { ok: true }; },
     "POST /__fb/api/send": ({ threadId, text }) => {
-      fb.threads[threadId].messages.push({ id: "mid.$out" + fb.seq++, out: true, text: String(text) });
+      fb.threads[threadId].messages.push({ id: mid(Date.now()), at: Date.now(), out: true, text: String(text) });
+      fb.seq++;
       fb.threads[threadId].updated = fb.seq;
       fb.sends++;
       commit();

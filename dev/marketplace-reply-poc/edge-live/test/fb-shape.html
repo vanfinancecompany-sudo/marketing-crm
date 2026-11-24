@@ -84,7 +84,10 @@ async function render() {
     const threads = Object.entries(s.threads).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0));
     grid.innerHTML = `<div role="grid" aria-label="Marketplace">` + threads.map(([id, t]) => {
       const last = t.messages.at(-1);
-      return row(id, t.name + " · " + t.listing, last ? (last.out ? "You: " : "") + last.text : "", t.unread);
+      // Facebook ends each row with the last activity age ("now", "5m", "2h").
+      const mins = last?.at ? Math.floor((Date.now() - last.at) / 60000) : 0;
+      const age = mins < 1 ? "now" : mins < 60 ? mins + "m" : Math.floor(mins / 60) + "h";
+      return row(id, t.name + " · " + t.listing, last ? (last.out ? "You: " : "") + last.text + " · " + age : "", t.unread);
     }).join("") + `</div>`;
   }
   const t = threadId && s.threads[threadId];

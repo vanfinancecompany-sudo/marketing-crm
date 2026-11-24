@@ -35,7 +35,7 @@
   <button data-mode="observe">Observe</button>
   <button data-mode="draft">Draft only</button>
   <button data-mode="send">Send</button>
-  <button data-mode="auto" title="Automatic replies to brand-new Rent2Buy enquiries only, one per conversation, at most 20 a day">Auto: new enquiries</button>
+  <button data-mode="auto" title="Automatic replies to unanswered Rent2Buy customer messages, with catch-up">Auto replies</button>
   <button id="resetOpener" title="Use only after checking that no customer conversation was opened">Reset safety stop</button>
   <button id="authoriseAccount" title="Lock the assistant to the Facebook account signed in to the assistant tab">Authorise signed-in account</button>
 </div>
@@ -126,7 +126,7 @@ function render(s) {
     "Facebook account: " + (s.account?.signedIn ? "signed in as " + s.account.signedIn : "not identified") + " | authorised: " + (s.account?.authorised || "none") + (s.account?.problem ? "  <-- " + s.account.problem : "  (OK)"),
     ...(s.openerHold ? ["Opener ON HOLD: " + s.openerHold.reason] : ["Opener attempts in this series: " + (s.openerAttempts || 0) + " of 8"]),
     "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
-    "Automatic replies today: " + (s.auto ? s.auto.sentToday + " of " + s.auto.dailyCap + (s.auto.testBuyer ? " (TEST: only buyer \"" + s.auto.testBuyer + "\")" : "") : "-"),
+    "Automatic replies today: " + (s.auto ? s.auto.sentToday + ", answering customer messages since " + new Date(s.auto.from).toLocaleString() + (s.auto.testBuyer ? " (TEST: only buyer \"" + s.auto.testBuyer + "\")" : "") : "-"),
     "Edge assistant tab: " + (hb ? hb.health + ", " + hb.visibility + ", last report " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + " s ago" : "not connected"),
     "Conversation list: " + (hb ? hb.list + " (" + hb.rows + " rows checked, " + hb.unread + " unread), opener: " + (hb.opener || "-") : "-"),
     "Extension: running " + (ext.running || "unknown") + ", installed " + (ext.expected || "unknown") + (ext.manualReloadNeeded ? "  <-- an older extension is running: click Reload on it once in edge://extensions (later updates are automatic)" : ext.updatePending ? "  <-- will update itself within a minute; if not, reload it in edge://extensions" : ""),
@@ -174,7 +174,7 @@ const refresh = () => api("/status").then(render).catch(() => {
 document.getElementById("stop").onclick = () => api("/stop", {}).then(render);
 document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
   if (b.dataset.mode === "send" && !confirm("Switch on LIVE sending to Facebook customers on the allowlist?")) return;
-  if (b.dataset.mode === "auto" && !confirm("Switch on LIVE automatic replies to brand-new Rent2Buy enquiries (one per conversation, at most 20 a day)?")) return;
+  if (b.dataset.mode === "auto" && !confirm("Switch on LIVE automatic replies to Rent2Buy customers (unanswered messages since the catch-up start)?")) return;
   api("/control", { mode: b.dataset.mode }).then((r) => r.error ? alert(r.error) : render(r));
 });
 document.getElementById("saveAllow").onclick = () => api("/status").then((s) => api("/control", {

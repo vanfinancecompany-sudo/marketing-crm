@@ -421,7 +421,7 @@ test("account lock: wrong account, signed out, unidentified or ineligible pauses
   assert.match(publicStatus(state).monitoring.reasons.join(" "), /Marketplace unavailable/);
 });
 
-test("retry limit: growing delays, hold after 8 attempts, kept until the owner resets; success resets the series", async () => {
+test("retry limit: growing delays, hold after 8 attempts, retried every 30 minutes while on hold; success resets the series", async () => {
   const { authoriseAccount, permitOpenerClick, resetSafetyStop, recordHeartbeat: hb } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
   const state = emptyState();
   setMode(state, "observe");
@@ -439,7 +439,9 @@ test("retry limit: growing delays, hold after 8 attempts, kept until the owner r
   const held = permitOpenerClick(state, now);
   assert.equal(held.hold, true);
   assert.match(held.reason, /after 8 attempts/);
-  assert.equal(permitOpenerClick(state, now + 86_400_000).ok, false, "still on hold a day later");
+  assert.equal(permitOpenerClick(state, now + 60_000).ok, false, "on hold a minute later");
+  assert.equal(permitOpenerClick(state, now + 1_800_000).ok, true, "one automatic retry after 30 minutes");
+  assert.equal(permitOpenerClick(state, now + 1_800_000 + 1_000).ok, false, "then on hold again for 30 minutes");
   assert.match(publicStatus(state).monitoring.reasons.join(" "), /Opener on hold/);
   resetSafetyStop(state);
   assert.equal(permitOpenerClick(state, now).ok, true);
@@ -472,135 +474,137 @@ test("monitoring continues across an approved send: an enquiry arriving during o
   assert.deepEqual(reported, ["3", "4"]);
 });
 
-// ---- Automatic replies to brand-new Rent2Buy conversations ----
-import { recordHeartbeat as beatAuto, autoSentToday, confidentRent2Buy } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
+// ---- Automatic replies with catch-up (mode "auto") ----
+import { recordHeartbeat as beatAuto, messageTime, confidentRent2Buy, permitOpenerClick as permitAuto } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
 const R2B_TITLE = "Marketplace £535 – 2023 Ford Deliver 9 - Visit us at Rent2BuyVans.co.uk View buyer More Options";
 const LINK = "https://www.rent2buyvans.co.uk/";
-const notice = (id) => ({ id: "mid.$n" + id, direction: "incoming", text: "Van started this chat. View buyer profile" });
-function autoState() {
+const FROM = Date.parse("2026-11-24T12:00:00.000Z");
+// A Facebook-format message ID carrying the given send time (bits 111-151).
+function mid(ms, salt = 1) {
+  const big = (0x80n << 160n) | (BigInt(ms) << 16n) | BigInt(salt & 0xffff);
+  return "mid.$" + Buffer.from(big.toString(16).padStart(42, "0"), "hex").toString("base64url") + "x";
+}
+const at = (hhmm) => Date.parse("2026-11-24T" + hhmm + ":00.000Z");
+const cust = (hhmm, text = "Hello", salt = 1) => ({ id: mid(at(hhmm), salt), direction: "incoming", text });
+const ours = (hhmm, text = "Our reply " + LINK) => ({ id: mid(at(hhmm), 9), direction: "outgoing", text });
+function autoOn(now = at("13:30")) {
   const state = emptyState();
   state.authorisedAccount = "1";
   beatAuto(state, { health: "healthy", list: "marketplace", account: "1", rows: 3 });
   setMode(state, "observe");
-  inspectInbox(state, [{ id: "100", unread: true }, { id: "300", unread: false }]); // seen while observing
   setMode(state, "auto");
-  inspectInbox(state, [{ id: "100", unread: true }, { id: "300", unread: false }]); // auto baseline
+  inspectInbox(state, [{ id: "100", unread: true }]); // first snapshot
   return state;
 }
-const newChat = (state, id) => inspectInbox(state, [{ id, unread: true, pos: 0 }, { id: "100", unread: true, pos: 1 }, { id: "300", unread: false, pos: 2 }]);
-const openChat = (state, id, { title = R2B_TITLE, messages } = {}) =>
-  inspectThread(state, { threadId: id, listingId: "1784523559333260", listingTitle: title, messages: messages || [notice(id), msg(id + "a", "incoming", "how does it work?")] }, OPTS);
-
-test("auto opens only brand-new conversations; existing or old unread ones stay with a person", () => {
-  const state = autoState();
-  assert.equal(newChat(state, "500").open, "500");
-  // An old conversation becoming unread again, or moving to the top, is not opened.
-  inspectInbox(state, [{ id: "300", unread: true, pos: 0 }, { id: "500", unread: true, pos: 1 }, { id: "100", unread: true, pos: 2 }]);
-  assert.deepEqual(state.pendingOpen, ["500"]);
-  assert.equal(state.events.at(-1).type, "unread-not-opened");
-  assert.match(state.events.at(-1).why, /Not a new conversation/);
-});
-
-test("auto sends one reply to a new Rent2Buy enquiry, confirms it, and never replies twice", () => {
-  const state = autoState();
-  newChat(state, "500");
-  const decision = openChat(state, "500");
-  assert.equal(decision.action, "draft");
-  assert.equal(decision.auto, true);
-  const send = recordDraft(state, decision, { text: "Rent2Buy answer.\n\nYou can browse current vans and apply online at " + LINK });
-  assert.equal(send.action, "send");
+const open = (state, id, messages, title = R2B_TITLE) => {
+  if (!state.pendingOpen.includes(id)) state.pendingOpen.push(id);
+  return inspectThread(state, { threadId: id, listingId: "1784523559333260", listingTitle: title, messages }, OPTS);
+};
+const answer = (state, decision, text = "Ask Me answer.\n\nYou can browse current vans and apply online at " + LINK) => {
+  const send = recordDraft(state, decision, { text });
+  if (send.action !== "send") return send;
   assert.deepEqual(authoriseSend(state, send.jobId), { go: true });
-  recordSendResult(state, send.jobId, { confirmed: true, outgoingId: "mid.$out1" });
-  assert.equal(autoSentToday(state), 1);
-  assert.equal(state.mode, "auto");
-  // The customer writes again: the conversation is known, so it is not opened.
-  inspectInbox(state, [{ id: "500", unread: false, pos: 0 }]);
-  inspectInbox(state, [{ id: "500", unread: true, pos: 0 }]);
-  assert.ok(!state.pendingOpen.includes("500"));
-  // Even if it were opened, no second automatic reply is allowed.
-  state.pendingOpen.push("500");
-  const again = inspectThread(state, { threadId: "500", listingId: "1784523559333260", listingTitle: R2B_TITLE, messages: [notice("500"), msg("500a", "incoming"), msg("out1", "outgoing", "Rent2Buy answer."), msg("500b", "incoming", "thanks")] }, OPTS);
-  assert.notEqual(again.action, "draft");
+  recordSendResult(state, send.jobId, { confirmed: true, outgoingId: mid(Date.now() - 1000, 7) });
+  return send;
+};
+
+test("message IDs carry a verifiable send time; anything else is unknown", () => {
+  assert.equal(new Date(messageTime("mid.$gAAQfrD0VH-KoPuV18WiDaAsKWL7-")).toISOString(), "2026-11-24T12:55:30.601Z");
+  assert.equal(new Date(messageTime("7530977511398328435")).toISOString(), "2026-11-24T12:55:57.513Z");
+  assert.equal(messageTime(mid(at("12:10"))), at("12:10"));
+  assert.equal(messageTime("mid.$in12"), null);
+  assert.equal(messageTime(mid(Date.now() + 3_600_000)), null, "a time in the future is not trusted");
 });
 
-test("auto never sends for an unclear listing, an old chat, a handover, an Ask Me error or a reply without the link", () => {
+test("catch-up answers only unanswered customer messages since 12:00, batched into one reply", () => {
+  const state = autoOn();
+  // Before the cutoff: excluded.
+  assert.equal(open(state, "200", [cust("11:50", "old question")]).action, "none");
+  // Two unanswered messages after the cutoff (an older one before it is excluded): one reply.
+  const d = open(state, "300", [cust("11:40", "very old"), ours("11:45"), cust("12:05", "Do I need a deposit?", 2), cust("12:06", "And can I pay weekly?", 3)]);
+  assert.equal(d.action, "draft");
+  assert.equal(d.auto, true);
+  assert.equal(d.message, "Do I need a deposit?\nAnd can I pay weekly?");
+  assert.equal(d.messageIds.length, 2);
+  assert.equal(answer(state, d).action, "send");
+  // Already answered: reopening sends nothing.
+  assert.equal(open(state, "300", [cust("12:05", "Do I need a deposit?", 2), cust("12:06", "And can I pay weekly?", 3), ours("12:07")]).action, "none");
+  // Even if our reply is not visible yet, the ledger knows those IDs were answered.
+  assert.equal(open(state, "300", [cust("12:05", "Do I need a deposit?", 2), cust("12:06", "And can I pay weekly?", 3)]).action, "none");
+  // A follow-up question later is answered too (no one-reply limit).
+  const f = open(state, "300", [cust("12:05", "x", 2), cust("12:06", "y", 3), ours("12:07"), cust("12:40", "How long does approval take?", 4)]);
+  assert.equal(f.action, "draft");
+  assert.equal(f.message, "How long does approval take?");
+  assert.equal(answer(state, f).action, "send");
+});
+
+test("a message whose time cannot be verified, an unclear listing, a handover, an Ask Me error or a reply without the link never sends", () => {
   const cases = [
-    ["no start notice", { messages: [msg("x1", "incoming", "how does it work?")] }, null],
-    ["seller already replied", { messages: [notice("x"), msg("x1", "incoming"), msg("x2", "outgoing", "Hi"), msg("x3", "incoming")] }, null],
-    ["many messages", { messages: [notice("x"), msg("x1", "incoming"), msg("x2", "incoming"), msg("x3", "incoming"), msg("x4", "incoming")] }, null],
-    ["Van Finance advert", { title: "2019 Ford Transit - Visit us at vanfinancecompany.co.uk" }, { text: "Answer " + LINK }],
-    ["no Rent2Buy in title", { title: "2019 Ford Transit Custom" }, { text: "Answer " + LINK }],
-    ["human handover", {}, { reason: "Customer needs the team" }],
-    ["Ask Me error", {}, { reason: "Ask Me unavailable: Ask Me returned HTTP 503" }],
-    ["no link", {}, { text: "Answer without the website." }],
+    ["time unknown", [{ id: "mid.$in12", direction: "incoming", text: "hi" }], R2B_TITLE, { text: "Answer " + LINK }],
+    ["Van Finance advert", [cust("12:10")], "2019 Ford Transit - Visit us at vanfinancecompany.co.uk", { text: "Answer " + LINK }],
+    ["no Rent2Buy in title", [cust("12:10")], "2019 Ford Transit Custom", { text: "Answer " + LINK }],
+    ["human handover", [cust("12:10")], R2B_TITLE, { reason: "Customer needs the team" }],
+    ["Ask Me error", [cust("12:10")], R2B_TITLE, { reason: "Ask Me unavailable: Ask Me returned HTTP 503" }],
+    ["no link", [cust("12:10")], R2B_TITLE, { text: "Answer without the website." }],
   ];
-  for (const [name, chat, draft] of cases) {
-    const state = autoState();
-    newChat(state, "600");
-    const decision = openChat(state, "600", chat);
-    if (decision.action === "draft") {
-      const result = recordDraft(state, decision, draft);
-      assert.equal(result.action, "none", name);
-    } else assert.equal(draft, null, name);
+  for (const [name, messages, title, draft] of cases) {
+    const state = autoOn();
+    const d = open(state, "600", messages, title);
+    if (d.action === "draft") assert.equal(recordDraft(state, d, draft).action, "none", name);
     assert.equal(state.events.some((e) => e.type === "claim"), false, name);
+    assert.ok(state.threads["600"].needsHuman, name + " is left for a person");
   }
   assert.equal(confidentRent2Buy(R2B_TITLE), true);
   assert.equal(confidentRent2Buy("Rent2Buy - Van Finance Company"), false);
 });
 
-test("auto stops at 20 replies a day, after 2 unconfirmed sends, on STOP, and after a restart", () => {
-  const state = autoState();
-  state.autoLog = Array.from({ length: 20 }, (_, i) => ({ at: new Date().toISOString(), threadId: "9" + i, jobId: "j" + i }));
-  assert.equal(newChat(state, "700").open, null);
-  assert.match(state.events.at(-1).why, /Daily automatic reply limit/);
+test("rows with customer activity since the cutoff are queued once; ours, older or already-checked rows are not", () => {
+  const now = Date.now();
+  const state = autoOn();
+  state.autoFrom = new Date(now - 3 * 3_600_000).toISOString(); // cutoff 3 hours ago
+  const rows = [
+    { id: "100", unread: true, pos: 0, age: "now", you: false },   // customer just wrote
+    { id: "110", unread: false, pos: 1, age: "5m", you: true },    // we replied last
+    { id: "120", unread: false, pos: 2, age: "2h", you: false },   // within the window
+    { id: "130", unread: true, pos: 3, age: "4h", you: false },    // before the cutoff
+    { id: "140", unread: true, pos: 4, age: null, you: false },    // age unknown
+  ];
+  inspectInbox(state, rows);
+  // 140 is a new unread arrival with no readable age: opened and checked by message time.
+  assert.deepEqual(state.pendingOpen, ["140", "100", "120"]);
+  open(state, "140", [cust("11:00")]);
+  // Once checked, the same rows are not queued again until there is newer activity.
+  open(state, "100", [cust("12:10")]);
+  open(state, "120", [cust("12:10")]);
+  state.pendingOpen = [];
+  inspectInbox(state, rows);
+  assert.deepEqual(state.pendingOpen, []);
+  state.autoChecked["100"] = new Date(now - 120_000).toISOString(); // checked 2 minutes ago, new message now
+  inspectInbox(state, rows);
+  assert.deepEqual(state.pendingOpen, ["100"]);
+  // A conversation that cannot be read within 4 minutes is dropped and left for a person.
+  state.autoQueuedAt["100"] = new Date(now - 300_000).toISOString();
+  inspectInbox(state, [{ id: "100", unread: true, pos: 0, age: "4m", you: false }]);
+  assert.deepEqual(state.pendingOpen, []);
+  assert.equal(state.events.findLast((e) => e.type === "left-for-person").threadId, "100");
+});
 
-  const failing = autoState();
+test("Auto stays on after a restart; STOP cancels a claimed reply; 2 unconfirmed sends stop Auto; the opener recovers by itself", () => {
+  const restarted = autoOn();
+  assert.equal(startupMode(restarted), false);
+  assert.equal(restarted.mode, "auto");
+
+  const stopped = autoOn();
+  const send = recordDraft(stopped, open(stopped, "900", [cust("12:10")]), { text: "Answer " + LINK });
+  assert.equal(send.action, "send");
+  setMode(stopped, "off");
+  assert.equal(authoriseSend(stopped, send.jobId).go, false);
+
+  const failing = autoOn();
   for (const id of ["801", "802"]) {
-    newChat(failing, id);
-    const send = recordDraft(failing, openChat(failing, id), { text: "Answer " + LINK });
-    assert.equal(send.action, "send", id);
-    recordSendResult(failing, send.jobId, { confirmed: false, error: "No message appeared" });
+    const s = recordDraft(failing, open(failing, id, [cust("12:10")]), { text: "Answer " + LINK });
+    recordSendResult(failing, s.jobId, { confirmed: false, error: "No message appeared" });
   }
   assert.equal(failing.mode, "observe");
   assert.equal(failing.events.at(-1).type, "auto-stopped");
-
-  const stopped = autoState();
-  newChat(stopped, "900");
-  const send = recordDraft(stopped, openChat(stopped, "900"), { text: "Answer " + LINK });
-  setMode(stopped, "off"); // STOP between the claim and the send control
-  assert.equal(authoriseSend(stopped, send.jobId).go, false);
-
-  const restarted = autoState();
-  assert.equal(startupMode(restarted), true);
-  assert.equal(restarted.mode, "observe");
-});
-
-test("auto test restriction: only the named test buyer's new conversation is opened and answered", async () => {
-  const { recordAutoCheck, autoCheckThread, autoCheckTimeout } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
-  const state = autoState();
-  setMode(state, "auto", { testBuyer: "Van" });
-  newChat(state, "910");
-  assert.deepEqual(state.pendingOpen, [], "nothing opened before the row check");
-  assert.equal(autoCheckThread(state), "910");
-  recordAutoCheck(state, { threadId: "910", found: true, rowText: "Kim · 2023 Ford Deliver 9 - Visit us at Rent2BuyVans.co.uk · 1m" });
-  assert.deepEqual(state.pendingOpen, []);
-  assert.match(state.events.at(-1).why, /Not the test buyer/);
-  newChat(state, "920");
-  assert.equal(recordAutoCheck(state, { threadId: "920", found: true, rowText: "" }).waiting, "row not rendered yet");
-  recordAutoCheck(state, { threadId: "920", found: true, rowText: "Van · 2021 Ford Transit Connect - Visit us at Rent2BuyVans.co.uk Unread message: Van: hi · 1m" });
-  assert.deepEqual(state.pendingOpen, ["920"]);
-  const decision = openChat(state, "920");
-  assert.equal(decision.auto, true);
-  // A conversation that passes the row check but whose notice names someone else is not answered.
-  newChat(state, "930");
-  recordAutoCheck(state, { threadId: "930", found: true, rowText: "Van · listing" });
-  const other = openChat(state, "930", { messages: [{ id: "mid.$n930", direction: "incoming", text: "Vanessa started this chat. View buyer profile" }, msg("930a", "incoming")] });
-  assert.equal(other.action, "none");
-  // Row checks time out without opening; leaving Auto clears the restriction.
-  newChat(state, "940");
-  autoCheckTimeout(state, Date.now() + 61_000);
-  assert.ok(!state.pendingOpen.includes("940"));
-  assert.throws(() => setMode(state, "auto", { testBuyer: "V<an>" }), /Invalid test buyer/);
-  setMode(state, "observe");
-  assert.equal(state.autoTestBuyer, null);
 });

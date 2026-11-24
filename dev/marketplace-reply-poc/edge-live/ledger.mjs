@@ -96,17 +96,25 @@ export function accountProblem(state) {
 // to 10 min; after 8 failed attempts the opener is on hold until the owner resets
 // it. Counted here, so reloads and restarts cannot start a fresh series.
 const OPENER_MAX_ATTEMPTS = 8;
+const OPENER_HOLD_RETRY_MS = 1_800_000;
 export function permitOpenerClick(state, now = Date.now()) {
-  if (state.openerHold) return { ok: false, hold: true, reason: state.openerHold.reason };
   const problem = accountProblem(state);
   if (problem) return { ok: false, hold: true, reason: problem };
+  if (state.openerHold) {
+    // Automatic recovery without the owner: while on hold, one attempt every 30
+    // minutes (the idle-only visibility assist can then reopen the list).
+    const last = Date.parse(state.openerHold.lastTryAt || state.openerHold.at);
+    if (now - last < OPENER_HOLD_RETRY_MS) return { ok: false, hold: true, reason: state.openerHold.reason };
+    state.openerHold.lastTryAt = new Date(now).toISOString();
+    return { ok: true, attempt: "hold retry" };
+  }
   const a = (state.openerAttempts ??= { count: 0, lastAt: 0 });
   const delay = a.count ? Math.min(20_000 * 2 ** (a.count - 1), 600_000) : 0;
   // During an owner-requested show the delay is skipped; the attempt still counts.
   const ownerShow = (state.showUntil && now < Date.parse(state.showUntil)) || state.heartbeat?.visibility === "visible";
   if (!ownerShow && now - a.lastAt < delay) return { ok: false, reason: "waiting for the retry delay" };
   if (a.count >= OPENER_MAX_ATTEMPTS) {
-    state.openerHold = { at: new Date(now).toISOString(), reason: "The Marketplace list could not be opened after " + OPENER_MAX_ATTEMPTS + " attempts. Press \"Reset safety stop\" to try again." };
+    state.openerHold = { at: new Date(now).toISOString(), reason: "The Marketplace list could not be opened after " + OPENER_MAX_ATTEMPTS + " attempts. Retrying every 30 minutes; press \"Reset safety stop\" to try now." };
     logEvent(state, "opener-hold", { reason: state.openerHold.reason });
     return { ok: false, hold: true, reason: state.openerHold.reason };
   }
@@ -124,12 +132,10 @@ export function resetSafetyStop(state) {
   logEvent(state, "safety-reset", { requested: true, hadStop: had });
 }
 
+// Auto stays on after a restart (owner's decision, 24 Nov 2026): it acts only
+// once the account lock and the Marketplace list check pass, and catches up
+// from the persisted ledger. Owner-approved Send is never restored.
 export function startupMode(state) {
-  if (state.mode === "auto") {
-    setMode(state, "observe");
-    logEvent(state, "auto-not-restored", { reason: "Service restarted; automatic replies must be switched on again" });
-    return true;
-  }
   if (state.mode !== "send") return false;
   setMode(state, "off");
   logEvent(state, "send-not-restored", { reason: "Service restarted; Send must be switched on again" });
@@ -274,7 +280,7 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
     if (state.mode === "observe") state.observedUnread = unread;
     logEvent(state, "baseline", { list, rows: rows.length, unreadLeftForPerson: unread.length });
     // Only an explicitly queued pilot conversation can be waiting here.
-    return { open: state.mode === "observe" ? null : state.pendingOpen[0] || null };
+    if (state.mode !== "auto") return { open: state.mode === "observe" ? null : state.pendingOpen[0] || null };
   }
   if (state.mode === "observe") {
     // Passive: record the arrival, nothing more. Nothing is queued to open,
@@ -283,33 +289,7 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
     state.observedUnread = unread;
     return { open: null };
   }
-  if (state.mode === "auto") {
-    // Only a conversation never seen before (not in the list history, not in the
-    // ledger) that appears unread at the top is opened. A further message in an
-    // existing chat, or an old chat becoming unread again, is left for a person.
-    for (const f of fresh) {
-      if (f.reason !== "new-at-top" || state.threads[f.id]) {
-        logEvent(state, "unread-not-opened", { threadId: f.id, reason: f.reason, why: "Not a new conversation: left for a person" });
-        continue;
-      }
-      if (autoSentToday(state) >= AUTO_DAILY_CAP) {
-        logEvent(state, "unread-not-opened", { threadId: f.id, reason: f.reason, why: "Daily automatic reply limit reached: left for a person" });
-        continue;
-      }
-      if (state.pendingOpen.includes(f.id)) continue;
-      if (state.autoTestBuyer) {
-        // Test restriction: check the row's sender name before opening anything.
-        if (!(state.autoCheck ??= []).some((c) => c.threadId === f.id)) {
-          state.autoCheck.push({ threadId: f.id, at: new Date().toISOString() });
-          logEvent(state, "auto-check", { threadId: f.id, reason: f.reason });
-        }
-        continue;
-      }
-      state.pendingOpen.push(f.id);
-      logEvent(state, "unread", { threadId: f.id, reason: f.reason, auto: true });
-    }
-    return { open: state.pendingOpen[0] || null };
-  }
+  if (state.mode === "auto") return autoInbox(state, rows, first ? [] : fresh, first);
   for (const f of fresh) {
     // Draft and Send open only allowlisted conversations (or all, when the
     // owner has deliberately ticked "all conversations").
@@ -602,26 +582,37 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   for (const m of fresh.filter((item) => item.direction === "outgoing")) confirmByObservation(thread, m);
 
   let customer;
-  // Automatic replies: the opened conversation must itself prove it is new. The
-  // whole chat is visible from Facebook's "started this chat" notice, the seller
-  // has never replied, and the customer has sent at most 3 messages.
+  // Automatic replies: answer the customer messages after our last reply that
+  // were sent at or after the catch-up start (time decoded from the Facebook
+  // message ID), and that no reply of ours already covers. All of them together
+  // get one reply. A message whose time cannot be verified goes to a person.
   let auto = false;
-  if (state.mode === "auto" && flagged) {
+  if (state.mode === "auto") {
+    if (!flagged) return { action: "none", reason: "Conversation was not queued" };
+    (state.autoChecked ??= {})[threadId] = new Date().toISOString();
+    if (state.autoQueuedAt) delete state.autoQueuedAt[threadId];
+    thread.rebaseline = false;
     const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
-    const why = existing ? "Conversation already known to the assistant"
-      : !raw.some((m) => /\bstarted this chat\b/i.test(String(m?.text || ""))) ? "Start of the conversation not visible"
-      : state.autoTestBuyer && !raw.some((m) => normalise(m?.text).startsWith(normalise(state.autoTestBuyer) + " started this chat")) ? "Not the test buyer"
-      : messages.some((m) => m.direction === "outgoing") ? "The conversation already has a reply"
-      : messages.filter((m) => m.direction === "incoming").length > AUTO_MAX_CUSTOMER_MESSAGES ? "More than " + AUTO_MAX_CUSTOMER_MESSAGES + " customer messages"
-      : null;
-    if (why) {
-      logEvent(state, "left-for-person", { threadId, why });
-      thread.rebaseline = false;
-      return { action: "none", reason: "Not answered automatically: " + why };
+    if (state.autoTestBuyer && !raw.some((m) => normalise(m?.text).startsWith(normalise(state.autoTestBuyer) + " started this chat"))) {
+      logEvent(state, "left-for-person", { threadId, why: "Not the test buyer" });
+      return { action: "none", reason: "Not the test buyer" };
     }
+    const from = autoFrom(state);
+    const covered = new Set(thread.jobs.filter((j) => ["confirmed", "claimed", "typed", "unconfirmed"].includes(j.status)).flatMap((j) => j.messageIds || []));
+    const lastOutgoing = messages.findLastIndex((m) => m.direction === "outgoing");
+    const recent = messages.slice(lastOutgoing + 1)
+      .filter((m) => m.direction === "incoming" && !covered.has(m.id))
+      .map((m) => ({ ...m, sentAt: messageTime(m.id) }))
+      .filter((m) => m.sentAt === null || m.sentAt >= from);
+    if (!recent.length) return { action: "none", reason: "No unanswered customer message since " + new Date(from).toISOString() };
+    if (recent.some((m) => m.sentAt === null)) {
+      thread.needsHuman = "Message time could not be verified";
+      logEvent(state, "escalate", { threadId, reason: thread.needsHuman });
+      return { action: "none", reason: thread.needsHuman };
+    }
+    customer = recent;
     auto = true;
-  }
-  if (!existing || existing.rebaseline) {
+  } else if (!existing || existing.rebaseline) {
     thread.rebaseline = false;
     // First sight. Only a conversation that became unread after the assistant
     // was switched on may be answered: its trailing incoming messages are new.
@@ -684,12 +675,87 @@ export function autoCheckTimeout(state, now = Date.now()) {
 }
 
 // ---- Automatic replies (mode "auto") ----
-// One reply per brand-new conversation, at most AUTO_DAILY_CAP a day (UK date),
-// only for a listing whose title names Rent2Buy and only with an ordinary Ask Me
-// or website answer containing the Rent2Buy link. Anything else goes to a person.
-const AUTO_DAILY_CAP = 20;
-const AUTO_MAX_CUSTOMER_MESSAGES = 3;
+// Every unanswered customer message sent since the catch-up start is answered,
+// several at once in one reply, only for a listing whose title names Rent2Buy
+// and only with an ordinary Ask Me or website answer containing the Rent2Buy
+// link. Complaints, requests for a person and Ask Me failures go to a person.
+const AUTO_START = "2026-11-24T12:00:00.000Z"; // 12:00 UK time (GMT), owner's cutoff
 const AUTO_MAX_FAILURES = 2;
+const AUTO_OPEN_MS = 240_000;
+const AUTO_RECHECK_MS = 45_000;
+const AGE_UNIT = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+export const autoFrom = (state) => Date.parse(state.autoFrom || AUTO_START);
+
+// Facebook message IDs ("mid.$" + 21 bytes, base64url) carry the send time in
+// milliseconds at bits 111-151 (verified 24 Nov 2026 against 4 live messages).
+// Numeric IDs carry it in the bits above 22. Anything else: unknown (null).
+export function messageTime(id, now = Date.now()) {
+  const text = String(id || "");
+  let ms = null;
+  // 29 base64url characters; the first 21 decoded bytes hold the fields.
+  const mid = /^mid\.\$([A-Za-z0-9_-]{29})$/.exec(text);
+  if (mid) {
+    const bytes = Buffer.from(mid[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").subarray(0, 21);
+    if (bytes.length === 21) ms = Number((BigInt("0x" + bytes.toString("hex")) >> 16n) & ((1n << 41n) - 1n));
+  } else if (/^\d{15,20}$/.test(text)) {
+    ms = Number(BigInt(text) >> 22n);
+  }
+  return ms !== null && ms > Date.parse("2020-01-01") && ms < now + 300_000 ? ms : null;
+}
+
+// Which conversations to open. Besides unread arrivals, any Marketplace row
+// whose last message is the customer's ("You:" absent) and whose last activity
+// (Facebook's "5m", "2h"... age; the upper bound of the real time) is at or
+// after the catch-up start, and newer than our last check of that conversation.
+// This catches up after Edge or Windows was closed, and on follow-up questions.
+function autoInbox(state, rows, fresh, first, now = Date.now()) {
+  const from = autoFrom(state);
+  const checked = (state.autoChecked ??= {});
+  const queuedAt = (state.autoQueuedAt ??= {});
+  const head = state.pendingOpen[0];
+  if (head && queuedAt[head] && now - Date.parse(queuedAt[head]) > AUTO_OPEN_MS) {
+    state.pendingOpen.shift();
+    delete queuedAt[head];
+    checked[head] = new Date(now).toISOString();
+    logEvent(state, "left-for-person", { threadId: head, why: "Conversation could not be read within 4 minutes" });
+  }
+  const queue = (id, reason) => {
+    if (state.threads[id]?.needsHuman || state.pendingOpen.includes(id)) return;
+    if (state.autoTestBuyer) {
+      if (!(state.autoCheck ??= []).some((c) => c.threadId === id)) {
+        state.autoCheck.push({ threadId: id, at: new Date(now).toISOString() });
+        logEvent(state, "auto-check", { threadId: id, reason });
+      }
+      return;
+    }
+    state.pendingOpen.push(id);
+    queuedAt[id] = new Date(now).toISOString();
+    logEvent(state, "unread", { threadId: id, reason, auto: true });
+  };
+  const upperOf = (row) => {
+    const age = /^(\d{1,4})([mhdw])$/.exec(String(row?.age || ""));
+    return age ? now - Number(age[1]) * AGE_UNIT[age[2]] : row?.age === "now" ? now : null;
+  };
+  const byId = new Map(rows.map((row) => [String(row.id), row]));
+  for (const f of fresh) {
+    const row = byId.get(f.id);
+    const upper = upperOf(row);
+    if (row?.you === true || (upper !== null && upper < from)) continue;
+    queue(f.id, f.reason);
+  }
+  let aged = 0, ours = 0;
+  for (const row of rows) {
+    const upper = upperOf(row);
+    if (upper === null) continue;
+    aged++;
+    if (row.you === true) { ours++; continue; }
+    if (upper < from) continue;
+    if (upper <= (Date.parse(checked[row.id] || "") || 0) + AUTO_RECHECK_MS) continue;
+    queue(String(row.id), "customer activity since the catch-up start");
+  }
+  if (first) logEvent(state, "catchup-scan", { rows: rows.length, withAge: aged, lastMessageOurs: ours, queued: state.pendingOpen.length });
+  return { open: state.pendingOpen[0] || null };
+}
 const ukDate = (value) => new Date(value).toLocaleDateString("en-GB", { timeZone: "Europe/London" });
 export function autoSentToday(state, now = Date.now()) {
   const today = ukDate(now);
@@ -702,12 +768,11 @@ export function confidentRent2Buy(listingTitle) {
   return /rent\s*(?:2|to)\s*buy/i.test(text) && !/finance/i.test(text);
 }
 function autoSendBlock(state, thread, decision, job) {
-  if (!decision.auto) return "Not a new conversation";
+  if (!decision.auto) return "Not checked for an automatic reply";
   if (thread.product !== "rent2buy" || !confidentRent2Buy(thread.listingTitle)) return "Listing not confidently identified as Rent2Buy";
   if (!thread.listingId) return "Listing not verified in the conversation";
   if (!String(job.text).includes(RENT2BUY_WEBSITE)) return "Reply does not contain the Rent2Buy website link";
-  if (thread.jobs.some((other) => other !== job)) return "Conversation already has a reply or draft";
-  if (autoSentToday(state) >= AUTO_DAILY_CAP) return "Daily automatic reply limit reached";
+  if (thread.jobs.some((other) => other !== job && OPEN_JOB.has(other.status))) return "Another reply is already in progress";
   if (accountProblem(state)) return accountProblem(state);
   return null;
 }
@@ -781,7 +846,7 @@ export function authoriseSend(state, jobId) {
   if (!job || job.status !== "claimed") return { go: false, reason: "Unknown or already used send claim" };
   const sendAllowed = state.mode === "send" && (state.allowAll || state.allowThreads.includes(thread.id));
   const autoAllowed = state.mode === "auto" && job.auto === true && !accountProblem(state)
-    && !thread.jobs.some((other) => other !== job && ["typed", "confirmed", "unconfirmed"].includes(other.status));
+    && !thread.jobs.some((other) => other !== job && other.status === "typed");
   if (!(sendAllowed || autoAllowed) || thread.needsHuman) {
     job.status = "cancelled";
     logEvent(state, "cancel", { threadId: thread.id, jobId });
@@ -875,7 +940,7 @@ export function publicStatus(state) {
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,
     enabledAt: state.enabledAt,
-    auto: { sentToday: autoSentToday(state), dailyCap: AUTO_DAILY_CAP, testBuyer: state.autoTestBuyer || null },
+    auto: { sentToday: autoSentToday(state), from: new Date(autoFrom(state)).toISOString(), testBuyer: state.autoTestBuyer || null },
     baselineUnread: state.inboxBaseline?.unread.length ?? null,
     observedUnread: state.mode === "observe" ? (state.observedUnread || []) : [],
     pendingOpen: state.pendingOpen,
