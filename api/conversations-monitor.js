@@ -9,7 +9,8 @@ const API_KEY_HEADER = "x-marketing-customer-database-key";
 const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function allowed(request, environment) {
-  if (request.headers?.["x-vercel-cron"] === "1") return true;
+  // Vercel cron calls carry "Authorization: Bearer <CRON_SECRET>"; the x-vercel-cron
+  // header alone is not trusted (anyone can send it).
   const expected = environment.MARKETING_CUSTOMER_DATABASE_API_KEY;
   const given = request.headers?.[API_KEY_HEADER] || String(request.headers?.authorization || "").replace(/^Bearer\s+/i, "");
   return Boolean((expected && given === expected) || (environment.CRON_SECRET && given === environment.CRON_SECRET));
