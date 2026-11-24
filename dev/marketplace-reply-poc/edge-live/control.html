@@ -36,6 +36,7 @@
   <button data-mode="draft">Draft only</button>
   <button data-mode="send">Send</button>
   <button id="resetOpener" title="Use only after checking that no customer conversation was opened">Reset safety stop</button>
+  <button id="authoriseAccount" title="Lock the assistant to the Facebook account signed in to the assistant tab">Authorise signed-in account</button>
 </div>
 
 <section>
@@ -99,6 +100,8 @@ const EVENT = {
   "assistant-tab-not-created": (e) => "Assistant did not create another tab: " + e.why,
   "assistant-tab-shown": (e) => "Assistant tab shown for " + e.seconds + " s, then back to tab " + e.previousTabId,
   "show-tab-requested": (e) => "Requested: show the assistant tab for " + e.seconds + " s",
+  "account-authorised": (e) => "Facebook account authorised: " + e.account,
+  "opener-hold": (e) => "OPENER ON HOLD: " + e.reason,
   "safety-reset": () => "Safety stop reset requested by the owner",
   "visibility-assist": (e) => "Idle visibility assist: assistant tab shown briefly; Marketplace list " + (e.opened ? "opened" : "did NOT open"),
 };
@@ -113,6 +116,8 @@ function render(s) {
   const hb = s.heartbeat;
   const ext = s.extension || {};
   document.getElementById("status").textContent = [
+    "Facebook account: " + (s.account?.signedIn ? "signed in as " + s.account.signedIn : "not identified") + " | authorised: " + (s.account?.authorised || "none") + (s.account?.problem ? "  <-- " + s.account.problem : "  (OK)"),
+    ...(s.openerHold ? ["Opener ON HOLD: " + s.openerHold.reason] : ["Opener attempts in this series: " + (s.openerAttempts || 0) + " of 8"]),
     "Mode: " + s.mode + (s.enabledAt ? " since " + new Date(s.enabledAt).toLocaleString() : ""),
     "Edge assistant tab: " + (hb ? hb.health + ", " + hb.visibility + ", last report " + Math.round((Date.now() - Date.parse(hb.at)) / 1000) + " s ago" : "not connected"),
     "Conversation list: " + (hb ? hb.list + " (" + hb.rows + " rows checked, " + hb.unread + " unread), opener: " + (hb.opener || "-") : "-"),
@@ -183,6 +188,12 @@ document.getElementById("resetOpener").onclick = () => {
   if (!confirm("Reset the list opener's safety stop? Only do this after checking that no customer conversation was opened.")) return;
   api("/control", { resetOpener: true }).then(render);
 };
+document.getElementById("authoriseAccount").onclick = () => api("/status").then((s) => {
+  const id = s.heartbeat?.account;
+  if (!id) return alert("No Facebook account is identified in the assistant tab.");
+  if (!confirm("Authorise Facebook account " + id + " (https://www.facebook.com/profile.php?id=" + id + ")? The assistant will pause in any other account.")) return;
+  api("/control", { authoriseAccount: id }).then(render);
+});
 document.getElementById("pilotCancel").onclick = () => api("/control", { cancelPilot: true }).then(render);
 document.addEventListener("click", (e) => { if (e.target.dataset.resume) api("/control", { resumeThread: e.target.dataset.resume }).then(render); });
 refresh(); setInterval(refresh, 2000);

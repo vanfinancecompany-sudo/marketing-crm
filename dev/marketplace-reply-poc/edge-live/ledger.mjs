@@ -65,9 +65,56 @@ export function migrateSafetyStop(state) {
   return true;
 }
 
+// ---- Facebook account lock ----
+// The assistant works only in the owner's authorised seller account. Anything
+// else (another account such as Vansco, signed out, unidentifiable, or
+// Marketplace unavailable) pauses it: no clicks, navigation, reads or sends.
+export function authoriseAccount(state, id) {
+  const account = String(id || "");
+  if (!/^\d{1,32}$/.test(account)) throw new TypeError("No Facebook account to authorise");
+  state.authorisedAccount = account;
+  logEvent(state, "account-authorised", { account });
+}
+
+export function accountProblem(state) {
+  const hb = state.heartbeat;
+  if (!hb) return "The Edge assistant tab has not reported yet";
+  if (hb.health === "signed-out") return "Login required: Facebook is signed out in the assistant tab";
+  if (hb.health === "security-challenge") return "Facebook is showing a security check in the assistant tab";
+  if (hb.health === "marketplace-unavailable") return "Marketplace unavailable: Facebook shows the Marketplace ineligible page for the signed-in account";
+  if (!state.authorisedAccount) return "No Facebook account is authorised yet";
+  if (!hb.account) return "Facebook account cannot be identified in the assistant tab";
+  if (hb.account !== state.authorisedAccount) return "Wrong Facebook account: signed in as " + hb.account + ", authorised account is " + state.authorisedAccount;
+  return null;
+}
+
+// ---- Retry limit for opening the Marketplace list ----
+// Every list-opening click needs the service's permission. Delays grow from 20 s
+// to 10 min; after 8 failed attempts the opener is on hold until the owner resets
+// it. Counted here, so reloads and restarts cannot start a fresh series.
+const OPENER_MAX_ATTEMPTS = 8;
+export function permitOpenerClick(state, now = Date.now()) {
+  if (state.openerHold) return { ok: false, hold: true, reason: state.openerHold.reason };
+  const problem = accountProblem(state);
+  if (problem) return { ok: false, hold: true, reason: problem };
+  const a = (state.openerAttempts ??= { count: 0, lastAt: 0 });
+  const delay = a.count ? Math.min(20_000 * 2 ** (a.count - 1), 600_000) : 0;
+  if (now - a.lastAt < delay) return { ok: false, reason: "waiting for the retry delay" };
+  if (a.count >= OPENER_MAX_ATTEMPTS) {
+    state.openerHold = { at: new Date(now).toISOString(), reason: "The Marketplace list could not be opened after " + OPENER_MAX_ATTEMPTS + " attempts. Press \"Reset safety stop\" to try again." };
+    logEvent(state, "opener-hold", { reason: state.openerHold.reason });
+    return { ok: false, hold: true, reason: state.openerHold.reason };
+  }
+  a.count++;
+  a.lastAt = now;
+  return { ok: true, attempt: a.count };
+}
+
 export function resetSafetyStop(state) {
-  const had = Boolean(state.openerTrip);
+  const had = Boolean(state.openerTrip || state.openerHold);
   state.openerTrip = null;
+  state.openerHold = null;
+  state.openerAttempts = { count: 0, lastAt: 0 };
   state.resetOpenerRequested = true;
   logEvent(state, "safety-reset", { requested: true, hadStop: had });
 }
@@ -116,14 +163,16 @@ export function setMode(state, mode, { allowThreads, allowAll } = {}) {
   logEvent(state, "mode", { mode, allowAll: state.allowAll, allowThreads: state.allowThreads });
 }
 
-export function recordHeartbeat(state, { health, visibility, url, rows, unread, list, opener, ext }) {
+export function recordHeartbeat(state, { health, visibility, url, rows, unread, list, opener, ext, account }) {
   const previous = state.heartbeat;
   state.heartbeat = {
     at: new Date().toISOString(), health: String(health || "unknown"), visibility: String(visibility || ""),
     url: String(url || "").slice(0, 200), rows: Number(rows) || 0, unread: Number(unread) || 0,
     list: String(list || "none").slice(0, 40), opener: String(opener || "").slice(0, 160),
     ext: typeof ext === "string" ? ext.slice(0, 20) : null,
+    account: typeof account === "string" && /^\d{1,32}$/.test(account) ? account : null,
   };
+  if (list === "marketplace" && state.openerAttempts?.count) state.openerAttempts = { count: 0, lastAt: 0 };
   if (state.mode !== "off" && health !== previous?.health && health !== "healthy" && health !== "loading") {
     logEvent(state, "health", { health });
   }
@@ -227,6 +276,7 @@ const PILOT_TIMEOUT_MS = 180_000;
 export function startFind(state, { words }) {
   const w = String(words || "").trim();
   if (w.length < 3) throw new TypeError("Enter at least 3 characters to find");
+  if (accountProblem(state)) throw new TypeError(accountProblem(state));
   if (state.heartbeat?.list !== "marketplace") {
     throw new TypeError("The Marketplace list is not open in the assistant tab yet. Wait for the green monitoring banner.");
   }
@@ -260,6 +310,7 @@ export function startPilot(state, { threadId, mustContain }) {
   if (!THREAD_ID.test(id)) throw new TypeError("Pilot needs a conversation ID");
   if (words.length < 3) throw new TypeError("Pilot needs words that must appear in the conversation row");
   if (state.mode !== "observe") throw new TypeError("Start the pilot from Observe mode");
+  if (accountProblem(state)) throw new TypeError(accountProblem(state));
   if (state.heartbeat?.list !== "marketplace") {
     throw new TypeError("The Marketplace list is not open in the assistant tab yet (" + (state.heartbeat?.list || "no report") + "). Wait for the green monitoring banner, then run the pilot.");
   }
@@ -406,6 +457,7 @@ export function approveSend(state, { threadId, jobId, text }) {
   if (!job || !["draft", "cancelled"].includes(job.status)) throw new TypeError("That draft was not found or is not waiting for approval");
   if (normalise(job.text) !== normalise(text)) throw new TypeError("The approved text does not match the draft exactly");
   if (state.mode !== "observe") throw new TypeError("Approve the send from Observe mode");
+  if (accountProblem(state)) throw new TypeError(accountProblem(state));
   if (state.heartbeat?.list !== "marketplace") throw new TypeError("The Marketplace list is not open in the assistant tab yet");
   // A draft cancelled before Send was pressed (never sent) is re-issued as a
   // fresh copy of the identical text: the extension never presses Send twice
@@ -624,6 +676,9 @@ export function monitoringVerdict(state, now = Date.now()) {
   const hb = state.heartbeat;
   const reasons = [];
   if (state.mode === "off") reasons.push("The assistant is Off.");
+  const problem = accountProblem(state);
+  if (problem) reasons.push(problem + ".");
+  if (state.openerHold) reasons.push("Opener on hold: " + state.openerHold.reason);
   if (!hb) reasons.push("The Edge extension has not connected to this service yet.");
   else {
     const age = Math.round((now - Date.parse(hb.at)) / 1000);
@@ -646,6 +701,9 @@ export function publicStatus(state) {
     finder: state.finder || null,
     approvedSend: state.approvedSend || null,
     safetyStop: state.openerTrip || null,
+    account: { signedIn: state.heartbeat?.account || null, authorised: state.authorisedAccount || null, problem: accountProblem(state) },
+    openerHold: state.openerHold || null,
+    openerAttempts: state.openerAttempts?.count || 0,
     mode: state.mode,
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,

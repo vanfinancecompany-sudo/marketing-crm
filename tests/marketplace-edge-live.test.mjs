@@ -196,7 +196,7 @@ test("only the Marketplace list counts once lists are named; arrival reasons are
 test("the pilot refuses to start, or fails clearly, when the Marketplace list is not open", () => {
   const state = emptyState();
   setMode(state, "observe");
-  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "chats-only", opener: "no-marketplace-control", rows: 13 };
+  state.authorisedAccount = "111"; state.heartbeat = { at: new Date().toISOString(), health: "healthy", account: "111", list: "chats-only", opener: "no-marketplace-control", rows: 13 };
   assert.throws(() => startPilot(state, { threadId: "500", mustContain: "Renault Master" }), /Marketplace list is not open/);
   state.heartbeat.list = "marketplace";
   startPilot(state, { threadId: "500", mustContain: "Renault Master" });
@@ -218,7 +218,7 @@ test("the pilot refuses to start, or fails clearly, when the Marketplace list is
 test("the pilot opens its one conversation only when the row text matches, drafts once, then returns to Observe", () => {
   const state = emptyState();
   setMode(state, "observe");
-  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "marketplace", opener: "present", rows: 2 };
+  state.authorisedAccount = "111"; state.heartbeat = { at: new Date().toISOString(), health: "healthy", account: "111", list: "marketplace", opener: "present", rows: 2 };
   inspectInbox(state, [{ id: "500", unread: true, pos: 0, grid: "marketplace" }, { id: "501", unread: true, pos: 1, grid: "marketplace" }], { list: "marketplace" });
   assert.throws(() => startPilot(state, { threadId: "500", mustContain: "" }));
   startPilot(state, { threadId: "500", mustContain: "Renault Master" });
@@ -250,7 +250,7 @@ test("the monitoring verdict explains in plain words why monitoring is not worki
   const state = emptyState();
   assert.equal(monitoringVerdict(state).ok, false);
   setMode(state, "observe");
-  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "chats-only", opener: "no-marketplace-control", rows: 13 };
+  state.authorisedAccount = "111"; state.heartbeat = { at: new Date().toISOString(), health: "healthy", account: "111", list: "chats-only", opener: "no-marketplace-control", rows: 13 };
   assert.match(monitoringVerdict(state).reasons.join(" "), /Marketplace entry was not found/);
   state.heartbeat = { ...state.heartbeat, list: "marketplace", opener: "present" };
   inspectInbox(state, [{ id: "1", unread: false, pos: 0 }], { list: "marketplace" });
@@ -354,7 +354,7 @@ test("the finder needs the Marketplace list, records only IDs, and times out cle
   const { startFind, recordFind, findTimeout } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
   const state = emptyState();
   setMode(state, "observe");
-  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "chats-only", rows: 13 };
+  state.authorisedAccount = "111"; state.heartbeat = { at: new Date().toISOString(), health: "healthy", account: "111", list: "chats-only", rows: 13 };
   assert.throws(() => startFind(state, { words: "Renault Master" }), /not open/);
   state.heartbeat.list = "marketplace";
   startFind(state, { words: "Renault Master" });
@@ -399,3 +399,50 @@ test("the safety stop is service-wide: set by any tab's trip, carried over, clea
 });
 
 function logEventForTest(state, type, at, detail = {}) { state.events.push({ at, type, ...detail }); }
+
+test("account lock: wrong account, signed out, unidentified or ineligible pauses everything", async () => {
+  const { accountProblem, authoriseAccount, permitOpenerClick } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
+  const state = emptyState();
+  setMode(state, "observe");
+  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "marketplace", account: "111", rows: 5 };
+  assert.match(accountProblem(state), /No Facebook account is authorised/);
+  authoriseAccount(state, "111");
+  assert.equal(accountProblem(state), null);
+  state.heartbeat.account = "222"; // e.g. the Vansco account
+  assert.match(accountProblem(state), /^Wrong Facebook account: signed in as 222, authorised account is 111/);
+  assert.throws(() => startPilot(state, { threadId: "5", mustContain: "^Van + Nissan" }), /Wrong Facebook account/);
+  assert.equal(permitOpenerClick(state).ok, false);
+  state.heartbeat.account = null;
+  assert.match(accountProblem(state), /cannot be identified/);
+  state.heartbeat = { ...state.heartbeat, account: "111", health: "signed-out" };
+  assert.match(accountProblem(state), /^Login required/);
+  state.heartbeat.health = "marketplace-unavailable";
+  assert.match(accountProblem(state), /^Marketplace unavailable/);
+  assert.match(publicStatus(state).monitoring.reasons.join(" "), /Marketplace unavailable/);
+});
+
+test("retry limit: growing delays, hold after 8 attempts, kept until the owner resets; success resets the series", async () => {
+  const { authoriseAccount, permitOpenerClick, resetSafetyStop, recordHeartbeat: hb } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
+  const state = emptyState();
+  setMode(state, "observe");
+  authoriseAccount(state, "111");
+  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "chats", account: "111", rows: 5 };
+  let now = 1_000_000;
+  const delays = [];
+  for (let i = 0; i < 8; i++) {
+    let wait = 0;
+    while (!permitOpenerClick(state, now).ok) { now += 1_000; wait += 1_000; }
+    delays.push(wait);
+  }
+  assert.deepEqual(delays, [0, 20_000, 40_000, 80_000, 160_000, 320_000, 600_000, 600_000]);
+  now += 600_000;
+  const held = permitOpenerClick(state, now);
+  assert.equal(held.hold, true);
+  assert.match(held.reason, /after 8 attempts/);
+  assert.equal(permitOpenerClick(state, now + 86_400_000).ok, false, "still on hold a day later");
+  assert.match(publicStatus(state).monitoring.reasons.join(" "), /Opener on hold/);
+  resetSafetyStop(state);
+  assert.equal(permitOpenerClick(state, now).ok, true);
+  hb(state, { health: "healthy", list: "marketplace", account: "111", opener: "present", rows: 5 });
+  assert.equal(state.openerAttempts.count, 0, "a successful open resets the series");
+});

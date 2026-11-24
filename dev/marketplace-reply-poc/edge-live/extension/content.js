@@ -80,6 +80,7 @@
   function health() {
     if (/\/checkpoint\//.test(location.pathname) || document.querySelector('form[action*="checkpoint"]')) return "security-challenge";
     if (document.querySelector('input[name="email"]') && document.querySelector('input[name="pass"]')) return "signed-out";
+    if (/^\/marketplace\/ineligible/.test(location.pathname)) return "marketplace-unavailable";
     if (document.readyState !== "complete") return "loading";
     return "healthy";
   }
@@ -402,6 +403,9 @@
     const chatsOpen = Boolean(namedGrid(/^chats$/i));
     const target = chatsOpen ? marketplaceControl() : messengerButton();
     if (!target) return (openerStatus = chatsOpen ? "no-marketplace-control" : "no-messenger-button");
+    // Every click needs the service's permission (strict retry limit, survives reloads).
+    const permit = await api("/opener/permit", {});
+    if (!permit.ok) return (openerStatus = permit.hold ? "on hold: " + permit.reason : "waiting for the retry delay");
     const strategy = CLICK_STRATEGIES[marketplaceMisses % CLICK_STRATEGIES.length];
     if (chatsOpen) clickLikeMouse(target, strategy);
     else target.click(); // the Messenger button responds to a plain click (live)
@@ -619,8 +623,12 @@
       rows: inbox.length, unread: inbox.filter((row) => row.unread).length, list: listState(), opener: openerStatus,
       ext: chrome.runtime.getManifest().version,
       stopFlag: sessionStorage.getItem("r2bOpenerTripped") === "1",
+      // The signed-in Facebook account (its numeric ID), for the account lock.
+      account: document.cookie.match(/(?:^|;\s*)c_user=(\d+)/)?.[1] || null,
     });
     serviceStop = beat.safetyStop || null;
+    // Wrong account, signed out, unidentifiable or Marketplace unavailable: do nothing.
+    if (beat.paused) { openerStatus = "paused: " + beat.paused; return; }
     if (beat.showTab) chrome.runtime.sendMessage({ type: "show-assistant-tab", seconds: beat.showTab.seconds }).catch(() => {});
     if (beat.mode === "off" || state !== "healthy") return;
     if (beat.verifyThread && !threadId && listState() === "marketplace") await reportPilotRow(beat.verifyThread);

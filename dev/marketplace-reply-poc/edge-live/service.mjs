@@ -12,6 +12,7 @@ import {
   recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
   startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot, startFind, recordFind, findTimeout,
   migrateSafetyStop, resetSafetyStop, approveSend, approvedSendTimeout,
+  authoriseAccount, accountProblem, permitOpenerClick,
 } from "./ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -105,6 +106,7 @@ const ROUTES = {
     if (body.startPilot) startPilot(state, body.startPilot);
     if (body.find) startFind(state, body.find);
     if (body.approveSend) approveSend(state, body.approveSend);
+    if (body.authoriseAccount) authoriseAccount(state, body.authoriseAccount);
     if (body.showAssistantTab) { state.showTab = { seconds: Math.min(Number(body.showAssistantTab.seconds) || 10, 20), at: new Date().toISOString() }; logEvent(state, "show-tab-requested", { seconds: state.showTab.seconds }); }
     if (body.resetOpener) resetSafetyStop(state);
     return statusWithExtension();
@@ -118,6 +120,9 @@ const ROUTES = {
     pilotTimeout(state);
     approvedSendTimeout(state);
     findTimeout(state);
+    // Paused in any account problem: the page does nothing at all.
+    const paused = state.mode === "off" ? null : accountProblem(state);
+    if (paused) return { mode: state.mode, paused, extensionVersion: expectedExtensionVersion() };
     return {
       mode: state.mode,
       verifyThread: state.pilot?.status === "verifying" ? state.pilot.threadId : null,
@@ -147,8 +152,9 @@ const ROUTES = {
     return { ok: true };
   },
   "POST /assist": (body) => { logEvent(state, "visibility-assist", { opened: Boolean(body.opened) }); return { ok: true }; },
-  "POST /inbox": (body) => ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false, list: typeof body.list === "string" ? body.list.slice(0, 40) : null }) }),
-  "POST /thread": (body) => handleThread(body),
+  "POST /opener/permit": () => permitOpenerClick(state),
+  "POST /inbox": (body) => accountProblem(state) ? { mode: state.mode, open: null, paused: accountProblem(state) } : ({ mode: state.mode, ...inspectInbox(state, body.threads, { listReady: body.listReady !== false, list: typeof body.list === "string" ? body.list.slice(0, 40) : null }) }),
+  "POST /thread": (body) => accountProblem(state) ? { action: "none", reason: accountProblem(state) } : handleThread(body),
   "POST /go": (body) => authoriseSend(state, String(body.jobId)),
   "POST /sent": (body) => { recordSendResult(state, String(body.jobId), body); return { ok: true }; },
   "GET /diagnostics": () => diagnostics,
