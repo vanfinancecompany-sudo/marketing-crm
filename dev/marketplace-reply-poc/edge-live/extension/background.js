@@ -130,6 +130,17 @@ async function supervise() {
   // tab the active tab of its window, so Facebook keeps drawing the Marketplace
   // list without anyone bringing it forward. A minimised window is restored,
   // without taking focus, only when the PC has been idle for 2 minutes.
+  // The service supplies the assistant tab's page (the one proven to open the
+  // Messenger panel), so a newly authorised profile uses it too. When it
+  // changes, the assistant tab goes there once.
+  if (typeof status.assistantHome === "string" && /^https:\/\/www\.facebook\.com\//.test(status.assistantHome)) {
+    const { home: stored } = await chrome.storage.local.get("home");
+    if (stored !== status.assistantHome) {
+      await chrome.storage.local.set({ home: status.assistantHome });
+      await chrome.tabs.update(tab.id, { url: status.assistantHome }).catch(() => {});
+      tabEvent("assistant-tab-home", { tabId: tab.id, url: urlPattern(status.assistantHome) });
+    }
+  }
   if (status.dedicatedProfile === true) {
     if (!tab.active) {
       await chrome.tabs.update(tab.id, { active: true }).catch(() => {});

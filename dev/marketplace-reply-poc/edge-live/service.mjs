@@ -107,6 +107,9 @@ function statusWithExtension() {
     tabCensus: state.tabCensus || null,
     authorisedInstance: state.authorisedInstance || null,
     dedicatedProfile: Boolean(state.authorisedInstance && state.dedicatedInstance === state.authorisedInstance),
+    // Proven on the live account: opening Messenger from this page shows the
+    // chat panel (the default marketplace/inbox page does not, 24 Nov 14:51).
+    assistantHome: process.env.R2B_ASSISTANT_HOME || (fixture ? null : "https://www.facebook.com/marketplace/you/selling"),
     instancesSeen: state.instancesSeen || {},
     ...(process.env.R2B_TAB_CREATE_GAP_MS ? { tabCreateGapMs: Number(process.env.R2B_TAB_CREATE_GAP_MS) } : {}),
     extension: { running, expected, updatePending: Boolean(expected && state.heartbeat && running !== expected), manualReloadNeeded: Boolean(state.heartbeat && !running) },
