@@ -721,15 +721,19 @@
   // Live (23:34): typing line by line did not insert cleanly into Facebook's
   // message box (line breaks). Insert the reply as a plain-text paste, which
   // the box handles including line breaks; fall back to typing.
-  function typeInto(box, text) {
+  async function typeInto(box, text) {
     box.focus();
     try {
       const data = new DataTransfer();
       data.setData("text/plain", text);
       box.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
     } catch {}
+    // Facebook updates the box shortly after a paste (live, 08:08: the full reply
+    // was there, but checked too early). Wait before deciding to fall back.
+    await sleep(600);
     if (norm(box.innerText) === norm(text)) return;
     clear(box);
+    await sleep(300);
     box.focus();
     text.split("\n").forEach((line, index) => {
       if (index) document.execCommand("insertLineBreak");
@@ -752,7 +756,7 @@
     const box = composer();
     if (!box || !log) return api("/sent", { jobId, confirmed: false, error: "Composer not found" });
     if (norm(box.innerText)) return api("/sent", { jobId, confirmed: false, error: "Composer already contains text" });
-    typeInto(box, text);
+    await typeInto(box, text);
     await sleep(400);
     if (norm(box.innerText) !== norm(text)) {
       const got = norm(box.innerText).slice(0, 160); // our own reply text only
