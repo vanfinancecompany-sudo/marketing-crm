@@ -734,7 +734,9 @@ function autoInbox(state, rows, fresh, first, now = Date.now()) {
   };
   const upperOf = (row) => {
     const age = /^(\d{1,4})([mhdw])$/.exec(String(row?.age || ""));
-    return age ? now - Number(age[1]) * AGE_UNIT[age[2]] : row?.age === "now" ? now : null;
+    // Facebook may round ages to the nearest unit ("2h" can mean 1h30m), so the
+    // latest possible activity is half a unit later than the shown age.
+    return age ? now - Math.max(0, Number(age[1]) - 0.5) * AGE_UNIT[age[2]] : row?.age === "now" ? now : null;
   };
   const byId = new Map(rows.map((row) => [String(row.id), row]));
   for (const f of fresh) {
