@@ -446,3 +446,28 @@ test("retry limit: growing delays, hold after 8 attempts, kept until the owner r
   hb(state, { health: "healthy", list: "marketplace", account: "111", opener: "present", rows: 5 });
   assert.equal(state.openerAttempts.count, 0, "a successful open resets the series");
 });
+
+test("monitoring continues across an approved send: an enquiry arriving during or right after it is still reported", async () => {
+  const { authoriseAccount, approveSend, recordSendResult, authoriseSend } = await import("../dev/marketplace-reply-poc/edge-live/ledger.mjs");
+  const state = emptyState();
+  setMode(state, "observe");
+  authoriseAccount(state, "111");
+  state.heartbeat = { at: new Date().toISOString(), health: "healthy", list: "marketplace", account: "111", rows: 3 };
+  const list = (rows) => inspectInbox(state, rows.map((r, pos) => ({ ...r, pos, grid: "marketplace" })), { list: "marketplace" });
+  list([{ id: "1", unread: false }, { id: "2", unread: false }]); // baseline
+  state.threads["1"] = { id: "1", listingId: "9", jobs: [{ id: "j", status: "draft", text: "Hello https://x/", customer: "Hi" }], seen: ["m1"], history: [] };
+  approveSend(state, { threadId: "1", jobId: "j", text: "Hello https://x/" });
+  assert.equal(list([{ id: "1", unread: false }, { id: "2", unread: false }]).open, "1", "the approved conversation opens");
+  const send = inspectThread(state, { threadId: "1", listingId: "9", messages: [{ id: "m1", direction: "incoming", text: "Hi" }] }, OPTS);
+  assert.equal(send.action, "send");
+  // Enquiry 2 arrives while the reply is being sent.
+  list([{ id: "3", unread: true }, { id: "1", unread: false }, { id: "2", unread: false }]);
+  authoriseSend(state, send.jobId);
+  recordSendResult(state, send.jobId, { confirmed: true, outgoingId: "o1" });
+  assert.equal(state.mode, "observe");
+  assert.ok(state.inboxBaseline, "the list snapshot is kept, not retaken");
+  // Enquiry 3 arrives right after the send: reported as a new arrival.
+  list([{ id: "4", unread: true }, { id: "3", unread: true }, { id: "1", unread: false }, { id: "2", unread: false }]);
+  const reported = state.events.filter((e) => ["unread-observed", "unread-not-opened"].includes(e.type)).map((e) => e.threadId);
+  assert.deepEqual(reported, ["3", "4"]);
+});

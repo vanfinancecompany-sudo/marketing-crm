@@ -165,6 +165,14 @@ export function setMode(state, mode, { allowThreads, allowAll } = {}) {
   logEvent(state, "mode", { mode, allowAll: state.allowAll, allowThreads: state.allowThreads });
 }
 
+// Internal switches for a pilot or an approved send keep the list snapshot, so
+// an enquiry arriving at that moment is still reported (monitoring continues).
+function switchMode(state, mode, opts) {
+  const baseline = state.inboxBaseline;
+  setMode(state, mode, opts);
+  if (baseline) state.inboxBaseline = baseline;
+}
+
 export function recordHeartbeat(state, { health, visibility, url, rows, unread, list, opener, ext, account }) {
   const previous = state.heartbeat;
   state.heartbeat = {
@@ -214,7 +222,7 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
   if (state.mode === "off") return { open: null };
   // An owner-approved send goes straight to its verified conversation; reopening
   // the Marketplace list is not needed (that step needs the tab on screen).
-  if (state.mode === "send" && state.approvedSend) return { open: state.approvedSend.threadId };
+  if (state.mode === "send" && state.approvedSend && !listReady) return { open: state.approvedSend.threadId };
   if (!listReady) return { open: null, waiting: "Conversation list is not open yet" };
   let rows = (Array.isArray(threads) ? threads : []).filter((row) => THREAD_ID.test(String(row?.id))).slice(0, 600);
   if (rows.some((row) => typeof row.grid === "string")) rows = rows.filter((row) => row.grid === PRIMARY_LIST);
@@ -330,7 +338,7 @@ export function cancelPilot(state, why = "Cancelled") {
   state.pilot.status = why === "Cancelled" ? "cancelled" : "failed";
   state.pilot.error = why;
   logEvent(state, "pilot", { status: state.pilot.status, threadId: state.pilot.threadId, why });
-  if (wasOpening) setMode(state, "observe");
+  if (wasOpening) switchMode(state, "observe");
 }
 
 export function verifyPilot(state, { threadId, found, rowText }) {
@@ -371,7 +379,7 @@ export function verifyPilot(state, { threadId, found, rowText }) {
   pilot.rowText = String(rowText).replace(/\s+/g, " ").trim().slice(0, 300);
   pilot.status = "opening";
   pilot.openedAt = new Date().toISOString();
-  setMode(state, "draft", { allowThreads: [pilot.threadId], allowAll: false });
+  switchMode(state, "draft", { allowThreads: [pilot.threadId], allowAll: false });
   state.pendingOpen = [pilot.threadId];
   logEvent(state, "pilot", { status: "opening", threadId: pilot.threadId });
   return { ok: true };
@@ -416,7 +424,7 @@ export function finishPilot(state, { snapshot, structure, decision, outcome, ask
   pilot.status = "done";
   pilot.finishedAt = new Date().toISOString();
   logEvent(state, "pilot", { status: "done", threadId: pilot.threadId, draft: Boolean(outcome?.draft) });
-  setMode(state, "observe");
+  switchMode(state, "observe");
   return true;
 }
 
@@ -473,7 +481,7 @@ export function approveSend(state, { threadId, jobId, text }) {
     thread.jobs.push(approvedJob);
   }
   thread.needsHuman = null; // the owner has explicitly approved this send
-  setMode(state, "send", { allowThreads: [id], allowAll: false });
+  switchMode(state, "send", { allowThreads: [id], allowAll: false });
   state.approvedSend = { threadId: id, jobId: approvedJob.id, at: new Date().toISOString() };
   state.pendingOpen = [id];
   logEvent(state, "send-approved", { threadId: id, jobId });
@@ -484,7 +492,7 @@ function endApprovedSend(state, outcome) {
   if (!state.approvedSend) return;
   logEvent(state, "send-approved-end", { threadId: state.approvedSend.threadId, outcome });
   state.approvedSend = null;
-  setMode(state, "observe");
+  switchMode(state, "observe");
 }
 
 export function approvedSendTimeout(state, now = Date.now()) {
