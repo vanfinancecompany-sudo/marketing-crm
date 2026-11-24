@@ -349,11 +349,13 @@ function crmReportPayload() {
 setInterval(async () => {
   try {
     if (fixture || !existsSync(CRM_REPORT_FILE)) return;
-    const { url, token } = JSON.parse(readFileSync(CRM_REPORT_FILE, "utf8"));
+    const { url, token, bypass } = JSON.parse(readFileSync(CRM_REPORT_FILE, "utf8"));
     if (!/^https:\/\//.test(String(url)) || !token) return;
     const { cursor, body } = crmReportPayload();
     const response = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token,
+        // Optional Vercel automation bypass, for reporting to a protected Preview.
+        ...(bypass ? { "x-vercel-protection-bypass": String(bypass) } : {}) },
       body: JSON.stringify(body), signal: AbortSignal.timeout(10_000),
     });
     state.crmReportLast = { at: new Date().toISOString(), ok: response.ok, status: response.status };
