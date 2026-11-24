@@ -24,6 +24,7 @@ async function email(environment, subject, lines) {
     apiKey: environment.SENDGRID_API_KEY, to, subject: `[Conversations & AI] ${subject}`,
     html: `<p>${lines.map(esc).join("</p><p>")}</p><p><a href="https://${esc(environment.VERCEL_PROJECT_PRODUCTION_URL || "marketing-crm-six.vercel.app")}/conversations-ai">Open Conversations &amp; AI</a></p>`,
     text: lines.join("\n"), categories: ["conversations-monitor"],
+    customArgs: { source: "conversations-monitor" }, // SendGrid rejects an empty custom_args
   });
   return true;
 }
