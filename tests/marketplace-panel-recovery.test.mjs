@@ -91,3 +91,13 @@ test("recovered Marketplace list clears the grace period and caps retries at thr
   await x.recover();
   assert.equal(x.reloads.length, 3, "new outage has new grace period");
 });
+
+test("Messenger Chats visible but Marketplace grid stuck also triggers bounded recovery", async () => {
+  const x = harness();
+  await x.recover(x.status, x.tab, { ...x.hb(), list: "chats" });
+  x.clock.now += 5 * 60_000 + 1;
+  await x.recover(x.status, x.tab, { ...x.hb(), list: "chats" });
+  assert.deepEqual(x.reloads, [12]);
+  await x.recover(x.status, x.tab, { ...x.hb(), list: "chats-only" });
+  assert.equal(x.saved.panelMissingSince, undefined, "a legitimately usable list clears recovery");
+});
