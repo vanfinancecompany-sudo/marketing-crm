@@ -154,6 +154,10 @@ async function supervise() {
   }
   // Nudge the content script; background timers are throttled by the browser.
   chrome.tabs.sendMessage(tab.id, { type: "tick" }).catch(() => {});
+  // The browser is alive but the Marketplace list may be missing entirely.
+  // This is separate from the silent-tab recovery below.
+  await recoverMissingMessengerPanel(tab, status, hb);
+
   // Silent tab (no report for 3 minutes). Live (24 Nov 13:38): after a Facebook
   // sign-out and sign-in in the assistant tab, its page script stopped and the
   // tab was never revived. Now: a tab that left Facebook goes back to the
@@ -175,6 +179,66 @@ async function supervise() {
         tabEvent("assistant-tab-recovered", { tabId: tab.id, how: "reloaded", status: tab.status || "", url: urlPattern(tab.url || "") });
       }
     }
+  }
+}
+
+// The page can keep heartbeating while Facebook refuses to display its
+// Messenger/Marketplace conversation panel. The normal silent-tab watchdog
+// cannot detect that case. Try a conservative reload of ONLY the dedicated
+// monitoring tab after five minutes of a healthy signed-in page with no list.
+// Never touch other Edge profiles, reply tabs, accounts, or customer messages.
+// Bound retries: no more than three per rolling hour, at least 10 minutes apart.
+const PANEL_MISSING_GRACE_MS = 5 * 60_000;
+const PANEL_RETRY_GAP_MS = 10 * 60_000;
+const PANEL_RETRY_WINDOW_MS = 60 * 60_000;
+const PANEL_RETRIES_PER_WINDOW = 3;
+
+async function recoverMissingMessengerPanel(tab, status, hb) {
+  const eligible = status.dedicatedProfile === true &&
+    status.mode === "auto" &&
+    status.monitoring?.ok === false &&
+    !status.safetyStop && !status.openerHold &&
+    !status.account?.problem &&
+    status.account?.authorised &&
+    status.account.signedIn === status.account.authorised &&
+    hb?.health === "healthy" && (hb?.list === "none" || hb?.list === "chats") &&
+    Number.isFinite(Date.parse(hb.at)) &&
+    Date.now() - Date.parse(hb.at) < STALE_HEARTBEAT_MS &&
+    /^https:\/\/www\.facebook\.com\/marketplace\//.test(tab.url || tab.pendingUrl || "");
+  if (!eligible) {
+    // Once the list returns, a future outage starts a fresh grace period.
+    await chrome.storage.local.remove("panelMissingSince");
+    return;
+  }
+  const values = await chrome.storage.local.get([
+    "panelMissingSince", "lastPanelRecoveryAt", "panelRecoveryWindowStart", "panelRecoveryAttempts",
+  ]);
+  const now = Date.now();
+  const since = values.panelMissingSince || now;
+  if (!values.panelMissingSince) {
+    await chrome.storage.local.set({ panelMissingSince: now });
+    return;
+  }
+  if (now - since < PANEL_MISSING_GRACE_MS || now - (values.lastPanelRecoveryAt || 0) < PANEL_RETRY_GAP_MS) return;
+  const windowStart = values.panelRecoveryWindowStart || now;
+  const newWindow = now - windowStart >= PANEL_RETRY_WINDOW_MS;
+  const attempts = newWindow ? 0 : (values.panelRecoveryAttempts || 0);
+  if (attempts >= PANEL_RETRIES_PER_WINDOW) return;
+  // Record the attempt first so a suspended/restarted service worker cannot
+  // enter a rapid reload loop.
+  await chrome.storage.local.set({
+    panelMissingSince: now,
+    lastPanelRecoveryAt: now,
+    panelRecoveryWindowStart: newWindow ? now : windowStart,
+    panelRecoveryAttempts: attempts + 1,
+  });
+  try {
+    await chrome.tabs.reload(tab.id);
+    tabEvent("assistant-panel-auto-reload", { tabId: tab.id, attempt: attempts + 1,
+      why: "Messenger panel still missing despite healthy page and active extension" });
+  } catch (error) {
+    tabEvent("assistant-panel-auto-reload-failed", { tabId: tab.id,
+      error: String(error?.message || error).slice(0, 100) });
   }
 }
 
