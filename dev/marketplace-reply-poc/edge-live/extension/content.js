@@ -771,12 +771,22 @@
     if (button) button.click();
     else box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
 
-    const head = norm(text).slice(0, 40).toLowerCase();
-    for (let i = 0; i < 30; i++) {
+    // Live (24 Nov, 08:10): the reply was delivered but shown as a link preview,
+    // so a strict "outgoing and starts with" check missed it. A NEW message
+    // (absent before Send) containing our reply's opening words or its link,
+    // anywhere in the message and whatever its layout, is our reply.
+    const lower = norm(text).toLowerCase();
+    const head = lower.slice(0, 40);
+    const link = (lower.match(/https?:\/\/\S+/) || [""])[0].replace(/\/+$/, "");
+    const isOurs = (m) => { const t = norm(m.text).toLowerCase(); return t.includes(head) || (link && t.includes(link)); };
+    let fresh = [];
+    for (let i = 0; i < 50; i++) {
       await sleep(500);
-      const sent = collectMessages(chatLog() || log).find((m) => !before.has(m.id) && m.direction === "outgoing" && norm(m.text).toLowerCase().startsWith(head));
+      fresh = collectMessages(chatLog() || log).filter((m) => !before.has(m.id));
+      const sent = fresh.find(isOurs);
       if (sent) return api("/sent", { jobId, confirmed: true, outgoingId: sent.id });
     }
-    return api("/sent", { jobId, confirmed: false, error: "No outgoing message appeared after sending" });
+    const seen = fresh.slice(-4).map((m) => m.direction + ": " + norm(m.text).slice(0, 60)).join(" | ") || "none";
+    return api("/sent", { jobId, confirmed: false, error: "No message containing the reply appeared within 25 s (new messages seen: " + seen + ")" });
   }
 })();

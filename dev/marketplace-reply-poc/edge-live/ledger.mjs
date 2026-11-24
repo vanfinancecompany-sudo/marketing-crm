@@ -579,8 +579,12 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
 function confirmByObservation(thread, outgoing) {
   const job = thread.jobs.findLast((item) => OPEN_JOB.has(item.status) || item.status === "unconfirmed");
   if (!job) return;
-  const head = normalise(job.text).slice(0, 40);
-  if (head && normalise(outgoing.text).startsWith(head)) {
+  // Same matching as the page: opening words or the reply's link, anywhere.
+  const reply = normalise(job.text);
+  const head = reply.slice(0, 40);
+  const link = (reply.match(/https?:\/\/\S+/) || [""])[0].replace(/\/+$/, "");
+  const seen = normalise(outgoing.text);
+  if (head && (seen.includes(head) || (link && seen.includes(link)))) {
     job.status = "confirmed";
     job.outgoingId = outgoing.id;
     if (thread.needsHuman === "A previous reply could not be confirmed") thread.needsHuman = null;
