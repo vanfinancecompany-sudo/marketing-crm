@@ -106,6 +106,7 @@ function statusWithExtension() {
     // A pre-0.3.0 extension reports no version and cannot update itself.
     tabCensus: state.tabCensus || null,
     authorisedInstance: state.authorisedInstance || null,
+    dedicatedProfile: Boolean(state.authorisedInstance && state.dedicatedInstance === state.authorisedInstance),
     instancesSeen: state.instancesSeen || {},
     ...(process.env.R2B_TAB_CREATE_GAP_MS ? { tabCreateGapMs: Number(process.env.R2B_TAB_CREATE_GAP_MS) } : {}),
     extension: { running, expected, updatePending: Boolean(expected && state.heartbeat && running !== expected), manualReloadNeeded: Boolean(state.heartbeat && !running) },
@@ -129,6 +130,12 @@ const ROUTES = {
       state.inboxBaseline = null;
       state.pendingOpen = [];
       logEvent(state, "profile-authorised", { instance: id.slice(0, 8) });
+    }
+    // The authorised profile is a dedicated assistant profile (its window holds
+    // only the assistant), so its tab may be kept active there.
+    if (typeof body.dedicatedProfile === "boolean") {
+      state.dedicatedInstance = body.dedicatedProfile ? state.authorisedInstance || null : null;
+      logEvent(state, "dedicated-profile", { on: body.dedicatedProfile });
     }
     if (body.resumeThread) resumeThread(state, String(body.resumeThread));
     if (body.cancelPilot) cancelPilot(state);

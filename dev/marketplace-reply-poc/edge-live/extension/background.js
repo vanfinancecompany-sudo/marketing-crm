@@ -81,7 +81,8 @@ async function ensureTab(status = {}) {
     // The only place the assistant ever creates a tab.
     const reason = tabId === null ? "no assistant tab recorded in this Edge session" : "recorded assistant tab " + tabId + " no longer exists";
     creatingTab = { reason, at: Date.now() };
-    tab = await chrome.tabs.create({ url: home, pinned: true, active: false });
+    // In the dedicated assistant profile the tab is the active one in its window.
+    tab = await chrome.tabs.create({ url: home, pinned: true, active: status.dedicatedProfile === true });
     tabEvent("assistant-tab-created", { tabId: tab.id, reason });
   }
   await chrome.storage.session.set({ tabId: tab.id });
@@ -125,6 +126,21 @@ async function supervise() {
   if (status.mode === "off") return;
   const tab = await ensureTab(status);
   if (!tab) return;
+  // Dedicated assistant profile (nothing else lives there): keep the assistant
+  // tab the active tab of its window, so Facebook keeps drawing the Marketplace
+  // list without anyone bringing it forward. A minimised window is restored,
+  // without taking focus, only when the PC has been idle for 2 minutes.
+  if (status.dedicatedProfile === true) {
+    if (!tab.active) {
+      await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+      tabEvent("assistant-tab-activated", { tabId: tab.id, why: "dedicated profile: keep the assistant tab active in its window" });
+    }
+    const win = await chrome.windows.get(tab.windowId).catch(() => null);
+    if (win?.state === "minimized" && (await chrome.idle.queryState(120)) !== "active") {
+      await chrome.windows.update(tab.windowId, { state: "normal", focused: false }).catch(() => {});
+      tabEvent("assistant-window-restored", { tabId: tab.id, why: "dedicated profile window was minimised; PC idle" });
+    }
+  }
   // Nudge the content script; background timers are throttled by the browser.
   chrome.tabs.sendMessage(tab.id, { type: "tick" }).catch(() => {});
   // Silent tab (no report for 3 minutes). Live (24 Nov 13:38): after a Facebook
