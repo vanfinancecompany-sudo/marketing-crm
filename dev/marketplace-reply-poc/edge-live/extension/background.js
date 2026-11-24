@@ -223,7 +223,12 @@ async function showAssistantTab(tab, seconds) {
   try {
     await chrome.tabs.update(tab.id, { active: true });
     if (wasMinimized) await chrome.windows.update(tab.windowId, { state: "normal", focused: true }).catch(() => {});
-    else if (!wasFocused) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    // Windows will not let a background app take focus (live, 08:04: Claude stayed
+    // in front). Restoring from minimised is allowed and brings the window up.
+    else if (!wasFocused) {
+      await chrome.windows.update(tab.windowId, { state: "minimized" }).catch(() => {});
+      await chrome.windows.update(tab.windowId, { state: "normal", focused: true }).catch(() => {});
+    }
     await new Promise((r) => setTimeout(r, ms));
   } finally {
     if (previous && previous.id !== tab.id) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});

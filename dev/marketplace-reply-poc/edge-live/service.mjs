@@ -107,7 +107,7 @@ const ROUTES = {
     if (body.find) startFind(state, body.find);
     if (body.approveSend) approveSend(state, body.approveSend);
     if (body.authoriseAccount) authoriseAccount(state, body.authoriseAccount);
-    if (body.showAssistantTab) { state.showTab = { seconds: Math.min(Number(body.showAssistantTab.seconds) || 10, 20), at: new Date().toISOString() }; logEvent(state, "show-tab-requested", { seconds: state.showTab.seconds }); }
+    if (body.showAssistantTab) { state.showTab = { seconds: Math.min(Number(body.showAssistantTab.seconds) || 10, 20), at: new Date().toISOString() }; state.showUntil = new Date(Date.now() + (state.showTab.seconds + 10) * 1000).toISOString(); logEvent(state, "show-tab-requested", { seconds: state.showTab.seconds }); }
     if (body.resetOpener) resetSafetyStop(state);
     return statusWithExtension();
   },
