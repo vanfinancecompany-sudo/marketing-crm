@@ -83,6 +83,19 @@ async function handleThread(body) {
   return result;
 }
 
+// Owner-requested: regenerate the waiting draft for one conversation from the
+// same customer message through the normal pipeline (after a routing fix).
+async function redraftLatest(threadId) {
+  const thread = state.threads[threadId];
+  const job = thread?.jobs.findLast((j) => j.status === "draft");
+  if (!job) throw new Error("No waiting draft for that conversation");
+  const draft = await draftMarketplaceReply({ product: thread.product, message: job.customer, history: [] }, { respond: STUB ? stubResponder : liveResponder(thread) });
+  if (!draft.text) throw new Error("The new draft was handed to a person: " + draft.reason);
+  job.status = "superseded";
+  thread.jobs.push({ ...job, id: crypto.randomUUID(), text: draft.text, status: "draft", at: new Date().toISOString(), supersedes: job.id });
+  logEvent(state, "redraft", { threadId });
+}
+
 function statusWithExtension() {
   const status = publicStatus(state);
   const expected = expectedExtensionVersion();
@@ -99,7 +112,7 @@ function statusWithExtension() {
 
 const ROUTES = {
   "GET /status": () => statusWithExtension(),
-  "POST /control": (body) => {
+  "POST /control": async (body) => {
     if (body.resumeThread) resumeThread(state, String(body.resumeThread));
     if (body.cancelPilot) cancelPilot(state);
     if (body.mode) { cancelPilot(state); setMode(state, body.mode, body); }
@@ -107,6 +120,7 @@ const ROUTES = {
     if (body.find) startFind(state, body.find);
     if (body.approveSend) approveSend(state, body.approveSend);
     if (body.authoriseAccount) authoriseAccount(state, body.authoriseAccount);
+    if (body.redraft) await redraftLatest(String(body.redraft));
     if (body.showAssistantTab) { state.showTab = { seconds: Math.min(Number(body.showAssistantTab.seconds) || 10, 20), at: new Date().toISOString() }; state.showUntil = new Date(Date.now() + (state.showTab.seconds + 10) * 1000).toISOString(); logEvent(state, "show-tab-requested", { seconds: state.showTab.seconds }); }
     if (body.resetOpener) resetSafetyStop(state);
     return statusWithExtension();

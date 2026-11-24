@@ -20,6 +20,8 @@ const VEHICLE_DETAIL = new RegExp([
   String.raw`\b(?:mileage|miles|mot|service history|condition|how old|what year|reg(?:istration)?)\b.{0,30}\b(?:it|this|that|one)\b`,
   String.raw`\b(?:hold|save|put aside|reserve)\b.{0,20}\b(?:it|this|that|one|the van)\b`,
   String.raw`\bkeep (?:it|this|that(?: one)?|the van) (?:for|until|till) (?:me|\w+day|tomorrow|the weekend)\b`,
+  // Live test (24 Nov 2026): "How many previous owners are there?"
+  String.raw`\b(?:previous|former|prior)\s+(?:owners?|keepers?)\b|\bhow many (?:owners?|keepers?)\b|\bone[- ]owner\b`,
   // Live pilot (23 Nov 2026): "What's the vehicle's history?"
   String.raw`\b(?:vehicle|van|its|the)['’]?s? (?:service |full |accident )?history\b|\bhistory (?:of|on|for) (?:it|this|that|the (?:van|vehicle))\b|\b(?:any|full) (?:service )?history\b`,
 ].join("|"), "i");
