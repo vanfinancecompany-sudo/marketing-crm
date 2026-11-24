@@ -1,0 +1,367 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Marketing CRM read-only connector for Meta Muse",
+    "version": "1.0.0",
+    "description": "Read-only, aggregated marketing data for Van Finance Company and Rent2Buy Vans: stock, website analytics, Ask Me engagement, enquiry volumes, demand themes, campaigns and CRM capabilities. Use it to identify commercial opportunities. No writes, no campaign execution, no customer personal data."
+  },
+  "servers": [
+    {
+      "url": "https://marketing-crm-six.vercel.app"
+    }
+  ],
+  "security": [
+    {
+      "museKey": []
+    }
+  ],
+  "paths": {
+    "/api/muse/index": {
+      "get": {
+        "operationId": "getIndex",
+        "summary": "List available resources",
+        "description": "List available resources. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/overview": {
+      "get": {
+        "operationId": "getOverview",
+        "summary": "Marketing CRM snapshot counts",
+        "description": "Marketing CRM snapshot counts. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/stock": {
+      "get": {
+        "operationId": "getStock",
+        "summary": "Advertised stock with prices and 30-day views",
+        "description": "Advertised stock with prices and 30-day views. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search text (model, spec, registration).",
+            "schema": {
+              "type": "string",
+              "maxLength": 60
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items (1-200, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/website-analytics": {
+      "get": {
+        "operationId": "getWebsiteAnalytics",
+        "summary": "Website traffic and finance application funnel",
+        "description": "Website traffic and finance application funnel. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/ask-me": {
+      "get": {
+        "operationId": "getAskMe",
+        "summary": "Ask Me assistant engagement analytics",
+        "description": "Ask Me assistant engagement analytics. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "Look-back window in days (1-90).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/conversations": {
+      "get": {
+        "operationId": "getConversations",
+        "summary": "Enquiry volumes by channel, product and day",
+        "description": "Enquiry volumes by channel, product and day. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "Look-back window in days (1-90).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/opportunities": {
+      "get": {
+        "operationId": "getOpportunities",
+        "summary": "Customer demand themes and content gaps",
+        "description": "Customer demand themes and content gaps. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "description": "Filter by product.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "finance",
+                "rent2buy"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items (1-200, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/campaigns": {
+      "get": {
+        "operationId": "getCampaigns",
+        "summary": "Campaigns and email send totals",
+        "description": "Campaigns and email send totals. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items (1-200, default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    },
+    "/api/muse/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "summary": "Marketing CRM capabilities",
+        "description": "Marketing CRM capabilities. Read-only. Aggregated or redacted: no customer names, contact details, addresses, application or finance details, or conversation text.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong key"
+          },
+          "429": {
+            "description": "Rate limited (60/min)"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "museKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-muse-api-key"
+      }
+    },
+    "schemas": {
+      "Envelope": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "readOnly": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}
