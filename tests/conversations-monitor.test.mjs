@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { redactExcerpt, normaliseReport, buildMonitorIssues, summariseAskMeSessions, countEvents, withoutFacebookSessions } from "../lib/conversationsMonitor.js";
+import { redactExcerpt, normaliseReport, buildMonitorIssues, summariseAskMeSessions, countEvents, withoutFacebookSessions, isMonitorTestEvent } from "../lib/conversationsMonitor.js";
 import { handleConversationsReport } from "../api/conversations-report.js";
 import { runConversationsMonitor } from "../api/conversations-monitor.js";
+import { buildActivityEntries, getConversationsActivity } from "../api/conversations-activity.js";
 
 const now = new Date("2026-11-24T16:00:00Z");
 const ago = (min) => new Date(now.getTime() - min * 60_000).toISOString();
@@ -92,7 +93,7 @@ test("monitor: one alert per problem, email once after it persists, recovery ema
   state.conversation_channel_status[0] = { channel: "facebook_marketplace", last_heartbeat_at: new Date(now.getTime() + 1_790_000).toISOString(), status: { monitoring: true, mode: "auto", tabReportedAt: new Date(now.getTime() + 1_790_000).toISOString() } };
   await runConversationsMonitor(fakeDb(state), { now: new Date(now.getTime() + 1_800_000), sendEmail });
   await runConversationsMonitor(fakeDb(state), { now: new Date(now.getTime() + 1_800_000), sendEmail });
-  assert.equal(sent.filter((s) => s.startsWith("Recovered")).length, 1, "recovery emailed once");
+  assert.equal(sent.filter((s) => s.startsWith("Recovered")).length, 0, "recovery resolves silently by default");
   assert.equal(state.conversation_monitor_alerts[0].status, "resolved");
 });
 
@@ -104,4 +105,72 @@ test("Ask Me sessions created by the Facebook assistant are not counted as websi
   ];
   const kept = withoutFacebookSessions(sessions, [{ question_excerpt: "Do I need a deposit?", occurred_at: ago(31) }]);
   assert.equal(kept.length, 2, "only the matching session in the 10-minute window is excluded");
+});
+
+
+test("test telemetry never triggers alerts or appears in customer metrics", () => {
+  const testEvent = { source_id: "TEST-monitor-askme-failure-20261124", channel: "facebook_marketplace", kind: "needs_human", occurred_at: ago(1), reason: "TEST (monitor check, not a customer): Ask Me unavailable: Ask Me returned HTTP 503" };
+  assert.equal(isMonitorTestEvent(testEvent), true);
+  const healthy = { last_heartbeat_at: ago(1), status: { monitoring: true, mode: "auto", tabReportedAt: ago(1) } };
+  assert.deepEqual(buildMonitorIssues({ facebook: healthy, events: [testEvent], now }), []);
+  assert.deepEqual(countEvents([testEvent]), {});
+  assert.deepEqual(buildActivityEntries([], [testEvent]), []);
+});
+
+test("one genuine AI error stays dashboard-only; repeated recent errors are critical", () => {
+  const healthy = { last_heartbeat_at: ago(1), status: { monitoring: true, mode: "auto", tabReportedAt: ago(1) } };
+  const failure = (minutes) => ({ source_id: `error-${minutes}`, channel: "facebook_marketplace", kind: "ai_failed", occurred_at: ago(minutes), reason: "Ask Me returned HTTP 503" });
+  const once = buildMonitorIssues({ facebook: healthy, events: [failure(3)], now });
+  assert.equal(once.length, 1);
+  assert.equal(once[0].severity, "warning", "single AI failure must not email");
+  const repeated = buildMonitorIssues({ facebook: healthy, events: [failure(1), failure(2), failure(3)], now });
+  assert.equal(repeated[0].severity, "critical", "three failures in fifteen minutes qualify");
+  const old = buildMonitorIssues({ facebook: healthy, events: [failure(20), failure(30), failure(40)], now });
+  assert.equal(old[0].severity, "warning", "old failures do not meet the fresh burst threshold");
+});
+
+test("no emails are sent for recovered incidents unless explicitly opted in", async () => {
+  const state = { conversation_channel_status: [{ channel: "facebook_marketplace", last_heartbeat_at: ago(30), status: {} }], conversation_events: [], conversation_monitor_alerts: [] };
+  const sent = [];
+  const sendEmail = async (_, title) => { sent.push(title); return true; };
+  await runConversationsMonitor(fakeDb(state), { now, sendEmail });
+  await runConversationsMonitor(fakeDb(state), { now: new Date(now.getTime() + 600_000), sendEmail });
+  const recoveredAt = new Date(now.getTime() + 660_000);
+  state.conversation_channel_status[0] = { channel: "facebook_marketplace", last_heartbeat_at: recoveredAt.toISOString(), status: { monitoring: true, mode: "auto", tabReportedAt: recoveredAt.toISOString() } };
+  await runConversationsMonitor(fakeDb(state), { now: recoveredAt, sendEmail });
+  assert.equal(sent.filter((title) => title.startsWith("Problem")).length, 1);
+  assert.equal(sent.filter((title) => title.startsWith("Recovered")).length, 0);
+  assert.equal(state.conversation_monitor_alerts[0].status, "resolved");
+});
+
+test("on-demand history search includes all retained sessions, with 20 items per page", async () => {
+  const sessions = Array.from({ length: 45 }, (_, i) => ({
+    product_lock: "rent2buy", last_activity_at: ago(i + 1),
+    conversation_history: [{ role: "user", content: i === 42 ? "Where is the purple pickup?" : `Question ${i}` },
+      { role: "assistant", content: i === 42 ? "The purple pickup is being prepared." : `Reply ${i}` }],
+  }));
+  const store = { ai_customer_sessions: sessions, conversation_events: [
+    { source_id: "facebook-1", channel: "facebook_marketplace", kind: "answered", occurred_at: ago(1), question_excerpt: "How much?", reply_excerpt: "£595 plus VAT" },
+    { source_id: "TEST-monitor-x", channel: "facebook_marketplace", kind: "needs_human", occurred_at: ago(1), reason: "TEST (monitor check, not a customer)" },
+  ] };
+  const db = { from(name) {
+    const rows = store[name] || [];
+    let minDate = ""; let column = "";
+    return { select() { return this; }, gte(key, date) { minDate = date; column = key; return this; },
+      order() { return this; }, range(start, end) {
+        return Promise.resolve({ data: rows.filter((r) => !minDate || r[column] >= minDate)
+          .slice(start, end + 1), error: null });
+      },
+    };
+  } };
+  const one = await getConversationsActivity(db, { days: 7, now });
+  assert.equal(one.total, 46, "all 45 Ask Me sessions and one Facebook reply; no test event");
+  assert.equal(one.entries.length, 20);
+  const last = await getConversationsActivity(db, { days: 7, page: 3, now });
+  assert.equal(last.entries.length, 6);
+  const match = await getConversationsActivity(db, { days: 7, search: "purple pickup", now });
+  assert.equal(match.total, 1);
+  assert.match(match.entries[0].reply_excerpt, /purple pickup/);
+  const fb = await getConversationsActivity(db, { days: 7, channel: "facebook_marketplace", now });
+  assert.equal(fb.total, 1);
 });
