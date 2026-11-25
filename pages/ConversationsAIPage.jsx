@@ -20,6 +20,62 @@ function Metric({ label, value }) {
   return <div className="competence-metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
+const RENEWAL_STATUS = {
+  queued: "Queued: open, check and prepare", submitted: "Submission confirmed (awaiting acceptance check)", accepted: "Accepted on Facebook",
+  awaiting_approval: "Awaiting admin approval", declined: "Declined by the group", skipped: "Skipped", failed: "Failed", needs_attention: "Needs manual attention", stopped: "Stopped (account problem)",
+};
+
+// Rent2Buy Facebook group renewals: separate from the Marketplace assistant.
+function RenewalsPanel({ data, error, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [maxDaily, setMaxDaily] = useState("");
+  async function post(body, confirmText) {
+    if (busy || (confirmText && !window.confirm(confirmText))) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/rent2buy-group-renewals", { method: "POST", headers: { "Content-Type": "application/json", [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey() }, body: JSON.stringify(body) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) window.alert(result.error || "Not saved.");
+      onChanged();
+    } finally { setBusy(false); }
+  }
+  const latest = data?.latest;
+  const isToday = latest && latest.date === data.today;
+  return (
+    <section className="panel"><div className="panel__header"><div><div className="eyebrow">Rent2Buy · Facebook Groups</div><h3>Group renewals (every 7 days)</h3>
+      <p>Daily 07:00 GMT queue of due Proven/Hot Rent2Buy groups. Posts are prepared with the existing helper and confirmed manually; one group never blocks the rest.</p></div></div>
+      {error ? <div className="notice notice--warning">{error}</div> : null}
+      {!data ? (!error ? <p>Loading renewal status…</p> : null) : <>
+        <p>
+          <label><input type="checkbox" checked={data.settings.enabled} disabled={busy} onChange={(e) => post({ action: "settings", enabled: e.target.checked }, e.target.checked ? "Enable the daily renewal queue?" : "Disable the daily renewal queue?")} /> Daily renewals enabled</label>
+          {" · "}Max per day{" "}
+          <input type="number" min="1" max="100" style={{ width: 60 }} value={maxDaily || data.settings.maxDaily} disabled={busy} onChange={(e) => setMaxDaily(e.target.value)} onBlur={() => maxDaily && Number(maxDaily) !== data.settings.maxDaily && post({ action: "settings", maxDaily: Number(maxDaily) }).then(() => setMaxDaily(""))} />
+          {" · "}Last daily run: {fmt(latest?.checkedAt)} · Next run: {fmt(data.nextRunAt)}
+        </p>
+        {latest ? <>
+          <div className="competence-metrics">
+            <Metric label="Groups due" value={latest.due} /><Metric label="In queue" value={latest.queued} /><Metric label="Processed" value={latest.processed} />
+            <Metric label="Submissions confirmed today" value={isToday ? latest.confirmedSubmissions : 0} /><Metric label="Accepted" value={latest.accepted} />
+            <Metric label="Awaiting approval" value={latest.awaitingApproval} /><Metric label="Skipped / failed" value={latest.skippedOrFailed} /><Metric label="Needs attention" value={latest.needsAttention} />
+          </div>
+          {latest.stopped ? <div className="notice notice--warning">Stopped {fmt(latest.stopped.at)}: {latest.stopped.reason}</div> : null}
+          <details><summary>Today's queue ({latest.queued})</summary><div className="competence-report-list">{latest.groups.map((g) => (
+            <div key={g.groupKey}><strong><a href={g.url} target="_blank" rel="noreferrer">{g.name}</a></strong> · {RENEWAL_STATUS[g.status] || g.status}{g.reason ? ` (${g.reason})` : ""}
+              {g.status === "queued" && g.issues.length ? <p>Check first: {g.issues.join(" · ")}</p> : null}
+              {isToday && g.status === "queued" && !latest.stopped ? <p>
+                <button type="button" className="button button--small" disabled={busy} onClick={() => post({ action: "outcome", groupUrl: g.url, status: "skipped", reason: window.prompt("Reason for skipping (e.g. group unavailable, membership required)?") || "" })}>Skip</button>{" "}
+                <button type="button" className="button button--small" disabled={busy} onClick={() => post({ action: "outcome", groupUrl: g.url, status: "needs_attention", reason: window.prompt("What needs attention (e.g. publication not confirmed)?") || "" })}>Needs attention</button>
+              </p> : null}
+            </div>))}</div></details>
+          {isToday && !latest.stopped ? <p><button type="button" className="button button--small" disabled={busy} onClick={() => post({ action: "stop", reason: window.prompt("Account restriction or security challenge details?") || "Account problem" }, "Stop all remaining renewals today?")}>Stop today (account problem)</button></p> : null}
+          <details><summary>Daily renewal history</summary>{data.history.map((h) => <p key={h.date}>{h.date}: {h.confirmedSubmissions} confirmed / {h.queued} queued · {h.accepted} accepted · {h.awaitingApproval} awaiting · {h.skippedOrFailed} skipped/failed · {h.needsAttention} attention{h.stopped ? " · stopped" : ""}</p>)}</details>
+        </> : <p>No daily run recorded yet.</p>}
+        <small>Confirmed submissions come from the helper's recorded posts; acceptance comes from the existing acceptance check. Prepared adverts or an opened composer are never counted.</small>
+      </>}
+    </section>
+  );
+}
+
 export default function ConversationsAIPage() {
   const [accessStatus, setAccessStatus] = useState(() => (getStoredMarketingAccessKey() ? "checking" : "locked"));
   const [accessKey, setAccessKey] = useState("");
@@ -135,14 +191,7 @@ export default function ConversationsAIPage() {
       <section className="panel"><div className="panel__header"><div><div className="eyebrow">Facebook · Marketplace assistant</div><h3>Automatic replies</h3></div></div>
         <div className="competence-metrics"><Metric label="Received" value={num(fb.counts.received)} /><Metric label="Answered (delivery confirmed)" value={num(fb.counts.answered)} /><Metric label="Needing a person" value={num(fb.counts.needs_human)} /><Metric label="Send / confirmation failures" value={num(fb.counts.send_failed)} /><Metric label="Ask Me failures" value={num(fb.counts.ai_failed)} /><Metric label="Auto replies today (assistant)" value={num(fb.detail?.autoRepliesToday)} /></div>
       </section>
-      <section className="panel"><div className="panel__header"><div><div className="eyebrow">Rent2Buy · Facebook Groups</div><h3>Daily proven-group renewals</h3><p>One daily check. Publication uses the existing manual approval workflow.</p></div></div>
-        {renewalError ? <div className="notice notice--warning">{renewalError}</div> : null}
-        {renewalData ? <><p>{renewalData.enabled ? "Daily check enabled" : "Daily check disabled"} · Last check: {fmt(renewalData.latest?.checkedAt)}</p>
-          {renewalData.latest ? <><div className="competence-metrics"><Metric label="Due at last check" value={renewalData.latest.due} /><Metric label="In daily queue" value={renewalData.latest.queued} /><Metric label="Due requiring review" value={renewalData.latest.needsReview} /><Metric label="CRM renewals recorded today" value={renewalData.latest.date === renewalData.today ? renewalData.latest.recorded : 0} /></div>
-          <details><summary>Review latest queue</summary><div className="competence-report-list">{renewalData.latest.groups.map(g => <div key={g.groupKey}><strong>{g.name}</strong><p>{g.recorded ? "CRM submission recorded" : g.issues.length ? g.issues.join(" · ") : "Ready for manual confirmation"}</p></div>)}</div></details>
-          <details><summary>Daily renewal history</summary>{renewalData.history.map(h => <p key={h.date}>{h.date}: {h.recorded} recorded / {h.queued} queued · {h.needsReview} due requiring review</p>)}</details></> : <p>No daily check recorded yet.</p>}
-          <small>Recorded submissions are CRM activity, not independent proof of Facebook publication or approval.</small></> : !renewalError ? <p>Loading renewal status…</p> : null}
-      </section>
+      <RenewalsPanel data={renewalData} error={renewalError} onChanged={() => refresh(days)} />
       <section className="panel">
         <div className="panel__header">
           <div><div className="eyebrow">Recent activity</div><h3>Questions and AI replies</h3></div>
