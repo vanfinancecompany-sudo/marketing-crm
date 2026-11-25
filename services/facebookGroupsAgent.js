@@ -711,11 +711,17 @@ export function groupPipeline(group) {
   return "new";
 }
 
-export function prepareFacebookGroupPost({ group, vehicle, caption, productKey, captionCopied = false }) {
-  if (!group?.url) return Promise.reject(new Error("Choose a Facebook group first."));
-  if (!vehicle) return Promise.reject(new Error("Choose a van first."));
-  const id = requestId("group-post");
-  const job = {
+export function requestGroupRenewalHelper(command, jobId) {
+  return messageRoundTrip("VFC_GROUP_RENEWAL_REQUEST", "VFC_GROUP_RENEWAL_RESPONSE", {
+    id: requestId("group-renewal"), command, jobId,
+  });
+}
+
+export function buildFacebookGroupPostJob({ group, vehicle, caption, productKey, captionCopied = false, renewal }) {
+  if (!group?.url) throw new Error("Choose a Facebook group first.");
+  if (!vehicle) throw new Error("Choose a van first.");
+  const id = renewal?.jobId || requestId("group-post");
+  return {
     id,
     productKey,
     groupUrl: normalizeFacebookGroupUrl(group.url),
@@ -726,8 +732,13 @@ export function prepareFacebookGroupPost({ group, vehicle, caption, productKey, 
     captionCopied: Boolean(captionCopied),
     imageUrl: vehicleImage(vehicle),
     createdAt: new Date().toISOString(),
+    ...(renewal && productKey === "rent2buy" ? { renewal: { date: renewal.date } } : {}),
   };
-  return messageRoundTrip(GROUP_POST_JOB, GROUP_POST_JOB_ACK, { id, job });
+}
+
+export async function prepareFacebookGroupPost(options) {
+  const job = buildFacebookGroupPostJob(options);
+  return messageRoundTrip(GROUP_POST_JOB, GROUP_POST_JOB_ACK, { id: job.id, job });
 }
 
 export function markGroupPosted(groups, groupUrl, details = {}) {
@@ -738,6 +749,7 @@ export function markGroupPosted(groups, groupUrl, details = {}) {
     return {
       ...group,
       lastPostedAt: postedAt,
+      ...(details.renewalPost ? { lastRenewalPostedAt: postedAt } : {}),
       lastPostCheckAt: "",
       postStatus: details.approvalState === "accepted" ? "accepted" : "awaiting",
       lastPostDetectedState: "",
@@ -873,6 +885,7 @@ export function startFacebookPostStatusCheck(groups, productKey, limit = 12) {
         url: group.url,
         registration: group.pendingRegistration,
         postedAt: group.lastPostedAt,
+        ...(productKey === "rent2buy" && group.lastRenewalPostedAt === group.lastPostedAt ? { renewalPost: true } : {}),
       })),
       startedAt: new Date().toISOString(),
     },

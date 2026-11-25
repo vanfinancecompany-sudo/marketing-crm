@@ -249,7 +249,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.28");
+  assert.equal(manifest.version, "1.2.29");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -642,12 +642,14 @@ function loadGroupHelperTestHooks({
   controls = [],
   labels = [],
   images = [],
+  feedback = [],
   locationHref = "https://www.facebook.com/groups/test/",
   runtimeSendMessage,
 } = {}) {
   const hooks = {};
   const appended = [];
   const calls = [];
+  const listeners = new Map();
   let activeElement = null;
   let clock = 0;
 
@@ -697,12 +699,13 @@ function loadGroupHelperTestHooks({
       if (selector === 'button, [role="button"], a') return controls;
       if (selector === "div, span") return labels;
       if (selector === "img") return images;
+      if (selector.startsWith('[role="alert"]')) return feedback;
       return [];
     },
     getElementById: () => null,
     createElement: () => ({ style: {}, innerHTML: "", remove() {} }),
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    removeEventListener(type, listener) { if (listeners.get(type) === listener) listeners.delete(type); },
     execCommand(command) {
       if ((command === "selectAll" || command === "delete") && activeElement) {
         activeElement.innerText = "";
@@ -752,9 +755,46 @@ function loadGroupHelperTestHooks({
     document,
     appended,
     calls,
+    dispatch(type, event) { listeners.get(type)?.(event); },
     setActive(element) { activeElement = element; },
   };
 }
+
+test("renewal receipts require a trusted Post click and fresh, matching Facebook confirmation", async () => {
+  async function observe({ preexisting, newFeedback, caption = "REGISTRATION: AB12 CDE" }) {
+    const alert = (text) => ({ innerText: text, getBoundingClientRect: () => ({ width: 150, height: 24 }) });
+    const feedback = preexisting ? [alert(preexisting)] : [];
+    const receipts = [];
+    const harness = loadGroupHelperTestHooks({ feedback, runtimeSendMessage(message) {
+      receipts.push(message.result);
+      return { ok: true };
+    } });
+    const post = { ...alert("Post"), getAttribute: () => null };
+    harness.hooks.watchRenewalPost({ id: "job-one", registration: "AB12CDE" },
+      { contains: (element) => element === post }, { innerText: caption });
+    const click = { target: { closest: () => post } };
+    harness.dispatch("click", { ...click, isTrusted: false });
+    assert.equal(receipts.length, 0);
+    harness.dispatch("click", { ...click, isTrusted: true });
+    if (newFeedback) feedback.push(alert(newFeedback));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(receipts.length, 1);
+    return receipts[0];
+  }
+  const posted = await observe({ newFeedback: "Your post was published." });
+  assert.equal(posted.status, "submitted");
+  assert.equal(posted.approvalState, "submitted");
+  const pending = await observe({ newFeedback: "Your post is pending approval" });
+  assert.equal(pending.approvalState, "pending");
+  const stale = await observe({ preexisting: "Your post was published." });
+  assert.equal(stale.status, "needs_attention");
+  assert.equal(stale.duplicateRisk, true);
+  const wrongCaption = await observe({ newFeedback: "Your post was published.", caption: "" });
+  assert.equal(wrongCaption.duplicateRisk, true);
+  assert.equal(wrongCaption.status, "needs_attention");
+  assert.equal((await observe({ newFeedback: "Your account is restricted" })).status, "stop");
+  assert.equal((await observe({ newFeedback: "Couldn't publish your post" })).status, "failed");
+});
 
 test("Facebook group comment and reply editors are rejected", () => {
   const harness = loadGroupHelperTestHooks();

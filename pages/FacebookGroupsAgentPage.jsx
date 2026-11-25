@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   GROUP_AGENT_DISCOVERY_COMPLETE,
   GROUP_AGENT_INSPECTION_COMPLETE,
@@ -10,6 +10,7 @@ import {
   GROUP_POST_SUBMITTED,
   applyGroupInspection,
   archiveFacebookGroup,
+  buildFacebookGroupPostJob,
   getFacebookHelperStatus,
   groupDueState,
   groupPipeline,
@@ -22,6 +23,8 @@ import {
   normalizeFacebookGroupUrl,
   mergeDiscoveredGroups,
   prepareFacebookGroupPost,
+  persistFacebookGroupsRemote,
+  requestGroupRenewalHelper,
   recoverFacebookGroupsFromSnapshot,
   requestFacebookGroupRecoverySnapshot,
   restoreFacebookGroup,
@@ -34,6 +37,18 @@ import {
 } from "../services/facebookGroupsAgent.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
+import { getStoredMarketingAccessKey, MARKETING_ACCESS_HEADER } from "../services/marketingAccess.js";
+
+async function renewalRequest(body) {
+  const response = await fetch("/api/rent2buy-group-renewals", {
+    headers: { [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey(), ...(body ? { "Content-Type": "application/json" } : {}) },
+    ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
+    cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "The renewal queue is unavailable.");
+  return data;
+}
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -141,8 +156,14 @@ export default function FacebookGroupsAgentPage({
   const [pipelineView, setPipelineView] = useState("new");
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState("");
+  const [renewalRunning, setRenewalRunning] = useState(false);
+  const [renewalPending, setRenewalPending] = useState(false);
+  const [renewalDraft, setRenewalDraft] = useState(null);
+  const [renewalMessage, setRenewalMessage] = useState("");
+  const renewalWork = useRef(false);
+  const renewalRunningRef = useRef(false);
 
-  function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt }) {
+  function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt, renewalDate }) {
     const activityDate = londonDateKey(postedAt ? new Date(postedAt) : new Date());
     const canonicalUrl = normalizeFacebookGroupUrl(groupUrl || "");
     const sourceId = [
@@ -162,6 +183,7 @@ export default function FacebookGroupsAgentPage({
         group_url: canonicalUrl,
         group_name: clean(groupName),
         registration: clean(registration).toUpperCase(),
+        ...(renewalDate ? { renewal_run_date: renewalDate, submitted_at: postedAt } : {}),
       },
     });
   }
@@ -252,6 +274,116 @@ export default function FacebookGroupsAgentPage({
     }),
     [vehicles, selectedVehicleId, usedVehicleKeys],
   );
+  const supportsRenewals = isRent2Buy && helperStatus.capabilities.includes("groups-renewals");
+
+  function setRenewalRun(on) {
+    renewalRunningRef.current = on;
+    setRenewalRunning(on);
+  }
+
+  async function advanceRenewals() {
+    if (renewalWork.current) return;
+    renewalWork.current = true;
+    try {
+      const helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
+      setRenewalPending(Boolean(helper.pending));
+      setRenewalDraft(helper.pending || null);
+      if (helper.pending) return;
+      const result = helper.result;
+      if (result?.status === "submitted") {
+        const current = loadFacebookGroups();
+        const item = current.find((group) => normalizeFacebookGroupUrl(group.url).toLowerCase() === result.groupUrl.toLowerCase());
+        if (!item) throw new Error("Refresh the group records before saving this browser receipt.");
+        const updated = Date.parse(item.lastPostedAt) >= Date.parse(result.postedAt) ? current :
+          markGroupPosted(current, result.groupUrl, result);
+        // Only acknowledge the browser's durable receipt after both CRM writes.
+        await persistFacebookGroupsRemote(updated);
+        await recordGroupPostActivity({ ...result, renewalDate: result.date });
+        saveFacebookGroups(updated, { remote: false });
+        setGroups(updated);
+        markVehicleUsed(result.registration, result.vehicleId);
+        await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
+        setRenewalMessage(result.groupName + " · submission confirmed");
+        return;
+      }
+      if (result) {
+        await renewalRequest(result.status === "stop"
+          ? { action: "stop", reason: result.reason }
+          : { action: "outcome", groupUrl: result.groupUrl, runDate: result.date,
+            jobId: result.jobId, status: result.status, reason: result.reason, duplicateRisk: result.duplicateRisk });
+        await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
+        if (result.status === "stop") setRenewalRun(false);
+        setRenewalMessage(result.groupName + " · " + result.reason);
+        return;
+      }
+      if (!renewalRunningRef.current || vehiclesLoading) return;
+      const { today, latest, settings } = await renewalRequest();
+      if (!settings.enabled || latest?.date !== today || latest.stopped) {
+        setRenewalRun(false);
+        setRenewalMessage(latest?.stopped?.reason || "No active renewal queue for today.");
+        return;
+      }
+      const group = latest.groups.find((item) => item.status === "queued");
+      if (!group) {
+        setRenewalRun(false);
+        setRenewalMessage("No further groups to prepare today. Review exceptions in Conversations & AI.");
+        return;
+      }
+      const renewal = { date: today, jobId: crypto.randomUUID() };
+      const vehicle = rotationVehicles.find((item) => {
+        if (usedVehicleKeys.includes(vehicleKey(item))) return false;
+        const job = buildFacebookGroupPostJob({ group, vehicle: item, productKey, renewal });
+        return job.caption && job.imageUrl && job.registration;
+      });
+      if (!vehicle) {
+        setRenewalRun(false);
+        setRenewalMessage("No unused eligible van has both a caption and an image. Refresh stock or reset the rotation.");
+        return;
+      }
+      const claimed = await renewalRequest({ action: "claim", groupUrl: group.url, jobId: renewal.jobId });
+      if (!claimed.prepare) {
+        setRenewalMessage(group.name + " · " + claimed.reason);
+        return;
+      }
+      try {
+        await prepareFacebookGroupPost({ group, vehicle, productKey, renewal });
+        setRenewalPending(true);
+        setRenewalMessage(group.name + " · preparing the stock photo and caption.");
+      } catch (error) {
+        // An acknowledgement can be lost after the extension already stored the job.
+        const current = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
+        if (!current.pending && !current.result) {
+          await renewalRequest({ action: "outcome", groupUrl: group.url, jobId: renewal.jobId,
+            status: "failed", reason: error.message });
+        }
+      }
+    } catch (error) {
+      setRenewalRun(false);
+      setRenewalPending(false);
+      setRenewalMessage(error.message || "Could not continue the renewal queue.");
+    } finally {
+      renewalWork.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!supportsRenewals) return undefined;
+    void advanceRenewals();
+    if (!renewalRunning && !renewalPending) return undefined;
+    const timer = window.setInterval(advanceRenewals, 4000);
+    return () => window.clearInterval(timer);
+  }, [supportsRenewals, renewalRunning, renewalPending, rotationVehicles, usedVehicleKeys, vehiclesLoading]);
+
+  async function reviewRenewalDraft() {
+    if (!renewalDraft) return;
+    const copied = await copyGroupCaptionForFallback(renewalDraft.caption);
+    try {
+      await requestGroupRenewalHelper("OPEN_GROUP_RENEWAL_DRAFT", renewalDraft.id);
+      setRenewalMessage(copied ? "Caption copied. Paste it and approve with Facebook’s Post button." : "Use Copy caption in the Facebook draft.");
+    } catch (error) {
+      setRenewalMessage(error.message);
+    }
+  }
 
   const counts = useMemo(() => {
     const result = {
@@ -842,6 +974,22 @@ export default function FacebookGroupsAgentPage({
         </div>
 
         {message ? <div className="notice">{message}</div> : null}
+        {isRent2Buy ? <div className="notice">
+          <strong>Daily Proven / Hot renewals</strong>
+          <p>Keep this page open. Copy and paste the prepared caption, review the advert and click Post in Facebook. The helper then prepares the next eligible group.</p>
+          <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
+            onClick={() => setRenewalRun(!renewalRunning)}>
+            {renewalRunning ? "Pause after this group" : "Prepare today’s renewal queue"}
+          </button>
+          {renewalDraft ? <details>
+            <summary>{renewalDraft.prepared ? "Review prepared advert" : "Preparing advert"} · {renewalDraft.groupName}</summary>
+            <p>{renewalDraft.registration}</p>
+            <img src={renewalDraft.imageUrl} alt="Prepared stock photo" width="200" />
+            <p style={{ whiteSpace: "pre-wrap" }}>{renewalDraft.caption}</p>
+            <button className="button button--small" type="button" onClick={reviewRenewalDraft}>Copy caption and open Facebook draft</button>
+          </details> : null}
+          {renewalMessage ? <p role="status">{renewalMessage}</p> : null}
+        </div> : null}
         {lastRun ? (
           <div className="creative-card__meta">
             Last agent run: {lastRun.type === "discovery"

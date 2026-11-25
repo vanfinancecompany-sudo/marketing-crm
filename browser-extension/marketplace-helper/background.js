@@ -5,6 +5,124 @@ const MARKETPLACE_STOCK_SNAPSHOTS_KEY = "vfcMarketplaceStockSnapshotsV1";
 const PUBLISH_CONFIRM_WINDOW_MS = 10 * 60 * 1000;
 const GROUP_AGENT_STATE_KEY = "vfcFacebookGroupsAgentState";
 const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
+const RENEWAL_STATE_KEY = "vfcRent2BuyGroupRenewal";
+let renewalWork = Promise.resolve();
+
+function withRenewalLock(work) {
+  const result = renewalWork.then(work);
+  renewalWork = result.catch(() => {});
+  return result;
+}
+
+async function readRenewal() {
+  return (await chrome.storage.local.get(RENEWAL_STATE_KEY))[RENEWAL_STATE_KEY] || {};
+}
+
+function saveRenewal(value) {
+  return chrome.storage.local.set({ [RENEWAL_STATE_KEY]: value });
+}
+
+function senderOrigin(sender) {
+  try { return new URL(sender?.url).origin; } catch { return ""; }
+}
+
+async function finishRenewal(state, detail) {
+  const { pending } = state;
+  if (!pending) return;
+  const { job } = pending;
+  const result = {
+    ...detail, jobId: job.id, date: job.renewal.date, groupUrl: job.groupUrl,
+    groupName: job.groupName, productKey: "rent2buy", registration: job.registration, vehicleId: job.vehicleId, renewalPost: true,
+  };
+  await saveRenewal({ origin: state.origin, tabId: pending.tabId, result, pending: null,
+    restricted: detail.status === "stop" || state.restricted === true });
+}
+
+async function startRenewalJob(job, sender) {
+  const target = canonicalGroupUrl(job.groupUrl);
+  if (job.productKey !== "rent2buy" || !/^\d{4}-\d{2}-\d{2}$/.test(job.renewal?.date || "") ||
+      !target || !job.imageUrl || !job.registration) return { ok: false, error: "Invalid Rent2Buy renewal advert." };
+  const state = await readRenewal();
+  const origin = senderOrigin(sender);
+  if (state.pending?.job.id === job.id && state.origin === origin) return { ok: true, jobId: job.id };
+  if (state.pending || state.result) return { ok: false, error: "Finish the previous renewal preparation first." };
+  const existing = state.origin === origin && state.tabId ? await chrome.tabs.get(state.tabId).catch(() => null) : null;
+  const previousGroup = existing?.url && canonicalGroupUrl(existing.url);
+  const reusable = previousGroup && previousGroup === state.lastGroupUrl ? existing : null;
+  const tab = reusable || await chrome.tabs.create({ url: "about:blank", active: false });
+  const pending = { job: { ...job, groupUrl: target }, tabId: tab.id, storedAt: Date.now() };
+  await saveRenewal({ origin, tabId: tab.id, pending, restricted: state.restricted === true });
+  try {
+    await chrome.tabs.update(tab.id, { url: target });
+  } catch {
+    await finishRenewal({ origin, pending, restricted: state.restricted }, { status: "failed", reason: "Could not open the group in Facebook" });
+  }
+  return { ok: true, jobId: job.id };
+}
+
+async function handleRenewalMessage(message, sender) {
+  const state = await readRenewal();
+  if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT"].includes(message.type)) {
+    if (!state.origin || state.origin !== senderOrigin(sender)) return { ok: true };
+    if (message.type === "OPEN_GROUP_RENEWAL_DRAFT") {
+      const tab = state.pending?.job.id === message.jobId ? await chrome.tabs.get(state.pending.tabId).catch(() => null) : null;
+      if (!tab || canonicalGroupUrl(tab.url) !== state.pending.job.groupUrl) {
+        return { ok: false, error: "The prepared Facebook draft is no longer open." };
+      }
+      await chrome.tabs.update(tab.id, { active: true });
+      await chrome.windows.update(tab.windowId, { focused: true });
+      return { ok: true };
+    }
+    if (message.type === "ACK_GROUP_RENEWAL_RESULT") {
+      if (state.result?.jobId === message.jobId) {
+        if (state.result.status === "submitted" && state.result.approvalState !== "accepted") {
+          await upsertApprovalMonitorItem(state.result);
+          ensureApprovalAlarm();
+        }
+        await saveRenewal({ origin: state.origin, tabId: state.tabId, lastGroupUrl: state.result.groupUrl, restricted: state.restricted });
+      }
+      return { ok: true };
+    }
+    if (state.pending) {
+      const tab = await chrome.tabs.get(state.pending.tabId).catch(() => null);
+      if (!tab || (tab.status === "complete" && canonicalGroupUrl(tab.url) !== state.pending.job.groupUrl &&
+          Date.now() - state.pending.storedAt >= 15_000)) {
+        await finishRenewal(state, { status: "needs_attention", reason: "The Facebook tab closed or left the group. Check for a submission before retrying.", duplicateRisk: Boolean(state.pending.prepared) });
+        return { ok: true, result: (await readRenewal()).result };
+      }
+    }
+    if (state.pending && !state.pending.prepared && Date.now() - state.pending.storedAt >= 90_000) {
+      await finishRenewal(state, { status: "needs_attention", reason: "Facebook did not finish preparing the composer" });
+      return { ok: true, result: (await readRenewal()).result };
+    }
+    return { ok: true, pending: state.pending ? { ...state.pending.job, prepared: Boolean(state.pending.prepared) } : null,
+      result: state.result || null };
+  }
+  const pending = state.pending;
+  if (!pending || pending.tabId !== sender?.tab?.id || pending.job.id !== message.jobId ||
+      canonicalGroupUrl(sender.url) !== pending.job.groupUrl) return { ok: false };
+  if (message.type === "GROUP_RENEWAL_READY") {
+    await saveRenewal({ ...state, restricted: false, pending: { ...pending, prepared: true } });
+  } else {
+    const detail = message.result || {};
+    if (detail.status === "submitted" && (!pending.prepared || !["accepted", "pending", "submitted"].includes(detail.approvalState))) return { ok: false };
+    if (!["submitted", "failed", "needs_attention", "stop"].includes(detail.status)) return { ok: false };
+    await finishRenewal(state, { status: detail.status, reason: clean(detail.reason).slice(0, 200),
+      duplicateRisk: detail.duplicateRisk === true,
+      postedAt: detail.status === "submitted" ? new Date().toISOString() : null, approvalState: detail.approvalState });
+  }
+  return { ok: true };
+}
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (!change.url || !/^https:\/\/www\.facebook\.com\/(?:checkpoint|login|recover|two_step_verification|accountquality)(?:\/|[?#]|$)/i.test(change.url)) return;
+  withRenewalLock(async () => {
+    const state = await readRenewal();
+    if (state.pending?.tabId === tabId) {
+      await finishRenewal(state, { status: "stop", reason: "Facebook requires sign-in or account/security review" });
+    }
+  }).catch(() => {});
+});
 const LAST_GROUP_POST_EVENT_KEY = "vfcLastFacebookGroupPostEvent";
 const GROUP_APPROVAL_MONITOR_KEY = "vfcFacebookGroupApprovalMonitor";
 const LAST_GROUP_STATUS_EVENT_KEY = "vfcLastFacebookGroupStatusEvent";
@@ -220,9 +338,11 @@ async function startAutomaticApprovalCheck() {
   }
 
   const now = Date.now();
+  const { restricted } = await readRenewal();
   const due = [...items]
     .sort((a, b) => new Date(a.lastCheckedAt || a.postedAt || 0) - new Date(b.lastCheckedAt || b.postedAt || 0))
     .find((item) => {
+      if (item.renewalPost && (restricted || Number(item.checkCount || 0) >= 3)) return false;
       if (!item.lastCheckedAt) return true;
       const checkedAt = new Date(item.lastCheckedAt).getTime();
       return !Number.isFinite(checkedAt) || now - checkedAt >= GROUP_APPROVAL_CHECK_MINUTES * 60 * 1000;
@@ -311,6 +431,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-discovery",
           "groups-inspection",
           "groups-post-prep",
+          "groups-renewals",
           "groups-post-status",
           "groups-auto-approval-monitor",
           "groups-state-recovery",
@@ -726,6 +847,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: "Invalid Facebook group post job." });
         return;
       }
+      if (job.renewal) {
+        sendResponse(await withRenewalLock(() => startRenewalJob(job, sender)));
+        return;
+      }
       const pending = {
         job,
         crmTabId: sender?.tab?.id || null,
@@ -741,12 +866,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === "GET_PENDING_GROUP_POST_JOB") {
+      const renewal = await withRenewalLock(async () => {
+        const state = await readRenewal();
+        const current = state.pending;
+        if (!current || current.tabId !== sender?.tab?.id ||
+            canonicalGroupUrl(sender.url) !== current.job.groupUrl) return null;
+        if (current.prepared) {
+          await finishRenewal(state, { status: "needs_attention", reason: "The prepared browser draft was interrupted. Check for a submission before retrying.", duplicateRisk: true });
+          return null;
+        }
+        return current.job;
+      });
+      if (renewal) { sendResponse({ ok: true, job: renewal }); return; }
       const pending = await getPendingGroupPost();
       if (pending?.tabId && sender?.tab?.id && pending.tabId !== sender.tab.id) {
         sendResponse({ ok: true, job: null });
         return;
       }
       sendResponse({ ok: true, job: pending?.job || null });
+      return;
+    }
+
+    if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "GROUP_RENEWAL_READY", "GROUP_RENEWAL_OUTCOME"].includes(message?.type)) {
+      sendResponse(await withRenewalLock(() => handleRenewalMessage(message, sender)));
       return;
     }
 

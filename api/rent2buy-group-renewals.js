@@ -1,6 +1,6 @@
 // Rent2Buy Facebook group renewals: daily queue, reporting and controls.
 // GET ?run=1 (Vercel cron, CRON_SECRET): build today's queue once.
-// GET (CRM key): reporting. POST (CRM key): { action: "settings" | "outcome" | "stop" }.
+// GET (CRM key): reporting. POST (CRM key): { action: "settings" | "claim" | "outcome" | "stop" }.
 import { createClient } from "@supabase/supabase-js";
 import {
   OUTCOMES, RUN_TABLE, SETTINGS_TABLE, DEFAULT_DAILY_LIMIT, buildRenewalPlan, canonicalGroup, clampLimit, londonDay, nextRunAt, summarizeRenewalRun,
@@ -67,15 +67,18 @@ export async function readRenewals(db, now = new Date()) {
 }
 
 // Record what happened to one queued group today, or stop the day safely.
-async function updateToday(db, now, mutate) {
-  const date = londonDay(now);
+async function updateToday(db, now, mutate, date = londonDay(now)) {
   const { data: run, error } = await db.from(RUN_TABLE).select("run_date,plan,outcomes,stopped").eq("run_date", date).maybeSingle();
   if (error) throw error;
   if (!run) return { ok: false, error: "No renewal run today" };
   const patch = mutate(run);
   if (patch.error) return { ok: false, error: patch.error };
-  const saved = await db.from(RUN_TABLE).update(patch).eq("run_date", date);
+  let update = db.from(RUN_TABLE).update(patch).eq("run_date", date)
+    .eq("outcomes", JSON.stringify(run.outcomes || {}));
+  update = run.stopped ? update.eq("stopped", JSON.stringify(run.stopped)) : update.is("stopped", null);
+  const saved = await update.select("run_date").maybeSingle();
   if (saved.error) throw saved.error;
+  if (!saved.data) return { ok: false, conflict: true, error: "The queue changed. Refresh it before continuing." };
   return { ok: true };
 }
 
@@ -89,14 +92,51 @@ export async function handlePost(db, body, now = new Date()) {
     if (error) throw error;
     return { ok: true, settings: await readSettings(db) };
   }
+  if (action === "claim") {
+    const groupKey = canonicalGroup(body.groupUrl);
+    const jobId = clean(body.jobId, 80);
+    if (!groupKey || !/^[a-zA-Z0-9-]{10,80}$/.test(jobId)) return { ok: false, error: "A queued group and preparation ID are required" };
+    if (!(await readSettings(db)).enabled) return { ok: false, error: "The daily renewal queue is disabled" };
+    const { data: current, error } = await db.from("facebook_group_state")
+      .select("group_key,group_url,group_name,rent2buy,state").eq("rent2buy", true)
+      .eq("group_key", groupKey).maybeSingle();
+    if (error) throw error;
+    const stillDue = buildRenewalPlan(current ? [current] : [], now, 1).groups.length > 0;
+    let unresolved = ["pending", "awaiting", "not_found"].includes(current?.state?.postStatus);
+    if (stillDue && !unresolved) {
+      // Keep the duplicate check across daily runs until group state records a newer post.
+      const prior = await Promise.all([{ status: "preparing" }, { duplicateRisk: true }].map((outcome) =>
+        db.from(RUN_TABLE).select("run_date").lt("run_date", londonDay(now))
+          .gt("checked_at", new Date(current.state.lastPostedAt).toISOString())
+          .contains("outcomes", { [groupKey]: outcome }).limit(1)));
+      for (const result of prior) if (result.error) throw result.error;
+      unresolved = prior.some((result) => result.data?.length);
+    }
+    const reason = unresolved ? "Review the previous submission before renewing this group" : "The group is no longer due or eligible";
+    const claimed = await updateToday(db, now, (run) => {
+      if (run.stopped) return { error: "Renewals have been stopped for today" };
+      if (!(run.plan?.groups || []).some((group) => group.groupKey === groupKey)) return { error: "Group is not in today's queue" };
+      if (run.outcomes?.[groupKey]) return { error: "This group was already claimed or handled" };
+      const entry = stillDue && !unresolved
+        ? { status: "preparing", jobId }
+        : { status: "needs_attention", reason };
+      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...entry, at: now.toISOString() } } };
+    });
+    return claimed.ok ? { ...claimed, prepare: stillDue && !unresolved, reason: stillDue && !unresolved ? null : reason } : claimed;
+  }
   if (action === "outcome") {
     const groupKey = canonicalGroup(body.groupUrl);
     const status = OUTCOMES.includes(body.status) ? body.status : "";
     if (!groupKey || !status) return { ok: false, error: "Valid groupUrl and status (skipped, failed, needs_attention) required" };
+    const date = body.jobId && /^\d{4}-\d{2}-\d{2}$/.test(body.runDate || "") && body.runDate <= londonDay(now) ? body.runDate : londonDay(now);
     return updateToday(db, now, (run) => {
       if (!(run.plan?.groups || []).some((g) => g.groupKey === groupKey)) return { error: "Group is not in today's queue" };
-      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { status, reason: clean(body.reason) || null, at: now.toISOString() } } };
-    });
+      const previous = run.outcomes?.[groupKey];
+      if (body.jobId && previous?.jobId !== body.jobId) return { error: "The preparation ID does not match" };
+      if (previous?.status === "preparing" && previous.jobId !== body.jobId) return { error: "Review the active browser draft before changing this group" };
+      if (body.jobId && previous.status === status) return { outcomes: run.outcomes };
+      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { status, reason: clean(body.reason) || null, at: now.toISOString(), ...(body.jobId ? { jobId: body.jobId } : {}), ...(body.duplicateRisk === true ? { duplicateRisk: true } : {}) } } };
+    }, date);
   }
   if (action === "stop") {
     // Account restriction or security challenge: no further renewals today.

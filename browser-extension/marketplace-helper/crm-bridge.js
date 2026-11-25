@@ -196,6 +196,15 @@
       return;
     }
 
+    if (message.source === "vfc-marketing-crm" && message.type === "VFC_GROUP_RENEWAL_REQUEST") {
+      const command = message.command;
+      if (!["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT"].includes(command)) return;
+      const result = await chrome.runtime.sendMessage({ type: command, jobId: message.jobId }).catch(() => null);
+      window.postMessage({ source: "vfc-facebook-helper", type: "VFC_GROUP_RENEWAL_RESPONSE",
+        id: message.id, ...(result || { ok: false, error: "Renewal helper unavailable" }) }, window.location.origin);
+      return;
+    }
+
     if (message.source === "vfc-marketing-crm" && message.type === GROUP_POST_JOB) {
       const id = message.id || message.job?.id || "";
       try {

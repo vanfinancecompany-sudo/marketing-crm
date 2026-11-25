@@ -21,7 +21,7 @@ function Metric({ label, value }) {
 }
 
 const RENEWAL_STATUS = {
-  queued: "Queued: open, check and prepare", submitted: "Submission confirmed (awaiting acceptance check)", accepted: "Accepted on Facebook",
+  queued: "Queued: open, check and prepare", preparing: "Browser draft or result pending", submitted: "Submission confirmed (awaiting acceptance check)", accepted: "Accepted on Facebook",
   awaiting_approval: "Awaiting admin approval", declined: "Declined by the group", skipped: "Skipped", failed: "Failed", needs_attention: "Needs manual attention", stopped: "Stopped (account problem)",
 };
 
@@ -49,7 +49,7 @@ function RenewalsPanel({ data, error, onChanged }) {
         <p>
           <label><input type="checkbox" checked={data.settings.enabled} disabled={busy} onChange={(e) => post({ action: "settings", enabled: e.target.checked }, e.target.checked ? "Enable the daily renewal queue?" : "Disable the daily renewal queue?")} /> Daily renewals enabled</label>
           {" · "}Max per day{" "}
-          <input type="number" min="1" max="100" style={{ width: 60 }} value={maxDaily || data.settings.maxDaily} disabled={busy} onChange={(e) => setMaxDaily(e.target.value)} onBlur={() => maxDaily && Number(maxDaily) !== data.settings.maxDaily && post({ action: "settings", maxDaily: Number(maxDaily) }).then(() => setMaxDaily(""))} />
+          <input type="number" min="1" max="30" style={{ width: 60 }} value={maxDaily || data.settings.maxDaily} disabled={busy} onChange={(e) => setMaxDaily(e.target.value)} onBlur={() => maxDaily && Number(maxDaily) !== data.settings.maxDaily && post({ action: "settings", maxDaily: Number(maxDaily) }).then(() => setMaxDaily(""))} />
           {" · "}Last daily run: {fmt(latest?.checkedAt)} · Next run: {fmt(data.nextRunAt)}
         </p>
         {latest ? <>

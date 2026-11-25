@@ -11,6 +11,8 @@ import {
   markGroupPostStatus,
   markGroupPosted,
   mergeFacebookGroupsByRecentPostState,
+  prepareFacebookGroupPost,
+  requestGroupRenewalHelper,
   recoverFacebookGroupsFromSnapshot,
   saveFacebookGroups,
   startFacebookPostStatusCheck,
@@ -54,7 +56,8 @@ function makeRuntime() {
     async remove(key) { stored.delete(key); },
   };
   const sendToWorker = (message, tabId) => new Promise((resolve) => {
-    workerHandler(message, { tab: { id: tabId } }, resolve);
+    const url = tabId === 1 ? crmWindow.location.origin + "/" : tabs.findLast((tab) => tab.id === tabId)?.url;
+    workerHandler(message, { tab: { id: tabId }, url }, resolve);
   });
   const chromeWorker = {
     storage: { local: storage },
@@ -65,7 +68,8 @@ function makeRuntime() {
       getManifest: () => ({ version: "1.2.19" }),
     },
     tabs: {
-      async create(options) { tabs.push({ id: 2, url: options.url }); return { id: 2 }; },
+      async get(id) { return { ...tabs.findLast((tab) => tab.id === id), status: "complete" }; },
+      async create(options) { tabs.push({ id: 2, url: options.url, created: true, active: options.active }); return { id: 2 }; },
       async update(id, options) { tabs.push({ id, url: options.url }); return { id }; },
       async query() { return [{ id: 1 }]; },
       async sendMessage(id, message) { if (id === 1 && bridgeHandler) bridgeHandler(message); },
@@ -90,6 +94,7 @@ function makeRuntime() {
       innerText: text,
       getBoundingClientRect: () => ({ width: 500, height: 240 }),
       querySelector: (selector) => card && selector.includes("img") ? { tagName: "IMG" } : null,
+      querySelectorAll: () => [],
     };
     const document = {
       body: { innerText: `Search results for ${registration}\n${text}` },
@@ -127,7 +132,7 @@ function makeRuntime() {
     assert.fail("Expected extension message was not delivered");
   }
 
-  return { crmWindow, crmMessages, stored, tabs, runFacebookPage, waitFor };
+  return { crmWindow, crmMessages, stored, tabs, sendToWorker, runFacebookPage, waitFor };
 }
 
 test("stored worker results recover after CRM delivery fails, without replaying onto a newer advert", () => {
@@ -158,6 +163,38 @@ test("stored worker results recover after CRM delivery fails, without replaying 
   const staleRemote = mergeFacebookGroupsByRecentPostState(newer, awaiting);
   assert.equal(staleRemote[0].pendingRegistration, "XY34 ZTT");
   assert.equal(staleRemote[0].postStatus, "awaiting");
+});
+
+test("renewal recovery keeps one tab and preserves a receipt until the CRM acknowledges it", async () => {
+  const previousWindow = globalThis.window;
+  const runtime = makeRuntime();
+  globalThis.window = runtime.crmWindow;
+  try {
+    const [first, second] = loadFacebookGroups().slice(2, 4);
+    const vehicle = { id: "stock-42", registration: "AB12CDE", imageUrl: "https://static.wixstatic.com/media/stock.jpg" };
+    const start = (group, jobId) => prepareFacebookGroupPost({ group, vehicle, productKey: "rent2buy",
+      caption: "REGISTRATION: AB12CDE", renewal: { date: "2026-11-25", jobId } });
+    const state = () => requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
+    const send = (type, jobId, result, tabId = 2) => runtime.sendToWorker({ type, jobId, result }, tabId);
+    await start(first, "first-renewal");
+    assert.equal((await state()).pending.prepared, false);
+    assert.equal((await send("GROUP_RENEWAL_READY", "first-renewal", undefined, 1)).ok, false);
+    assert.equal((await send("GROUP_RENEWAL_READY", "first-renewal")).ok, true);
+    assert.equal((await state()).pending.prepared, true);
+    const result = { status: "submitted", approvalState: "pending" };
+    assert.equal((await send("GROUP_RENEWAL_OUTCOME", "first-renewal", result)).ok, true);
+    assert.equal((await state()).result.approvalState, "pending");
+    await assert.rejects(start(second, "second-renewal"), /previous renewal/);
+    assert.equal((await state()).result.jobId, "first-renewal");
+    await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", "first-renewal");
+    await start(second, "second-renewal");
+    assert.equal((await state()).pending.id, "second-renewal");
+    assert.equal(runtime.tabs.filter((tab) => tab.created).length, 1);
+    assert.equal(runtime.tabs.find((tab) => tab.created).active, false);
+    assert.equal(runtime.tabs.at(-1).id, 2);
+  } finally {
+    globalThis.window = previousWindow;
+  }
 });
 
 for (const productKey of ["rent2buy", "finance"]) {
