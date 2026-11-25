@@ -148,7 +148,7 @@ export async function buildFreshCarControlledPublishState(registrationInput, env
     loadCarManualMedia(supabase, configuration, vehicle, registration),
   ]);
   const { imageSet, media } = buildCarImageSet(vehicle, decision, importedDealerKitMedia, manualMedia);
-  const plan = buildDealerKitCarWixPlan({ vehicle, decision, imageSet, carListingRows, carDetailRows });
+  const plan = buildDealerKitCarWixPlan({ vehicle, decision, imageSet, carListingRows, carDetailRows, completePricingLookup: true });
   plan.confirmation = buildCarPublishConfirmation(plan);
 
   return {
