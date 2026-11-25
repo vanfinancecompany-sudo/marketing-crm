@@ -1,6 +1,6 @@
 // Data for the Conversations & AI page. Protected by the CRM access key.
 import { createClient } from "@supabase/supabase-js";
-import { countEvents, summariseAskMeSessions, withoutFacebookSessions, isMonitorTestEvent, HEARTBEAT_STALE_MS, readMarketplaceOutstanding, marketplaceProductCounts } from "../lib/conversationsMonitor.js";
+import { countEvents, summariseAskMeSessions, withoutFacebookSessions, isMonitorTestEvent, HEARTBEAT_STALE_MS, readMarketplaceOutstanding, marketplaceProductCounts, marketplaceDisplayKind } from "../lib/conversationsMonitor.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 
@@ -58,7 +58,7 @@ export async function buildConversationsDashboard(db, { days = 7, now = new Date
       facebook_page: { status: "not_connected", note: "Business Page Messenger integration is planned." },
       whatsapp: { status: "not_connected", note: "WhatsApp is not connected yet." },
     },
-    activity: events.slice(0, 100),
+    activity: events.slice(0, 100).map(e => ({...e,kind:marketplaceDisplayKind(e)})),
     alerts: alertsRes.data || [],
   };
 }

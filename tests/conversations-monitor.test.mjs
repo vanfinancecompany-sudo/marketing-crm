@@ -242,3 +242,12 @@ test("Marketplace outstanding stays open after the hour and clears only on later
   assert.equal(marketplaceOutstanding([...rows,event("123456789","manual_answered",2)]).length,0);
   assert.equal(marketplaceOutstanding([...rows,event("123456789","manual_answered",200)]).length,1);
 });
+
+test("manual reply observations are not counted as AI deliveries", () => {
+ const e={source_id:"fbm:manual-reply:"+ago(1)+":123456789",channel:"facebook_marketplace",kind:"answered",occurred_at:ago(1),product:"finance"};
+ const counts=marketplaceProductCounts([e]);
+ assert.equal(counts.finance.answered,0);
+ assert.equal(counts.finance.manual_answered,1);
+ assert.equal(countEvents([e]).facebook_marketplace.answered,0);
+ assert.equal(buildActivityEntries([], [e])[0].kind,"manual_answered");
+});
