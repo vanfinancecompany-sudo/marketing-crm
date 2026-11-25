@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { redactExcerpt, normaliseReport, buildMonitorIssues, summariseAskMeSessions, countEvents, withoutFacebookSessions, isMonitorTestEvent } from "../lib/conversationsMonitor.js";
+import { redactExcerpt, normaliseReport, buildMonitorIssues, summariseAskMeSessions, countEvents, withoutFacebookSessions, isMonitorTestEvent, marketplaceOutstanding, marketplaceProductCounts } from "../lib/conversationsMonitor.js";
 import { handleConversationsReport } from "../api/conversations-report.js";
 import { runConversationsMonitor } from "../api/conversations-monitor.js";
 import { describeRenewalAgent, RENEWAL_MONITOR_CHANNEL } from "../lib/rent2buyGroupRenewalMonitor.js";
@@ -63,7 +63,7 @@ function fakeDb(state) {
         if (patch) matching.forEach((row) => Object.assign(row, patch));
         return matching.map((row) => ({ ...row }));
       };
-      const q = { select() { return q; }, gte() { return q; }, order() { return q; }, limit() { return q; },
+      const q = { select() { return q; }, gte() { return q; }, order() { return q; }, limit() { return q; }, range(start,end) { return Promise.resolve({data:run().slice(start,end+1),error:null}); },
         eq(k, v) { filters.push([k, v]); return q; }, is(k, v) { filters.push([k, v]); return q; },
         maybeSingle: async () => ({ data: run()[0] || null, error: null }),
         then(resolve) { resolve({ data: run(), error: null }); },
@@ -230,4 +230,24 @@ test("on-demand history search includes all retained sessions, with 20 items per
   assert.match(match.entries[0].reply_excerpt, /purple pickup/);
   const fb = await getConversationsActivity(db, { days: 7, channel: "facebook_marketplace", now });
   assert.equal(fb.total, 1);
+});
+
+test("Marketplace outstanding stays open after the hour and clears only on later recorded reply", () => {
+  const event=(id,kind,minutes,product="rent2buy")=>({channel:"facebook_marketplace",source_id:"fbm:"+kind+":"+ago(minutes)+":"+id,kind,occurred_at:ago(minutes),product,conversation_ref:id.slice(-6)});
+  const rows=[event("123456789","received",180),event("123456789","needs_human",175),event("223456789","received",160,"finance"),event("223456789","answered",150,"finance")];
+  const pending=marketplaceOutstanding(rows);
+  assert.equal(pending.length,1);
+  assert.equal(marketplaceProductCounts(rows,pending).rent2buy.outstanding,1);
+  assert.ok(buildMonitorIssues({events:rows,outstanding:pending,now}).some(i=>i.fingerprint==="facebook:outstanding:rent2buy"));
+  assert.equal(marketplaceOutstanding([...rows,event("123456789","manual_answered",2)]).length,0);
+  assert.equal(marketplaceOutstanding([...rows,event("123456789","manual_answered",200)]).length,1);
+});
+
+test("manual reply observations are not counted as AI deliveries", () => {
+ const e={source_id:"fbm:manual-reply:"+ago(1)+":123456789",channel:"facebook_marketplace",kind:"answered",occurred_at:ago(1),product:"finance"};
+ const counts=marketplaceProductCounts([e]);
+ assert.equal(counts.finance.answered,0);
+ assert.equal(counts.finance.manual_answered,1);
+ assert.equal(countEvents([e]).facebook_marketplace.answered,0);
+ assert.equal(buildActivityEntries([], [e])[0].kind,"manual_answered");
 });
