@@ -21,6 +21,7 @@ import {
 } from "../lib/bufferActiveWindow.js";
 import {
   automatedReelFrameSpecs,
+  automatedVehicleUrl,
   buildAutomatedFacebookCaption,
   buildAutomatedReelCaption,
   isVanFinancePoorCreditReelSlot,
@@ -398,4 +399,23 @@ test("VFC Facebook worker keeps rendered reels flowing without timing out on fre
   assert.match(worker, /freshRenderBudget\.remaining -= 1/);
   assert.match(worker, /skipped: "fresh_render_deferred"/);
   assert.equal((worker.match(/\s+freshRenderBudget,\s*\}\),/g) || []).length, 2);
+});
+
+
+test("Rent2Buy publishing uses standalone vehicle links even with legacy or missing CRM links", () => {
+  const expected = "https://www.rent2buyvans.co.uk/van-pages/ks23wgy";
+  const legacy = "https://www.vanfinancecompany.co.uk/guaranteed-rent2buy-vans/ks23wgy";
+  for (const vehicle of [
+    { reg: "KS23 WGY", weblink: legacy },
+    { registration: "KS23WGY", webLink: "" },
+    { registration: "KS23WGY", link: "/guaranteed-rent2buy-vans/ks23wgy" },
+    { reg: "KS23 WGY", webLink: "https://example.com/wrong" },
+  ]) {
+    assert.equal(automatedVehicleUrl(vehicle, "rent2buy"), expected);
+    assert.ok(buildAutomatedFacebookCaption(vehicle, "rent2buy").endsWith(expected));
+    assert.ok(buildAutomatedReelCaption({ productKey: "rent2buy", vehicle, registration: "KS23WGY" }).endsWith(expected));
+  }
+  assert.equal(automatedVehicleUrl({ reg: "KS23WGY", webLink: "https://www.rent2buyvans.co.uk/van-pages/live-ks23wgy" }, "rent2buy"), "https://www.rent2buyvans.co.uk/van-pages/live-ks23wgy");
+  assert.equal(automatedVehicleUrl({ reg: "rent-1" }, "rent2buy"), "https://www.rent2buyvans.co.uk/");
+  assert.equal(automatedVehicleUrl({ reg: "KS23WGY", weblink: "https://www.vanfinancecompany.co.uk/van-finance/ks23wgy" }, "vanFinance"), "https://www.vanfinancecompany.co.uk/van-finance/ks23wgy");
 });
