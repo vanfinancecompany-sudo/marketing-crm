@@ -11,7 +11,7 @@ import { liveResponder } from "./askme-live.mjs";
 import { openPanelWindow, preparePanelWindowHelper } from "./panel-window.mjs";
 import {
   authoriseSend, inspectInbox, inspectThread, loadState, logEvent, publicStatus, recordDraft,
-  recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode,
+  recordHeartbeat, recordSendResult, resumeThread, saveState, setMode, startupMode, pendingCrmReport, acknowledgeCrmReport,
   startPilot, verifyPilot, cancelPilot, pilotTimeout, finishPilot, startFind, recordFind, findTimeout,
   migrateSafetyStop, resetSafetyStop, approveSend, approvedSendTimeout,
   autoCheckThread, recordAutoCheck, autoCheckTimeout,
@@ -373,22 +373,10 @@ setInterval(() => {
 // ({ "url": ".../api/conversations-report", "token": "..." }) next to the state
 // file; without it nothing is sent.
 const CRM_REPORT_FILE = join(dirname(STATE_FILE), "crm-report.json");
-const REPORT_KIND = { incoming: "received", sent: "answered", unconfirmed: "send_failed", escalate: "needs_human" };
 function crmReportPayload() {
   const status = statusWithExtension();
-  const cursor = state.crmReportCursor || new Date(Date.now() - 6 * 3_600_000).toISOString();
-  const findJob = (thread, jobId) => thread?.jobs?.find((j) => j.id === jobId);
-  const events = state.events.filter((e) => e.at > cursor && REPORT_KIND[e.type] && e.threadId).map((e) => {
-    const thread = state.threads[e.threadId];
-    const job = e.jobId ? findJob(thread, e.jobId) : null;
-    return {
-      id: `fbm:${e.type}:${e.at}:${e.threadId}`, kind: REPORT_KIND[e.type], at: e.at, product: thread?.product || null,
-      conversation: String(e.threadId).slice(-6), question: job?.customer || null, reply: e.type === "sent" ? job?.text || null : null,
-      reason: e.reason || e.error || null,
-    };
-  });
+  const events = pendingCrmReport(state);
   return {
-    cursor: state.events.at(-1)?.at || cursor,
     body: {
       heartbeat: {
         monitoring: status.monitoring.ok, reasons: status.monitoring.reasons, mode: status.mode,
@@ -402,12 +390,16 @@ function crmReportPayload() {
     },
   };
 }
+let crmReportInFlight=false;
 setInterval(async () => {
+  if (crmReportInFlight) return;
+  crmReportInFlight=true;
   try {
     if (fixture || !existsSync(CRM_REPORT_FILE)) return;
     const { url, token, bypass } = JSON.parse(readFileSync(CRM_REPORT_FILE, "utf8"));
     if (!/^https:\/\//.test(String(url)) || !token) return;
-    const { cursor, body } = crmReportPayload();
+    const { body } = crmReportPayload();
+    saveState(STATE_FILE,state); // persist pending batch before any request
     const response = await fetch(url, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token,
         // Optional Vercel automation bypass, for reporting to a protected Preview.
@@ -415,10 +407,12 @@ setInterval(async () => {
       body: JSON.stringify(body), signal: AbortSignal.timeout(10_000),
     });
     state.crmReportLast = { at: new Date().toISOString(), ok: response.ok, status: response.status };
-    if (response.ok) state.crmReportCursor = cursor;
+    const receipt=response.ok ? await response.json().catch(()=>null) : null;
+    if (receipt?.ok === true && receipt.stored === body.events.length) acknowledgeCrmReport(state,body.events);
+    saveState(STATE_FILE,state);
   } catch (error) {
     state.crmReportLast = { at: new Date().toISOString(), ok: false, error: String(error?.message || error).slice(0, 120) };
-  }
+  } finally { crmReportInFlight=false; }
 }, 60_000);
 
 server.listen(PORT, "127.0.0.1", () => {

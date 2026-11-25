@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   authoriseSend, emptyState, inspectInbox, inspectThread, loadState, publicStatus, recordDraft, recordHeartbeat,
-  recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict, pilotTimeout, resolveProduct,
+  recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict, pilotTimeout, resolveProduct, logEvent, pendingCrmReport, acknowledgeCrmReport,
 } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
 import { liveResponder } from "../dev/marketplace-reply-poc/edge-live/askme-live.mjs";
 import { draftMarketplaceReply } from "../dev/marketplace-reply-poc/assistant.mjs";
@@ -725,4 +725,36 @@ test("short-term hire enquiries get a polite no with the right website", async (
   }
   const weekly = await draftMarketplaceReply({ product: "rent2buy", message: "Is the weekly rental fixed?" }, { respond: async () => ({ status: "ready", reply: "Yes." }) });
   assert.doesNotMatch(weekly.text, /short-term/, "Rent2Buy weekly rental is not short-term hire");
+});
+
+test("read Marketplace activity can be inspected without an unread badge; old messages never auto-send", () => {
+ const state=autoOn();
+ inspectInbox(state,[{id:"400",grid:"marketplace",pos:0,unread:false,you:false,age:"1m"}],{list:"marketplace"});
+ assert.ok(state.pendingOpen.includes("400"));
+ assert.equal(open(state,"400",[cust("11:50")]).action,"none");
+});
+test("a seller reply observed after a held message clears reporting evidence, not the safety hold", () => {
+ const state=autoOn();
+ const d=open(state,"700",[cust("12:10","Please contact me")]);
+ recordDraft(state,d,{reason:"Customer needs the team"});
+ assert.ok(state.threads["700"].needsHuman);
+ state.autoReconcileOnly={"700":true};
+ const result=open(state,"700",[cust("12:10","Please contact me"),ours("12:11","We will call you")]);
+ assert.equal(result.action,"none");
+ assert.ok(state.threads["700"].needsHuman);
+ assert.ok(pendingCrmReport(state).some(e=>e.id.startsWith("fbm:manual-reply:")));
+ assert.equal(state.threads["700"].crmPendingMessageIds.length,0);
+ open(state,"700",[cust("12:10","Please contact me"),ours("12:11","We will call you")]);
+ assert.equal(pendingCrmReport(state).filter(e=>e.id.startsWith("fbm:manual-reply:")).length,1);
+});
+test("CRM outbox survives debug ledger truncation, batches and acknowledges exact ids", () => {
+ const state=emptyState(); state.threads["123"]={product:"finance",jobs:[]};
+ for(let i=0;i<205;i++) logEvent(state,"incoming",{threadId:"123",question:"Question "+i});
+ for(let i=0;i<350;i++) logEvent(state,"debug",{});
+ const first=pendingCrmReport(state); assert.equal(first.length,200);
+ assert.equal(new Set(first.map(e=>e.id)).size,200);
+ const file=join(mkdtempSync(join(tmpdir(),"fbm-outbox-")),"state.json");
+ saveState(file,state); const reloaded=loadState(file);
+ assert.equal(pendingCrmReport(reloaded)[0].id,first[0].id);
+ acknowledgeCrmReport(reloaded,first); assert.equal(pendingCrmReport(reloaded).length,5);
 });

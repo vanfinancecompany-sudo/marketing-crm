@@ -151,8 +151,50 @@ export function saveState(file, state) {
   renameSync(pending, file);
 }
 
+const CRM_KINDS = { incoming:"received", sent:"answered", unconfirmed:"send_failed", escalate:"needs_human", "manual-reply":"answered" };
+function crmExcerpt(text, limit=280) {
+  return String(text || "").replace(/\s+/g," ").trim().slice(0,2000)
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g,"[email]")
+    .replace(/(?:\+?44\s?|0)(?:\d[\s-]?){9,10}\b/g,"[phone]")
+    .replace(/\b\d{8,}\b/g,"[number]")
+    .replace(/\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/gi,"[postcode]").slice(0,limit) || null;
+}
+function crmEvent(state, e, legacy=false) {
+  if (!CRM_KINDS[e.type] || !THREAD_ID.test(String(e.threadId || ""))) return null;
+  const thread=state.threads[e.threadId];
+  const job=e.jobId ? thread?.jobs?.find(j=>j.id===e.jobId) : null;
+  return {id:legacy ? `fbm:${e.type}:${e.at}:${e.threadId}` : `fbm:${e.type}:${e.at}:${randomUUID()}:${e.threadId}`,
+    kind:CRM_KINDS[e.type],at:e.at,product:thread?.product || null,conversation:String(e.threadId).slice(-6),
+    question:crmExcerpt(e.question || job?.customer),reply:e.type==="sent" ? crmExcerpt(job?.text,600) : null,
+    reason:crmExcerpt(e.reason || e.error,240)};
+}
+function ensureCrmOutbox(state) {
+  state.crmReportOutbox ??= [];
+  if (state.crmReportOutboxMigrated) return;
+  const cursor=state.crmReportCursor || new Date(Date.now()-6*3_600_000).toISOString();
+  for (const e of state.events) {
+    if (e.at <= cursor) continue;
+    const event=crmEvent(state,e,true);
+    if (event && !state.crmReportOutbox.some(x=>x.id===event.id)) state.crmReportOutbox.push(event);
+  }
+  state.crmReportOutboxMigrated=true;
+}
+export function pendingCrmReport(state) {
+  ensureCrmOutbox(state);
+  return state.crmReportOutbox.slice(0,200);
+}
+export function acknowledgeCrmReport(state, events) {
+  const ids=new Set(events.map(e=>e.id));
+  state.crmReportOutbox=(state.crmReportOutbox || []).filter(e=>!ids.has(e.id));
+  for (const e of events) if (!state.crmReportCursor || e.at>state.crmReportCursor) state.crmReportCursor=e.at;
+}
 export function logEvent(state, type, detail = {}) {
-  state.events.push({ at: new Date().toISOString(), type, ...detail });
+  ensureCrmOutbox(state);
+  const e={at:new Date().toISOString(),type,...detail};
+  if (e.question) e.question=crmExcerpt(e.question);
+  const report=crmEvent(state,e);
+  if (report) state.crmReportOutbox.push(report);
+  state.events.push(e);
   if (state.events.length > MAX_EVENTS) state.events.splice(0, state.events.length - MAX_EVENTS);
 }
 
@@ -272,6 +314,7 @@ export function inspectInbox(state, threads, { listReady = true, list = null } =
     const prevState = typeof prev === "string" ? prev : prev?.s;
     const prevPos = typeof prev === "object" && prev ? prev.p : undefined;
     const pos = Number.isFinite(row.pos) ? row.pos : 0;
+    if (state.mode === "auto" && !first && row.grid === PRIMARY_LIST && row.unread === false && row.you === false && pos < TOP_ROWS && (prevState === undefined || (Number.isFinite(prevPos) && prevPos >= 2 && pos === 0))) fresh.push({id,pos,reason:"read-customer-activity"});
     if (!first && row.unread === true) {
       if (prevState === "read") fresh.push({ id, pos, reason: "read-to-unread" });
       else if (prevState === undefined && pos < TOP_ROWS) fresh.push({ id, pos, reason: "new-at-top" });
@@ -571,6 +614,8 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   // Observe never reads, stores or forwards message content.
   if (state.mode === "observe") return { action: "none", reason: "Observe mode is passive" };
   const flagged = state.pendingOpen.includes(threadId);
+  const reconcileOnly=Boolean(state.autoReconcileOnly?.[threadId]);
+  if (state.autoReconcileOnly) delete state.autoReconcileOnly[threadId];
   state.pendingOpen = state.pendingOpen.filter((id) => id !== threadId);
   const messages = (Array.isArray(snapshot.messages) ? snapshot.messages : [])
     .filter((m) => typeof m?.id === "string" && MESSAGE_ID.test(m.id) && ["incoming", "outgoing"].includes(m.direction))
@@ -588,6 +633,7 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
     history: [], jobs: [], conversation: null, needsHuman: null,
   };
   state.threads[threadId] = thread;
+  const verifiedListing=Boolean(snapshot.listingId && /^\d{1,32}$/.test(snapshot.listingId) && (!thread.listingId || thread.listingId === snapshot.listingId));
   if (snapshot.listingId && /^\d{1,32}$/.test(snapshot.listingId)) thread.listingId = snapshot.listingId;
   if (snapshot.listingTitle) thread.listingTitle = String(snapshot.listingTitle).slice(0, 200);
   thread.product = resolveProduct(thread.listingTitle, defaultProduct);
@@ -598,6 +644,7 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   for (const m of fresh) seen.add(m.id);
   thread.seen = [...seen].slice(-MAX_SEEN);
   for (const m of fresh.filter((item) => item.direction === "outgoing")) confirmByObservation(thread, m);
+  if (state.mode === "auto" && flagged && verifiedListing) reconcileObservedReply(state,thread,messages);
 
   let customer;
   // Automatic replies: answer the customer messages after our last reply that
@@ -627,6 +674,7 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
     if (!recent.length) return { action: "none", reason: "No unanswered customer message since " + (Number.isFinite(from) ? new Date(from).toISOString() : "finance support started") };
     if (recent.some((m) => m.sentAt === null)) {
       thread.needsHuman = "Message time could not be verified";
+      recordIncomingForCrm(state,thread,recent);
       logEvent(state, "escalate", { threadId, reason: thread.needsHuman });
       return { action: "none", reason: thread.needsHuman };
     }
@@ -646,8 +694,9 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
     customer = fresh.filter((m) => m.direction === "incoming");
   }
   if (!customer.length) return { action: "none", reason: "No new customer message" };
-  logEvent(state, "incoming", { threadId, messageIds: customer.map((m) => m.id) });
+  recordIncomingForCrm(state,thread,customer);
 
+  if (reconcileOnly) return {action:"none",reason:"Human hand-off: read-only reconciliation"};
   if (thread.needsHuman) return { action: "none", reason: "Conversation is with the team: " + thread.needsHuman };
   if (thread.jobs.some((job) => OPEN_JOB.has(job.status) || job.status === "unconfirmed")) {
     thread.needsHuman = "A previous reply could not be confirmed";
@@ -661,6 +710,42 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
   const text = customer.map((m) => String(m.text || "").trim()).filter(Boolean).join("\n").slice(0, 3000);
   if (!text) return { action: "none", reason: "Customer message has no text (photo or sticker)" };
   return { action: "draft", threadId, product: thread.product, message: text, messageIds: customer.map((m) => m.id), ...(auto ? { auto: true } : {}) };
+}
+
+// Only log actual observed customer messages once; an inbox read indicator is
+// never evidence of a reply. Keep the outstanding message IDs across restarts.
+function recordIncomingForCrm(state,thread,customer) {
+  const reported=new Set(thread.crmReportedIncomingIds || state.events.filter(e=>e.type==="incoming"&&e.threadId===thread.id).flatMap(e=>e.messageIds || []));
+  const newMessages=customer.filter(m=>!reported.has(m.id));
+  if (!newMessages.length) return;
+  for (const m of newMessages) reported.add(m.id);
+  thread.crmReportedIncomingIds=[...reported].slice(-MAX_SEEN);
+  thread.crmPendingMessageIds=[...new Set([...(thread.crmPendingMessageIds || []),...newMessages.map(m=>m.id)])].slice(-MAX_SEEN);
+  logEvent(state,"incoming",{threadId:thread.id,messageIds:newMessages.map(m=>m.id),question:newMessages.map(m=>m.text).join(" ")});
+}
+function pendingIds(state,thread) {
+  if (Array.isArray(thread.crmPendingMessageIds)) return thread.crmPendingMessageIds;
+  const last=state.events.findLast(e=>e.threadId===thread.id && ["incoming","sent","manual-reply"].includes(e.type));
+  return last?.type==="incoming" ? last.messageIds || [] : [];
+}
+function reconcileObservedReply(state,thread,messages) {
+  const ids=pendingIds(state,thread);
+  if (!ids.length) return;
+  const positions=ids.map(id=>messages.findIndex(m=>m.id===id && m.direction==="incoming"));
+  if (positions.some(i=>i<0)) return; // incomplete history is not proof
+  const last=Math.max(...positions);
+  const times=positions.map(i=>messageTime(messages[i].id));
+  if (times.some(t=>t===null)) return;
+  const reply=messages.slice(last+1).find(m=>m.direction==="outgoing" && messageTime(m.id)!==null && messageTime(m.id)>=Math.max(...times));
+  if (!reply || !String(reply.text || "").trim()) return;
+  thread.crmPendingMessageIds=[];
+  if (thread.crmLastObservedOutgoingId===reply.id) return;
+  thread.crmLastObservedOutgoingId=reply.id;
+  const known=thread.jobs.find(j=>j.outgoingId===reply.id);
+  if (known && state.events.some(e=>e.type==="sent" && e.jobId===known.id)) return;
+  // Do not infer who typed it. This is seller-side evidence, not AI delivery
+  // evidence, and it does not release a manual/safety hold or send anything.
+  logEvent(state,"manual-reply",{threadId:thread.id,reason:"Seller-side reply observed after the outstanding customer message"});
 }
 
 // ---- Auto test restriction: only the named test buyer ----
@@ -736,11 +821,12 @@ function autoInbox(state, rows, fresh, first, now = Date.now()) {
   if (head && queuedAt[head] && now - Date.parse(queuedAt[head]) > AUTO_OPEN_MS) {
     state.pendingOpen.shift();
     delete queuedAt[head];
+    if (state.autoReconcileOnly) delete state.autoReconcileOnly[head];
     checked[head] = new Date(now).toISOString();
     logEvent(state, "left-for-person", { threadId: head, why: "Conversation could not be read within 4 minutes" });
   }
-  const queue = (id, reason) => {
-    if (state.threads[id]?.needsHuman || state.pendingOpen.includes(id)) return;
+  const queue = (id, reason, reconcile=false) => {
+    if ((!reconcile && state.threads[id]?.needsHuman) || state.pendingOpen.includes(id)) return;
     if (state.autoTestBuyer) {
       if (!(state.autoCheck ??= []).some((c) => c.threadId === id)) {
         state.autoCheck.push({ threadId: id, at: new Date(now).toISOString() });
@@ -749,6 +835,7 @@ function autoInbox(state, rows, fresh, first, now = Date.now()) {
       return;
     }
     state.pendingOpen.push(id);
+    if (reconcile) (state.autoReconcileOnly ??= {})[id]=true;
     queuedAt[id] = new Date(now).toISOString();
     logEvent(state, "unread", { threadId: id, reason, auto: true });
   };
@@ -763,17 +850,24 @@ function autoInbox(state, rows, fresh, first, now = Date.now()) {
     const row = byId.get(f.id);
     const upper = upperOf(row);
     if (row?.you === true || (upper !== null && upper < from)) continue;
-    queue(f.id, f.reason);
+    queue(f.id, f.reason, Boolean(state.threads[f.id]?.needsHuman));
   }
   let aged = 0, ours = 0;
   for (const row of rows) {
     const upper = upperOf(row);
     if (upper === null) continue;
     aged++;
-    if (row.you === true) { ours++; continue; }
+    if (row.you === true) {
+      ours++;
+      const thread=state.threads[row.id];
+      if (thread && pendingIds(state,thread).length && upper >= from && upper > (Date.parse(checked[row.id] || "") || 0) + AUTO_RECHECK_MS) queue(String(row.id),"verify seller-side reply",true);
+      continue;
+    }
     if (upper < from) continue;
     if (upper <= (Date.parse(checked[row.id] || "") || 0) + AUTO_RECHECK_MS) continue;
-    queue(String(row.id), "customer activity since the catch-up start");
+    const held=Boolean(state.threads[row.id]?.needsHuman);
+    if (held && now - (Date.parse(checked[row.id] || "") || 0) < 10*60_000) continue;
+    queue(String(row.id), "customer activity since the catch-up start",held);
   }
   if (first) logEvent(state, "catchup-scan", { rows: rows.length, withAge: aged, lastMessageOurs: ours, queued: state.pendingOpen.length });
   return { open: state.pendingOpen[0] || null };
@@ -827,7 +921,7 @@ export function recordDraft(state, decision, draft) {
   const thread = state.threads[decision.threadId];
   if (draft.reason) {
     thread.needsHuman = draft.reason;
-    logEvent(state, "escalate", { threadId: thread.id, reason: draft.reason });
+    logEvent(state, "escalate", { threadId: thread.id, reason: draft.reason,question:decision.message });
     return { action: "none", reason: draft.reason };
   }
   const job = {
@@ -896,6 +990,7 @@ export function recordSendResult(state, jobId, { confirmed, outgoingId, error })
     if (job.outgoingId) thread.seen = [...new Set([...thread.seen, job.outgoingId])].slice(-MAX_SEEN);
     thread.history.push({ role: "assistant", content: job.text });
     thread.history = thread.history.slice(-12);
+    if (Array.isArray(thread.crmPendingMessageIds)) thread.crmPendingMessageIds=thread.crmPendingMessageIds.filter(id=>!(job.messageIds || []).includes(id));
     logEvent(state, "sent", { threadId: thread.id, jobId });
   } else if (job.status !== "confirmed") {
     job.status = job.status === "claimed" ? "cancelled" : "unconfirmed";
