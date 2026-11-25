@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import {
   bufferDormantPayload,
   isBufferScheduledRunDue,
@@ -149,7 +150,7 @@ function recoverablePostError(error) {
   return "";
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!["GET", "POST"].includes(request.method)) {
     response.setHeader("Allow", "GET, POST");
@@ -458,3 +459,5 @@ export default async function handler(request, response) {
     });
   }
 }
+
+export default withCronHealth("/api/vansco-google-business-automation-worker", handler);

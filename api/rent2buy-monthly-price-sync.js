@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { pendingRent2BuySpecialDeal } from "../lib/rent2BuyProtectedSpecialDeals.mjs";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import {
@@ -93,7 +94,7 @@ async function applyPatches(config, patches) {
   return { successes, failures };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   if (request.method !== "GET" && request.method !== "POST") {
     return response.status(405).json({ ok: false, message: "Method not allowed." });
   }
@@ -154,3 +155,5 @@ export default async function handler(request, response) {
     return response.status(500).json({ ok: false, message: error?.message || "Rent2Buy monthly price sync failed." });
   }
 }
+
+export default withCronHealth("/api/rent2buy-monthly-price-sync", handler);

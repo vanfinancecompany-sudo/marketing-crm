@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import {ownedStoryArtworkUrl} from "../lib/storyArtworkPolicy.js";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -325,7 +326,7 @@ async function createInstagramPost(channelId, mirror) {
   );
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!["GET", "POST"].includes(request.method)) {
     response.status(405).json({ ok: false, error: "Method not allowed." });
@@ -465,3 +466,5 @@ export default async function handler(request, response) {
     });
   }
 }
+
+export default withCronHealth("/api/buffer-instagram-mirror", handler);

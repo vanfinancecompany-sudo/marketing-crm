@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { randomUUID } from "node:crypto";
 import { getSupabaseServiceAdmin, normalizeRegistration } from "./_vansco-cache-utils.js";
 import { loadStockSourceSnapshot, providerReservedRegistrations, stockSourceProviderConfig } from "./_stock-source-provider.js";
@@ -405,7 +406,7 @@ export async function getStockWatchMonitorStatus() {
   };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   const cron = request.method === "GET" && isCronRequest(request);
   if (!cron && !isAuthorised(request)) return response.status(401).json({ ok: false, message: "Marketing CRM access is required." });
@@ -432,3 +433,5 @@ export default async function handler(request, response) {
     return response.status(500).json({ ok: false, message: error?.message || "Stock Watch Monitor failed." });
   }
 }
+
+export default withCronHealth("/api/stock-watch-monitor-agent", handler);

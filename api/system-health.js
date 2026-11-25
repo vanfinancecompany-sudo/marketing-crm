@@ -714,13 +714,7 @@ async function checkUnknownEmailSubmissions() {
 
 async function loadAutomationEvidence() {
   const supabase = supabaseClient();
-  const [vanscoResult, editorialResult, activityResult, emailResult, carslink] = await Promise.all([
-    supabase
-      .from("vansco_refresh_runs")
-      .select("status,stage,started_at,updated_at,completed_at,last_error,success_count,failure_count")
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+  const [editorialResult, activityResult, emailResult, carslink] = await Promise.all([
     supabase
       .from("knowledge_automation_runs")
       .select("status,started_at,completed_at,duration_ms,error_message,jobs_claimed,jobs_succeeded,jobs_failed")
@@ -743,13 +737,11 @@ async function loadAutomationEvidence() {
     loadCarslinkSyncStatus(),
   ]);
 
-  if (vanscoResult.error) throw vanscoResult.error;
   if (editorialResult.error) throw editorialResult.error;
   if (activityResult.error) throw activityResult.error;
   if (emailResult.error) throw emailResult.error;
 
   return {
-    vansco: vanscoResult.data || null,
     editorial: editorialResult.data || null,
     activity: activityResult.data || [],
     email: emailResult.data || null,
@@ -772,9 +764,6 @@ function buildAutomationCentre(evidence, checkMap) {
   const storyLast = latestActivity(activity, (row) => /story/i.test(`${row?.activity_type || ""} ${row?.source || ""}`));
   const priceSyncLast = latestActivity(activity, (row) => /rent2buy.*price|price.*rent2buy/i.test(`${row?.activity_type || ""} ${row?.source || ""}`));
 
-  const vansco = evidence?.vansco || {};
-  const vanscoStatus = String(vansco.status || "").toLowerCase();
-  const vanscoOk = !["failed", "error"].includes(vanscoStatus) && ageMs(vansco.started_at) < 36 * HOUR;
   const editorial = evidence?.editorial || {};
   const editorialStatus = String(editorial.status || "").toLowerCase();
   const editorialOk = !["failed", "error"].includes(editorialStatus) && (!editorial.started_at || ageMs(editorial.started_at) < 4 * HOUR);
@@ -783,22 +772,10 @@ function buildAutomationCentre(evidence, checkMap) {
 
   return [
     automationItem({
-      key: "vansco_stock_refresh",
-      label: "Vansco overnight stock refresh",
-      cadence: "Daily at 02:00 UTC",
-      status: vansco.started_at ? (vanscoOk ? (vanscoStatus === "running" ? "running" : "healthy") : "failed") : "waiting",
-      lastAttemptAt: vansco.started_at || null,
-      lastSuccessAt: vanscoStatus === "complete" ? (vansco.completed_at || vansco.updated_at || null) : null,
-      duration: durationMs(vansco.started_at, vansco.completed_at),
-      nextExpectedAt: nextDailyAt(2, 0, now),
-      lastError: vansco.last_error || "",
-      detail: "Current Dragon/Vansco cache refresh. Advisory stock comparison only.",
-    }),
-    automationItem({
       key: "vansco_facebook_automation",
       label: "Vansco Facebook stock automation",
-      cadence: "Every 30 minutes at :11/:41",
-      status: checkMap.vanscoFacebookWaiting ? "waiting" : (checkMap.vanscoFacebook ? "healthy" : "failed"),
+      cadence: "Hourly at :11, 06:00–22:00 UTC",
+      status: checkMap.vanscoFacebookEnabled === false ? "disabled" : checkMap.vanscoFacebookWaiting ? "waiting" : (checkMap.vanscoFacebook ? "healthy" : "failed"),
       lastAttemptAt: checkMap.vanscoFacebookAttemptAt || null,
       lastSuccessAt: checkMap.vanscoFacebookSuccessAt || null,
       nextExpectedAt: nextTwiceHourlyAt(11, 41, now),
@@ -808,7 +785,7 @@ function buildAutomationCentre(evidence, checkMap) {
     automationItem({
       key: "facebook_automation",
       label: "Facebook + Google Business publishing automation",
-      cadence: "Every 2 hours at :05",
+      cadence: "Hourly at :05, 06:00–22:00 UTC",
       status: checkMap.facebook ? "healthy" : "failed",
       lastSuccessAt: facebookLast,
       nextExpectedAt: nextEveryTwoHoursAt(5, now),
@@ -818,12 +795,12 @@ function buildAutomationCentre(evidence, checkMap) {
     automationItem({
       key: "instagram_mirror",
       label: "Instagram mirror",
-      cadence: "Hourly at :14",
+      cadence: "Hourly at :40, 06:00–22:00 UTC",
       status: checkMap.instagram ? "healthy" : "failed",
       lastAttemptAt: checkMap.bufferCheckedAt || null,
       lastSuccessAt: checkMap.instagram ? (instagramLast || checkMap.bufferCheckedAt || null) : instagramLast,
       duration: checkMap.bufferDuration,
-      nextExpectedAt: nextHourlyAt(14, now),
+      nextExpectedAt: nextHourlyAt(40, now),
       lastError: checkMap.instagramIssue || "",
       telemetry: "live",
       detail: checkMap.instagram
@@ -966,6 +943,7 @@ export default async function handler(request, response) {
       email: checks[5].ok && checks[6].ok,
       emailIssue: checks[5]?.issue?.message || checks[6]?.issue?.message || "",
       vanscoFacebook: checks[7].ok,
+      vanscoFacebookEnabled: checks[7]?.enabled,
       vanscoFacebookWaiting: Boolean(checks[7]?.waiting),
       vanscoFacebookAttemptAt: checks[7]?.status?.attemptedAt || checks[7]?.status?.updatedAt || null,
       vanscoFacebookSuccessAt: checks[7]?.status?.lastSuccessAt || null,

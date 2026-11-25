@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { runCarslinkProductionSync } from "../lib/carslinkProductionSync.js";
 
 const ACCESS_HEADER = "x-marketing-customer-database-key";
@@ -45,7 +46,7 @@ function isPrimaryProduction(request) {
   return normalizeHost(request.headers.host || "") === primaryHost;
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!["GET", "POST"].includes(request.method)) {
     response.setHeader("Allow", "GET, POST");
@@ -89,3 +90,5 @@ export default async function handler(request, response) {
     });
   }
 }
+
+export default withCronHealth("/api/carslink-auto-sync", handler);

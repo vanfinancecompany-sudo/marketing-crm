@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { processBatch } from "./vansco-email-delivery.js";
@@ -21,7 +22,7 @@ function checked(result){
  if(result.error)throw Error(result.error.message||"Vansco worker database request failed.");
  return result.data;
 }
-export default async function handler(request,response){
+async function handler(request,response){
  response.setHeader("Cache-Control","no-store");
  if(request.method!=="GET")return response.status(405).json({ok:false});
  if(!cronAuthorised(request))return response.status(401).json({ok:false});
@@ -57,3 +58,5 @@ export default async function handler(request,response){
   return response.status(500).json({ok:false,message:"Vansco worker failed safely. Check server logs and durable batch progress."});
  }
 }
+
+export default withCronHealth("/api/vansco-email-worker", handler);

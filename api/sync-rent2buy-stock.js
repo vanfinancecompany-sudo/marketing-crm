@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import {
   RENT2BUY_ALL_VANS_COLLECTION_ID,
   RENT2BUY_WIX_SITE_ID,
@@ -158,7 +159,7 @@ async function pushToRent2BuyStock(vehicles) {
   return payload;
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
 
   if (!["GET", "POST"].includes(request.method || "")) {
@@ -203,3 +204,5 @@ export default async function handler(request, response) {
     });
   }
 }
+
+export default withCronHealth("/api/sync-rent2buy-stock", handler);

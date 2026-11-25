@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { dispatchCrmEmailEvent } from '../lib/crmEmailEventOutbox.js';
@@ -8,7 +9,7 @@ function authorized(req) {
   return expected.length > 0 && expected.length === supplied.length && timingSafeEqual(expected, supplied);
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   if (req.method !== 'GET') return res.status(405).json({ ok: false });
   if (!authorized(req)) return res.status(401).json({ ok: false });
@@ -30,3 +31,5 @@ export default async function handler(req, res) {
     return res.status(503).json({ ok: false });
   }
 }
+
+export default withCronHealth("/api/application-received-event-retry", handler);

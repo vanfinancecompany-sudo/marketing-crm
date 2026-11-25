@@ -1,10 +1,11 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import { cleanConfirmedSoldVanscoImages } from "../lib/vanscoSoldImageCleanup.js";
 
 // No Buffer API calls. Only explicitly verified sold/awaiting-delivery
 // stock rows can authorize deletion of v2-owned Vansco media.
 export const config = { maxDuration: 180 };
-export default async function handler(request,response) {
+async function handler(request,response) {
   response.setHeader("Cache-Control","no-store");
   if (request.method!=="GET" && request.method!=="POST") return response.status(405).json({ok:false,error:"Method not allowed."});
   const secret=String(process.env.CRON_SECRET||"").trim();
@@ -25,3 +26,5 @@ export default async function handler(request,response) {
     return response.status(503).json({ok:false,error:"Vansco sold-image cleanup could not verify required evidence; nothing else was deleted."});
   }
 }
+
+export default withCronHealth("/api/vansco-buffer-image-cleanup", handler);
