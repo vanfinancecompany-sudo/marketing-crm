@@ -73,6 +73,7 @@ async function updateToday(db, now, mutate, date = londonDay(now)) {
   if (!run) return { ok: false, error: "No renewal run today" };
   const patch = mutate(run);
   if (patch.error) return { ok: false, error: patch.error };
+  if (patch.result) return patch.result;
   let update = db.from(RUN_TABLE).update(patch).eq("run_date", date)
     .eq("outcomes", JSON.stringify(run.outcomes || {}));
   update = run.stopped ? update.eq("stopped", JSON.stringify(run.stopped)) : update.is("stopped", null);
@@ -112,17 +113,30 @@ export async function handlePost(db, body, now = new Date()) {
       for (const result of prior) if (result.error) throw result.error;
       unresolved = prior.some((result) => result.data?.length);
     }
-    const reason = unresolved ? "Review the previous submission before renewing this group" : "The group is no longer due or eligible";
+    const group = current?.state || {};
+    const approved = group.postStatus === "accepted" || Number(group.acceptedPostCount) > 0 || Boolean(group.lastAcceptedAt);
+    const rulesBlockAdvert = group.status === "Red" || group.linksAllowed === false;
+    const autoBlocked = body.automatic === true && (!approved || rulesBlockAdvert);
+    const prepare = stillDue && !unresolved && !autoBlocked;
+    const reason = unresolved ? "Review the previous submission before renewing this group" :
+      autoBlocked ? "A previously accepted advert and compatible group rules are required for an automatic renewal" :
+        "The group is no longer due or eligible";
     const claimed = await updateToday(db, now, (run) => {
       if (run.stopped) return { error: "Renewals have been stopped for today" };
       if (!(run.plan?.groups || []).some((group) => group.groupKey === groupKey)) return { error: "Group is not in today's queue" };
-      if (run.outcomes?.[groupKey]) return { error: "This group was already claimed or handled" };
-      const entry = stillDue && !unresolved
+      const existing = run.outcomes?.[groupKey];
+      if (existing) {
+        if (existing.status !== "preparing" || existing.jobId !== jobId) {
+          return { result: { ok: true, prepare: false, reason: "This group was already claimed or handled" } };
+        }
+        if (prepare) return { result: { ok: true, prepare: true, reason: null } };
+      }
+      const entry = prepare
         ? { status: "preparing", jobId }
         : { status: "needs_attention", reason };
       return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...entry, at: now.toISOString() } } };
     });
-    return claimed.ok ? { ...claimed, prepare: stillDue && !unresolved, reason: stillDue && !unresolved ? null : reason } : claimed;
+    return claimed.ok && claimed.prepare === undefined ? { ...claimed, prepare, reason: prepare ? null : reason } : claimed;
   }
   if (action === "outcome") {
     const groupKey = canonicalGroup(body.groupUrl);

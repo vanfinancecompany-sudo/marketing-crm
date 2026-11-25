@@ -106,6 +106,8 @@ test("a renewal can be claimed once, unresolved posts are flagged, and the stopp
   const claim = (id, jobId) => handlePost(db, { action: "claim", groupUrl: url(id), jobId }, now);
   const competitors = await Promise.all([claim("one", "job-alpha-123"), claim("one", "job-beta-1234")]);
   assert.equal(competitors.filter((entry) => entry.prepare).length, 1);
+  const claimedId = db.t.rent2buy_group_renewal_runs[0].outcomes[url("one")].jobId;
+  assert.equal((await claim("one", claimedId)).prepare, true, "the same reserved job can recover its handoff");
   const blocked = await claim("pending", "job-alpha-456");
   assert.equal(blocked.prepare, false);
   assert.match(blocked.reason, /previous submission/);
@@ -130,6 +132,20 @@ test("an interrupted or unconfirmed Facebook post cannot be prepared again on th
   for (const { group_name: name } of groups) {
     const result = await handlePost(db, { action: "claim", groupUrl: url(name), jobId: "next-preparation-" + name }, next);
     assert.equal(result.prepare, name === "failed", name);
+  }
+});
+
+test("automatic posting requires recorded acceptance and compatible group rules", async () => {
+  const group = (id, state) => ({ ...fixture(id, state), group_key: url(id) });
+  const db = fakeDb({ groups: [
+    group("membership-only", { postStatus: "", acceptedPostCount: 0 }),
+    group("no-links", { linksAllowed: false }),
+    group("approved", {}),
+  ] });
+  await runDailyRenewalCheck(db, now);
+  for (const [name, allowed] of [["membership-only", false], ["no-links", false], ["approved", true]]) {
+    const claim = await handlePost(db, { action: "claim", groupUrl: url(name), jobId: "auto-preparation-" + name, automatic: true }, now);
+    assert.equal(claim.prepare, allowed, name);
   }
 });
 

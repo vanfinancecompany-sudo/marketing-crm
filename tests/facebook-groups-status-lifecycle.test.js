@@ -22,15 +22,17 @@ const backgroundSource = fs.readFileSync(new URL("../browser-extension/marketpla
 const bridgeSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/crm-bridge.js", import.meta.url), "utf8");
 const pageSource = fs.readFileSync(new URL("../browser-extension/marketplace-helper/facebook-groups.js", import.meta.url), "utf8");
 
-function makeRuntime() {
+function makeRuntime(origin = "https://marketing-crm-six.vercel.app") {
   const stored = new Map();
   const listeners = new Set();
   const crmMessages = [];
   const tabs = [];
   let workerHandler;
   let bridgeHandler;
+  let alarmHandler;
+  const deliveries = [];
   const crmWindow = {
-    location: { origin: "https://marketing-crm-six.vercel.app", hostname: "marketing-crm-six.vercel.app" },
+    location: { origin, hostname: new URL(origin).hostname },
     localStorage: {
       getItem: (key) => stored.get(`local:${key}`) ?? null,
       setItem: (key, value) => stored.set(`local:${key}`, value),
@@ -56,7 +58,7 @@ function makeRuntime() {
     async remove(key) { stored.delete(key); },
   };
   const sendToWorker = (message, tabId) => new Promise((resolve) => {
-    const url = tabId === 1 ? crmWindow.location.origin + "/" : tabs.findLast((tab) => tab.id === tabId)?.url;
+    const url = tabId === 1 ? crmWindow.location.origin + "/rent2buy-groups" : tabs.findLast((tab) => tab.id === tabId)?.url;
     workerHandler(message, { tab: { id: tabId }, url }, resolve);
   });
   const chromeWorker = {
@@ -72,11 +74,11 @@ function makeRuntime() {
       async create(options) { tabs.push({ id: 2, url: options.url, created: true, active: options.active }); return { id: 2 }; },
       async update(id, options) { tabs.push({ id, url: options.url }); return { id }; },
       async query() { return [{ id: 1 }]; },
-      async sendMessage(id, message) { if (id === 1 && bridgeHandler) bridgeHandler(message); },
+      async sendMessage(id, message) { deliveries.push({ id, type: message.type }); if (id === 1 && bridgeHandler) bridgeHandler(message); },
       async remove() {},
       onUpdated: { addListener() {} },
     },
-    alarms: { create() {}, onAlarm: { addListener() {} } },
+    alarms: { create() {}, onAlarm: { addListener(listener) { alarmHandler = listener; } } },
     action: { async setBadgeText() {}, async setTitle() {} },
   };
   vm.runInNewContext(backgroundSource, { chrome: chromeWorker, URL, Date, console, setTimeout }, { filename: "background.js" });
@@ -132,7 +134,8 @@ function makeRuntime() {
     assert.fail("Expected extension message was not delivered");
   }
 
-  return { crmWindow, crmMessages, stored, tabs, sendToWorker, runFacebookPage, waitFor };
+  return { crmWindow, crmMessages, stored, tabs, deliveries, sendToWorker, runFacebookPage, waitFor,
+    wakeRenewals: () => alarmHandler({ name: "vfcRent2BuyGroupRenewalAlarm" }) };
 }
 
 test("stored worker results recover after CRM delivery fails, without replaying onto a newer advert", () => {
@@ -192,6 +195,66 @@ test("renewal recovery keeps one tab and preserves a receipt until the CRM ackno
     assert.equal(runtime.tabs.filter((tab) => tab.created).length, 1);
     assert.equal(runtime.tabs.find((tab) => tab.created).active, false);
     assert.equal(runtime.tabs.at(-1).id, 2);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("automatic renewal is opt-in, claims the Post action once and disarms on a restriction", async () => {
+  const previousWindow = globalThis.window;
+  const runtime = makeRuntime();
+  globalThis.window = runtime.crmWindow;
+  try {
+    const [group] = loadFacebookGroups().slice(2, 3);
+    const jobId = "one-automatic-renewal";
+    const vehicle = { id: "stock-42", registration: "AB12CDE", imageUrl: "https://static.wixstatic.com/media/stock.jpg" };
+    const start = () => prepareFacebookGroupPost({ group, vehicle, productKey: "rent2buy", caption: "REGISTRATION: AB12CDE",
+      renewal: { date: "2026-11-25", jobId, automatic: true } });
+    const send = (type, result) => runtime.sendToWorker({ type, jobId, result }, 2);
+    await assert.rejects(start(), /disabled/);
+    await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled: true });
+    await start();
+    assert.equal((await send("GROUP_RENEWAL_READY")).ok, true);
+    assert.equal((await send("GROUP_RENEWAL_OUTCOME", { status: "submitted", approvalState: "pending" })).ok, false);
+    const grants = await Promise.all([send("BEGIN_GROUP_RENEWAL_SUBMISSION"), send("BEGIN_GROUP_RENEWAL_SUBMISSION")]);
+    assert.equal(grants.filter((grant) => grant.ok).length, 1);
+    await send("GROUP_RENEWAL_OUTCOME", { status: "stop", reason: "Security challenge" });
+    const stopped = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
+    assert.equal(stopped.automatic, false);
+    assert.equal(stopped.result.status, "stop");
+    assert.equal(stopped.result.automatic, true);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("the alarm reopens the configured renewal driver in the background and reuses it", async () => {
+  const previousWindow = globalThis.window;
+  const runtime = makeRuntime();
+  globalThis.window = runtime.crmWindow;
+  try {
+    await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled: true });
+    runtime.wakeRenewals();
+    const countWakes = () => runtime.deliveries.filter((item) => item.type === "GROUP_RENEWAL_WAKE").length;
+    await runtime.waitFor(() => countWakes() === 1);
+    assert.equal(runtime.tabs[0].url, runtime.crmWindow.location.origin + "/rent2buy-groups");
+    assert.equal(runtime.tabs[0].active, false);
+    runtime.wakeRenewals();
+    await runtime.waitFor(() => countWakes() === 2);
+    assert.equal(runtime.tabs.filter((tab) => tab.created).length, 1);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
+test("automatic posting rejects a lookalike CRM origin and allows the verified branch alias", async () => {
+  const previousWindow = globalThis.window;
+  const enable = () => requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled: true });
+  try {
+    globalThis.window = makeRuntime("https://marketing-crm-lookalike.vercel.app").crmWindow;
+    await assert.rejects(enable(), /approved Marketing CRM address/);
+    globalThis.window = makeRuntime("https://marketing-crm-git-codex-rent2buy-8e370c-stuart-westons-projects.vercel.app").crmWindow;
+    assert.equal((await enable()).automatic, true);
   } finally {
     globalThis.window = previousWindow;
   }

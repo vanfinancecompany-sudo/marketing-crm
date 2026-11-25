@@ -711,9 +711,9 @@ export function groupPipeline(group) {
   return "new";
 }
 
-export function requestGroupRenewalHelper(command, jobId) {
+export function requestGroupRenewalHelper(command, jobId, options = {}) {
   return messageRoundTrip("VFC_GROUP_RENEWAL_REQUEST", "VFC_GROUP_RENEWAL_RESPONSE", {
-    id: requestId("group-renewal"), command, jobId,
+    id: requestId("group-renewal"), command, jobId, ...options,
   });
 }
 
@@ -732,7 +732,7 @@ export function buildFacebookGroupPostJob({ group, vehicle, caption, productKey,
     captionCopied: Boolean(captionCopied),
     imageUrl: vehicleImage(vehicle),
     createdAt: new Date().toISOString(),
-    ...(renewal && productKey === "rent2buy" ? { renewal: { date: renewal.date } } : {}),
+    ...(renewal && productKey === "rent2buy" ? { renewal: { date: renewal.date, ...(renewal.automatic ? { automatic: true } : {}) } } : {}),
   };
 }
 

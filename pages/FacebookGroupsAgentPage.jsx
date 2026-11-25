@@ -39,6 +39,17 @@ import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, MARKETING_ACCESS_HEADER } from "../services/marketingAccess.js";
 
+const AUTOMATIC_RENEWAL_CLAIM_KEY = "vfcRent2BuyAutomaticRenewalClaim";
+
+function readAutomaticRenewalClaim() {
+  try { return JSON.parse(window.localStorage.getItem(AUTOMATIC_RENEWAL_CLAIM_KEY) || "null"); }
+  catch { return null; }
+}
+
+function clearAutomaticRenewalClaim(jobId) {
+  if (readAutomaticRenewalClaim()?.jobId === jobId) window.localStorage.removeItem(AUTOMATIC_RENEWAL_CLAIM_KEY);
+}
+
 async function renewalRequest(body) {
   const response = await fetch("/api/rent2buy-group-renewals", {
     headers: { [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey(), ...(body ? { "Content-Type": "application/json" } : {}) },
@@ -157,6 +168,8 @@ export default function FacebookGroupsAgentPage({
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState("");
   const [renewalRunning, setRenewalRunning] = useState(false);
+  const [renewalAutomatic, setRenewalAutomatic] = useState(false);
+  const [renewalPolling, setRenewalPolling] = useState(false);
   const [renewalPending, setRenewalPending] = useState(false);
   const [renewalDraft, setRenewalDraft] = useState(null);
   const [renewalMessage, setRenewalMessage] = useState("");
@@ -275,10 +288,29 @@ export default function FacebookGroupsAgentPage({
     [vehicles, selectedVehicleId, usedVehicleKeys],
   );
   const supportsRenewals = isRent2Buy && helperStatus.capabilities.includes("groups-renewals");
+  const supportsAutomaticRenewals = supportsRenewals && helperStatus.capabilities.includes("groups-automatic-renewals");
 
   function setRenewalRun(on) {
     renewalRunningRef.current = on;
     setRenewalRunning(on);
+  }
+
+  async function setAutomaticRenewals(enabled) {
+    try {
+      await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled });
+      setRenewalRun(false);
+      setRenewalAutomatic(enabled);
+      setRenewalPolling(enabled);
+      setRenewalMessage(enabled ? "Automatic renewals enabled in this Edge profile." : "Automatic renewals paused.");
+      if (enabled) void advanceRenewals();
+    } catch (error) {
+      setRenewalMessage(error.message);
+    }
+  }
+
+  async function deferAutomaticRenewals(until) {
+    setRenewalPolling(false);
+    await requestGroupRenewalHelper("DEFER_GROUP_RENEWAL_AUTOMATION", undefined, { until });
   }
 
   async function advanceRenewals() {
@@ -286,10 +318,21 @@ export default function FacebookGroupsAgentPage({
     renewalWork.current = true;
     try {
       const helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
+      const automatic = helper.automatic && helper.driver;
+      setRenewalAutomatic(Boolean(helper.automatic));
+      if (helper.automatic && !helper.driver) setRenewalRun(false);
       setRenewalPending(Boolean(helper.pending));
       setRenewalDraft(helper.pending || null);
-      if (helper.pending) return;
+      if (helper.pending) {
+        clearAutomaticRenewalClaim(helper.pending.id);
+        return;
+      }
       const result = helper.result;
+      if (result) clearAutomaticRenewalClaim(result.jobId);
+      if (!result && helper.restrictionReason) {
+        setRenewalPolling(false);
+        setRenewalMessage(helper.restrictionReason);
+      }
       if (result?.status === "submitted") {
         const current = loadFacebookGroups();
         const item = current.find((group) => normalizeFacebookGroupUrl(group.url).toLowerCase() === result.groupUrl.toLowerCase());
@@ -312,41 +355,77 @@ export default function FacebookGroupsAgentPage({
           : { action: "outcome", groupUrl: result.groupUrl, runDate: result.date,
             jobId: result.jobId, status: result.status, reason: result.reason, duplicateRisk: result.duplicateRisk });
         await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
-        if (result.status === "stop") setRenewalRun(false);
+        if (result.status === "stop") {
+          setRenewalRun(false);
+          setRenewalPolling(false);
+          setRenewalAutomatic(false);
+        }
         setRenewalMessage(result.groupName + " · " + result.reason);
         return;
       }
-      if (!renewalRunningRef.current || vehiclesLoading) return;
-      const { today, latest, settings } = await renewalRequest();
+      if ((!renewalRunningRef.current && !automatic) || vehiclesLoading || (automatic && helper.wakeAt > Date.now())) return;
+      const { today, latest, settings, nextRunAt } = await renewalRequest();
       if (!settings.enabled || latest?.date !== today || latest.stopped) {
         setRenewalRun(false);
+        if (automatic) {
+          const next = Date.parse(nextRunAt);
+          const checkAgain = !settings.enabled || latest?.stopped ? 60 * 60_000 : 15 * 60_000;
+          const wakeAt = latest?.date !== today ? Math.min(next || Infinity, Date.now() + checkAgain) : next;
+          await deferAutomaticRenewals(new Date(Number.isFinite(wakeAt) ? wakeAt : Date.now() + checkAgain).toISOString());
+        }
         setRenewalMessage(latest?.stopped?.reason || "No active renewal queue for today.");
         return;
       }
-      const group = latest.groups.find((item) => item.status === "queued");
+      const saved = automatic ? readAutomaticRenewalClaim() : null;
+      const interrupted = saved?.date === today && latest.groups.find((item) => item.groupKey === saved.groupKey &&
+        ["queued", "preparing"].includes(item.status));
+      if (saved && !interrupted) clearAutomaticRenewalClaim(saved.jobId);
+      const group = interrupted || latest.groups.find((item) => item.status === "queued");
       if (!group) {
         setRenewalRun(false);
+        if (automatic) await deferAutomaticRenewals(nextRunAt);
         setRenewalMessage("No further groups to prepare today. Review exceptions in Conversations & AI.");
         return;
       }
-      const renewal = { date: today, jobId: crypto.randomUUID() };
-      const vehicle = rotationVehicles.find((item) => {
-        if (usedVehicleKeys.includes(vehicleKey(item))) return false;
+      if (automatic) setRenewalPolling(true);
+      const renewal = { date: today, jobId: interrupted ? saved.jobId : crypto.randomUUID(), automatic };
+      const hasAdvert = (item) => {
         const job = buildFacebookGroupPostJob({ group, vehicle: item, productKey, renewal });
         return job.caption && job.imageUrl && job.registration;
-      });
-      if (!vehicle) {
-        setRenewalRun(false);
-        setRenewalMessage("No unused eligible van has both a caption and an image. Refresh stock or reset the rotation.");
+      };
+      let vehicle = interrupted ? (vehicles || []).find((item) => vehicleKey(item) === saved.vehicleId && hasAdvert(item)) :
+        rotationVehicles.find((item) => !usedVehicleKeys.includes(vehicleKey(item)) && hasAdvert(item));
+      if (!vehicle && interrupted) {
+        if (group.status === "preparing") await renewalRequest({ action: "outcome", groupUrl: group.url, jobId: saved.jobId,
+          status: "failed", reason: "The selected van became unavailable before the browser received the job" });
+        clearAutomaticRenewalClaim(saved.jobId);
         return;
       }
-      const claimed = await renewalRequest({ action: "claim", groupUrl: group.url, jobId: renewal.jobId });
+      if (!vehicle && automatic) {
+        vehicle = (vehicles || []).find(hasAdvert);
+        if (vehicle) {
+          saveUsedVanKeys(productKey, []);
+          setUsedVehicleKeys([]);
+        }
+      }
+      if (!vehicle) {
+        setRenewalRun(false);
+        if (automatic) await deferAutomaticRenewals(new Date(Date.now() + 60 * 60_000).toISOString());
+        setRenewalMessage("No unused eligible van has both a caption and an image.");
+        return;
+      }
+      if (automatic) window.localStorage.setItem(AUTOMATIC_RENEWAL_CLAIM_KEY, JSON.stringify({
+        date: today, groupKey: group.groupKey, jobId: renewal.jobId, vehicleId: vehicleKey(vehicle),
+      }));
+      const claimed = await renewalRequest({ action: "claim", groupUrl: group.url, jobId: renewal.jobId, automatic });
       if (!claimed.prepare) {
+        clearAutomaticRenewalClaim(renewal.jobId);
         setRenewalMessage(group.name + " · " + claimed.reason);
         return;
       }
       try {
         await prepareFacebookGroupPost({ group, vehicle, productKey, renewal });
+        clearAutomaticRenewalClaim(renewal.jobId);
         setRenewalPending(true);
         setRenewalMessage(group.name + " · preparing the stock photo and caption.");
       } catch (error) {
@@ -355,10 +434,12 @@ export default function FacebookGroupsAgentPage({
         if (!current.pending && !current.result) {
           await renewalRequest({ action: "outcome", groupUrl: group.url, jobId: renewal.jobId,
             status: "failed", reason: error.message });
+          clearAutomaticRenewalClaim(renewal.jobId);
         }
       }
     } catch (error) {
       setRenewalRun(false);
+      setRenewalPolling(false);
       setRenewalPending(false);
       setRenewalMessage(error.message || "Could not continue the renewal queue.");
     } finally {
@@ -369,10 +450,17 @@ export default function FacebookGroupsAgentPage({
   useEffect(() => {
     if (!supportsRenewals) return undefined;
     void advanceRenewals();
-    if (!renewalRunning && !renewalPending) return undefined;
-    const timer = window.setInterval(advanceRenewals, 4000);
-    return () => window.clearInterval(timer);
-  }, [supportsRenewals, renewalRunning, renewalPending, rotationVehicles, usedVehicleKeys, vehiclesLoading]);
+    function onRenewalWake(event) {
+      if (event.source === window && event.origin === window.location.origin &&
+          event.data?.source === "vfc-facebook-helper" && event.data?.type === "VFC_GROUP_RENEWAL_WAKE") void advanceRenewals();
+    }
+    window.addEventListener("message", onRenewalWake);
+    const timer = renewalRunning || renewalPending || renewalPolling ? window.setInterval(advanceRenewals, 4000) : null;
+    return () => {
+      if (timer !== null) window.clearInterval(timer);
+      window.removeEventListener("message", onRenewalWake);
+    };
+  }, [supportsRenewals, renewalRunning, renewalPending, renewalPolling, rotationVehicles, usedVehicleKeys, vehiclesLoading]);
 
   async function reviewRenewalDraft() {
     if (!renewalDraft) return;
@@ -976,12 +1064,17 @@ export default function FacebookGroupsAgentPage({
         {message ? <div className="notice">{message}</div> : null}
         {isRent2Buy ? <div className="notice">
           <strong>Daily Proven / Hot renewals</strong>
-          <p>Keep this page open. Copy and paste the prepared caption, review the advert and click Post in Facebook. The helper then prepares the next eligible group.</p>
-          <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
+          <p>{renewalAutomatic ? "The helper posts each eligible renewal in this Edge profile and records Facebook’s results." :
+            "Enable automatic renewals for previously approved adverts, or review drafts one by one."}</p>
+          {supportsAutomaticRenewals ? <button className="button button--small" type="button" disabled={Boolean(busy)}
+            onClick={() => void setAutomaticRenewals(!renewalAutomatic)}>
+            {renewalAutomatic ? "Pause automatic renewals" : "Enable automatic renewals"}
+          </button> : null}
+          {!renewalAutomatic ? <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
             onClick={() => setRenewalRun(!renewalRunning)}>
             {renewalRunning ? "Pause after this group" : "Prepare today’s renewal queue"}
-          </button>
-          {renewalDraft ? <details>
+          </button> : null}
+          {renewalDraft && !renewalDraft.renewal?.automatic ? <details>
             <summary>{renewalDraft.prepared ? "Review prepared advert" : "Preparing advert"} · {renewalDraft.groupName}</summary>
             <p>{renewalDraft.registration}</p>
             <img src={renewalDraft.imageUrl} alt="Prepared stock photo" width="200" />

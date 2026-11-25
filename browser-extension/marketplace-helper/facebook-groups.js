@@ -534,20 +534,30 @@
       const expected = Date.parse(target.postedAt);
       let matched = null;
       for (let attempt = 0; attempt < 12 && !matched; attempt += 1) {
+        if (renewalRestriction()) {
+          await chrome.runtime.sendMessage({ type: "GROUP_POST_STATUS_PAGE_RESULT", jobId: state.job.id,
+            groupIndex: state.groupIndex, result: { url: target.url, registration: target.registration, restricted: true } });
+          return;
+        }
         matched = [...document.querySelectorAll('[role="article"], article')].filter(visible)
           .map((article) => {
             const link = article.querySelector('a[href*="/posts/"],a[href*="/permalink/"]');
             const when = Date.parse(article.querySelector("time[datetime]")?.getAttribute("datetime"));
             const dated = Number.isFinite(expected) && Number.isFinite(when) && when >= expected - 60_000;
-            return wantedReg && link?.href && dated && advertRegistrationLine(article.innerText || "", wantedReg)
-              && canonicalGroupUrl(link.href) === canonicalGroupUrl(target.url) ? link.href : null;
+            const text = article.innerText || "";
+            if (!wantedReg || !link?.href || !dated || !advertRegistrationLine(text, wantedReg) ||
+                canonicalGroupUrl(link.href) !== canonicalGroupUrl(target.url)) return null;
+            const declined = /post (?:was )?(?:declined|rejected|not approved)|declined by (?:an )?admin/i.test(text);
+            const pending = /pending approval|awaiting (?:admin )?approval|waiting for (?:admin )?approval/i.test(text);
+            return { url: link.href, declined, pending };
           }).find(Boolean);
         if (!matched) await sleep(500);
       }
       await chrome.runtime.sendMessage({ type: "GROUP_POST_STATUS_PAGE_RESULT", jobId: state.job.id,
         groupIndex: state.groupIndex, result: { name: target.name, url: target.url,
-          registration: target.registration, accepted: Boolean(matched), pending: !matched,
-          matchedUrl: matched || "", matchMethod: matched ? "dated-renewal-advert" : "",
+          registration: target.registration, accepted: Boolean(matched && !matched.pending && !matched.declined),
+          pending: !matched || (matched.pending && !matched.declined), declined: Boolean(matched?.declined),
+          matchedUrl: matched?.url || "", matchMethod: matched ? "dated-renewal-advert" : "",
           checkedAt: new Date().toISOString() } });
       return;
     }
@@ -787,44 +797,95 @@
     return chrome.runtime.sendMessage({ type: "GROUP_RENEWAL_OUTCOME", jobId: job.id, result: { status, ...detail } });
   }
 
+  async function verifyRenewalSubmission(job, previous, captionHasRegistration) {
+    const recordConfirmation = (approvalState) => captionHasRegistration
+      ? renewalOutcome(job, "submitted", { approvalState })
+      : renewalOutcome(job, "needs_attention", { reason: "Facebook confirmed a post without the prepared stock registration in its caption.", duplicateRisk: true });
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      await sleep(800);
+      if (renewalRestriction()) {
+        await renewalOutcome(job, "stop", { reason: "Facebook reported an account restriction or security check" });
+        return;
+      }
+      const feedback = renewalFeedback().filter((text) => !previous.has(text));
+      if (feedback.some((text) => /post (?:was |has been )?submitted for (?:admin )?approval|your post is (?:pending|awaiting) approval/i.test(text))) {
+        await recordConfirmation("pending");
+        return;
+      }
+      if (feedback.some((text) => /^(?:your )?post (?:was |has been )?(?:published|posted|shared)(?: successfully)?[.!]?$/i.test(text))) {
+        await recordConfirmation("submitted");
+        return;
+      }
+      if (feedback.some((text) => /couldn.t (?:publish|create|share) your post|post couldn.t be (?:published|shared)|failed to post/i.test(text))) {
+        await renewalOutcome(job, "failed", { reason: "Facebook reported that the post failed" });
+        return;
+      }
+    }
+    await renewalOutcome(job, "needs_attention", { reason: "Facebook did not confirm submission. Check for the post before retrying.", duplicateRisk: true });
+  }
+
+  function actionableRenewalPost(element) {
+    return Boolean(visible(element) && !element.disabled && element.getAttribute("aria-disabled") !== "true" &&
+      /^post$/i.test(clean(element.getAttribute("aria-label") || element.innerText || element.textContent)));
+  }
+
   function watchRenewalPost(job, dialog, editor) {
     function onClick(event) {
       const button = event.target?.closest?.('button, [role="button"]');
-      if (!event.isTrusted || !button || !dialog.contains(button) || !visible(button) || button.disabled ||
-          button.getAttribute("aria-disabled") === "true" ||
-          !/^post$/i.test(clean(button.getAttribute("aria-label") || button.innerText || button.textContent))) return;
+      if (!event.isTrusted || !button || !dialog.contains(button) || !actionableRenewalPost(button)) return;
       document.removeEventListener("click", onClick, true);
-      const previous = new Set(renewalFeedback());
       const captionHasRegistration = normalizeRegistration(editor.innerText || editor.textContent).includes(normalizeRegistration(job.registration));
-      const recordConfirmation = (approvalState) => captionHasRegistration
-        ? renewalOutcome(job, "submitted", { approvalState })
-        : renewalOutcome(job, "needs_attention", { reason: "Facebook confirmed a post without the prepared stock registration in its caption.", duplicateRisk: true });
-      void (async () => {
-        for (let attempt = 0; attempt < 15; attempt += 1) {
-          await sleep(800);
-          if (renewalRestriction()) {
-            await renewalOutcome(job, "stop", { reason: "Facebook reported an account restriction or security check" });
-            return;
-          }
-          const feedback = renewalFeedback().filter((text) => !previous.has(text));
-          if (feedback.some((text) => /post (?:was |has been )?submitted for (?:admin )?approval|your post is (?:pending|awaiting) approval/i.test(text))) {
-            await recordConfirmation("pending");
-            return;
-          }
-          if (feedback.some((text) => /^(?:your )?post (?:was |has been )?(?:published|posted|shared)(?: successfully)?[.!]?$/i.test(text))) {
-            await recordConfirmation("submitted");
-            return;
-          }
-          if (feedback.some((text) => /couldn.t (?:publish|create|share) your post|post couldn.t be (?:published|shared)|failed to post/i.test(text))) {
-            await renewalOutcome(job, "failed", { reason: "Facebook reported that the post failed" });
-            return;
-          }
-        }
-        await renewalOutcome(job, "needs_attention", { reason: "Facebook did not confirm submission. Check for the post before retrying.", duplicateRisk: true });
-      })().catch(() => {});
+      void verifyRenewalSubmission(job, new Set(renewalFeedback()), captionHasRegistration).catch(() => {});
     }
     document.addEventListener("click", onClick, true);
   }
+
+  function attachedPhoto(dialog) {
+    return [...dialog.querySelectorAll('img[src^="blob:"],img[src^="data:image/"],[style*="blob:"],button[aria-label*="Remove photo" i],[role="button"][aria-label*="Remove photo" i]')]
+      .find(visible);
+  }
+
+  async function submitAutomaticRenewal(job, dialog, editor) {
+    const compact = (value) => clean(value).replace(/\s+/g, " ");
+    const content = () => editor.innerText || editor.textContent || "";
+    if (!advertRegistrationLine(job.caption || "", normalizeRegistration(job.registration))) {
+      return renewalOutcome(job, "needs_attention", { reason: "The prepared caption did not identify the selected van" });
+    }
+    if (compact(content())) {
+      return renewalOutcome(job, "needs_attention", { reason: "The verified composer was not empty" });
+    }
+    if (renewalRestriction()) return renewalOutcome(job, "stop", { reason: "Facebook requires account or security review" });
+
+    const files = new DataTransfer();
+    files.setData("text/plain", job.caption);
+    editor.focus();
+    editor.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: files }));
+    let post = null;
+    for (let check = 0; check < 20; check += 1) {
+      await sleep(500);
+      if (renewalRestriction()) return renewalOutcome(job, "stop", { reason: "Facebook requires account or security review" });
+      if (!dialog.contains(editor) || !isVerifiedCreatePostDialog(dialog)) break;
+      if (compact(content()) !== compact(job.caption) || !attachedPhoto(dialog)) continue;
+      const buttons = [...dialog.querySelectorAll('button, [role="button"]')].filter(actionableRenewalPost);
+      if (buttons.length === 1) {
+        post = buttons[0];
+        break;
+      }
+    }
+    if (!post) return renewalOutcome(job, "needs_attention", { reason: "Could not verify the caption, attached photo and Post button in Facebook" });
+
+    const reserved = await chrome.runtime.sendMessage({ type: "BEGIN_GROUP_RENEWAL_SUBMISSION", jobId: job.id });
+    if (!reserved?.ok) return renewalOutcome(job, "needs_attention", { reason: "Automatic submission was stopped before posting" });
+    if (renewalRestriction()) return renewalOutcome(job, "stop", { reason: "Facebook requires account or security review" });
+    if (!dialog.contains(post) || !dialog.contains(editor) || !actionableRenewalPost(post) ||
+        !attachedPhoto(dialog) || compact(content()) !== compact(job.caption)) {
+      return renewalOutcome(job, "needs_attention", { reason: "The composer changed before submission" });
+    }
+    const previous = new Set(renewalFeedback());
+    post.click();
+    return verifyRenewalSubmission(job, previous, true);
+  }
+
 
   async function prepareGroupPost(job) {
     if (!location.pathname.startsWith("/groups/")) return;
@@ -876,12 +937,21 @@
 
     results.push({ label: "Composer", ok: true, detail: "Verified Create Post dialog" });
     if (job.renewal) {
-      const join = buttonWithText(/^join group$/i);
+      const join = buttonWithText(/^join(?: group)?$/i);
       if (renewalRestriction() || join || membershipPendingVisible()) {
         const restricted = renewalRestriction();
         await renewalOutcome(job, restricted ? "stop" : "needs_attention", {
           reason: restricted ? "Facebook reported an account restriction" : "Group membership could not be confirmed",
         });
+        return;
+      }
+      const ruleEvidence = job.renewal.automatic ? extractRuleEvidence(pageLines().slice(0, 60)) : "";
+      if (explicitRuleStatus(ruleEvidence) === "Red" || /\b(?:no (?:external )?links|links? (?:are )?not allowed)\b/i.test(ruleEvidence)) {
+        await renewalOutcome(job, "needs_attention", { reason: "Facebook shows a group rule that prohibits commercial adverts" });
+        return;
+      }
+      if (job.renewal.automatic && (attachedPhoto(scope) || clean(editor.innerText || editor.textContent))) {
+        await renewalOutcome(job, "needs_attention", { reason: "Facebook opened an existing draft. It was left alone." });
         return;
       }
       let image;
@@ -893,6 +963,10 @@
       }
       const ready = await chrome.runtime.sendMessage({ type: "GROUP_RENEWAL_READY", jobId: job.id });
       if (!ready?.ok) return;
+      if (job.renewal.automatic) {
+        await submitAutomaticRenewal(job, scope, editor);
+        return;
+      }
       watchRenewalPost(job, scope, editor);
       showPostReport(job, [...results, image, { label: "Caption", ok: true, detail: "Ready to copy" }],
         "", "Copy and paste the caption, review the advert and click Post.");
@@ -936,6 +1010,8 @@
       membershipPendingVisible,
       waitForMembershipPending,
       watchRenewalPost,
+      submitAutomaticRenewal,
+      checkPostedStatus,
       prepareGroupPost,
     });
   }

@@ -6,6 +6,12 @@ const PUBLISH_CONFIRM_WINDOW_MS = 10 * 60 * 1000;
 const GROUP_AGENT_STATE_KEY = "vfcFacebookGroupsAgentState";
 const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
 const RENEWAL_STATE_KEY = "vfcRent2BuyGroupRenewal";
+const RENEWAL_ALARM = "vfcRent2BuyGroupRenewalAlarm";
+const RENEWAL_POST_INTERVAL_MS = 60_000;
+const RENEWAL_CRM_ORIGINS = new Set([
+  "https://marketing-crm-six.vercel.app",
+  "https://marketing-crm-git-codex-rent2buy-8e370c-stuart-westons-projects.vercel.app",
+]);
 let renewalWork = Promise.resolve();
 
 function withRenewalLock(work) {
@@ -26,6 +32,39 @@ function senderOrigin(sender) {
   try { return new URL(sender?.url).origin; } catch { return ""; }
 }
 
+function renewalDriverUrl(value) {
+  try {
+    const url = new URL(value);
+    return RENEWAL_CRM_ORIGINS.has(url.origin) &&
+      url.pathname.replace(/\/$/, "") === "/rent2buy-groups" ? url.origin + "/rent2buy-groups" : "";
+  } catch { return ""; }
+}
+
+function ensureRenewalAlarm() {
+  try { chrome.alarms.create(RENEWAL_ALARM, { periodInMinutes: 5 }); } catch {}
+}
+
+async function wakeRenewalDriver() {
+  const state = await readRenewal();
+  const driver = state.automation;
+  if (!driver?.enabled && !state.result?.automatic) return;
+  if (!state.pending && !state.result && Math.max(driver?.wakeAt || 0, state.nextSubmissionAt || 0) > Date.now()) return;
+  if (!driver?.url) return;
+
+  let tab = driver.tabId ? await chrome.tabs.get(driver.tabId).catch(() => null) : null;
+  if (renewalDriverUrl(tab?.url) !== driver.url) {
+    const candidates = await chrome.tabs.query({ url: driver.url + "*" });
+    tab = candidates.find((candidate) => renewalDriverUrl(candidate.url) === driver.url);
+    if (!tab) tab = await chrome.tabs.create({ url: driver.url, active: false });
+    await saveRenewal({ ...state, automation: { ...driver, tabId: tab.id } });
+  }
+  if (tab.discarded) {
+    await chrome.tabs.reload(tab.id);
+    return;
+  }
+  await chrome.tabs.sendMessage(tab.id, { type: "GROUP_RENEWAL_WAKE" }).catch(() => {});
+}
+
 async function finishRenewal(state, detail) {
   const { pending } = state;
   if (!pending) return;
@@ -33,9 +72,18 @@ async function finishRenewal(state, detail) {
   const result = {
     ...detail, jobId: job.id, date: job.renewal.date, groupUrl: job.groupUrl,
     groupName: job.groupName, productKey: "rent2buy", registration: job.registration, vehicleId: job.vehicleId, renewalPost: true,
+    automatic: job.renewal.automatic === true,
   };
-  await saveRenewal({ origin: state.origin, tabId: pending.tabId, result, pending: null,
-    restricted: detail.status === "stop" || state.restricted === true });
+  const automation = detail.status === "stop" && state.automation ? { ...state.automation, enabled: false } : state.automation;
+  const nextSubmissionAt = pending.submissionStarted ? pending.submissionStarted + RENEWAL_POST_INTERVAL_MS : state.nextSubmissionAt;
+  await saveRenewal({ origin: state.origin, tabId: pending.tabId, result, pending: null, automation, nextSubmissionAt,
+    restricted: detail.status === "stop" || state.restricted === true, restrictionReason: detail.status === "stop" ? detail.reason : state.restrictionReason });
+}
+
+async function stopRenewalForRestriction(state, reason) {
+  if (state.pending) return finishRenewal(state, { status: "stop", reason });
+  const automation = state.automation ? { ...state.automation, enabled: false } : state.automation;
+  await saveRenewal({ ...state, automation, restricted: true, restrictionReason: reason });
 }
 
 async function startRenewalJob(job, sender) {
@@ -44,6 +92,10 @@ async function startRenewalJob(job, sender) {
       !target || !job.imageUrl || !job.registration) return { ok: false, error: "Invalid Rent2Buy renewal advert." };
   const state = await readRenewal();
   const origin = senderOrigin(sender);
+  if (job.renewal.automatic && (!state.automation?.enabled || state.automation.tabId !== sender?.tab?.id ||
+      state.automation.url !== renewalDriverUrl(sender.url) || state.restricted || state.nextSubmissionAt > Date.now())) {
+    return { ok: false, error: "Automatic posting is disabled for this CRM tab" };
+  }
   if (state.pending?.job.id === job.id && state.origin === origin) return { ok: true, jobId: job.id };
   if (state.pending || state.result) return { ok: false, error: "Finish the previous renewal preparation first." };
   const existing = state.origin === origin && state.tabId ? await chrome.tabs.get(state.tabId).catch(() => null) : null;
@@ -51,19 +103,50 @@ async function startRenewalJob(job, sender) {
   const reusable = previousGroup && previousGroup === state.lastGroupUrl ? existing : null;
   const tab = reusable || await chrome.tabs.create({ url: "about:blank", active: false });
   const pending = { job: { ...job, groupUrl: target }, tabId: tab.id, storedAt: Date.now() };
-  await saveRenewal({ origin, tabId: tab.id, pending, restricted: state.restricted === true });
+  await saveRenewal({ ...state, origin, tabId: tab.id, pending, restricted: state.restricted === true });
   try {
     await chrome.tabs.update(tab.id, { url: target });
   } catch {
-    await finishRenewal({ origin, pending, restricted: state.restricted }, { status: "failed", reason: "Could not open the group in Facebook" });
+    await finishRenewal({ ...state, origin, pending }, { status: "failed", reason: "Could not open the group in Facebook" });
   }
   return { ok: true, jobId: job.id };
 }
 
 async function handleRenewalMessage(message, sender) {
   const state = await readRenewal();
+  const senderUrl = renewalDriverUrl(sender?.url);
+  const sameDriver = Boolean(senderUrl && state.automation?.url === senderUrl);
+  if (message.type === "SET_GROUP_RENEWAL_AUTOMATION") {
+    if (!senderUrl || !sender?.tab?.id || (state.origin && state.origin !== senderOrigin(sender) && (state.pending || state.result))) {
+      return { ok: false, error: "Open Rent2Buy Groups on the approved Marketing CRM address to enable automatic renewals" };
+    }
+    const enabled = message.enabled === true;
+    if (!enabled && !sameDriver) return { ok: true, automatic: false };
+    if (enabled && state.pending && !state.pending.job.renewal.automatic) {
+      return { ok: false, error: "Finish the open manual draft before enabling automatic renewals" };
+    }
+    await saveRenewal({ ...state, origin: senderOrigin(sender), restricted: enabled ? false : state.restricted,
+      restrictionReason: enabled ? "" : state.restrictionReason,
+      automation: { enabled, url: senderUrl, tabId: enabled ? sender.tab.id : state.automation.tabId, wakeAt: 0 } });
+    if (enabled) ensureRenewalAlarm();
+    return { ok: true, automatic: enabled, driver: enabled };
+  }
+  if (message.type === "DEFER_GROUP_RENEWAL_AUTOMATION") {
+    if (!sameDriver || state.automation.tabId !== sender?.tab?.id) return { ok: false };
+    const until = Date.parse(message.until);
+    if (Number.isFinite(until)) {
+      const wakeAt = Math.min(until, Date.now() + 25 * 60 * 60_000);
+      await saveRenewal({ ...state, automation: { ...state.automation, wakeAt } });
+    }
+    return { ok: true };
+  }
   if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT"].includes(message.type)) {
     if (!state.origin || state.origin !== senderOrigin(sender)) return { ok: true };
+    const driver = sameDriver && state.automation.tabId === sender?.tab?.id;
+    const automatic = Boolean(sameDriver && state.automation.enabled);
+    const report = { ok: true, automatic, driver: Boolean(driver), restrictionReason: state.restrictionReason,
+      wakeAt: driver ? Math.max(state.automation.wakeAt || 0, state.nextSubmissionAt || 0) : 0 };
+    if (state.automation?.enabled && !driver) return report;
     if (message.type === "OPEN_GROUP_RENEWAL_DRAFT") {
       const tab = state.pending?.job.id === message.jobId ? await chrome.tabs.get(state.pending.tabId).catch(() => null) : null;
       if (!tab || canonicalGroupUrl(tab.url) !== state.pending.job.groupUrl) {
@@ -79,7 +162,7 @@ async function handleRenewalMessage(message, sender) {
           await upsertApprovalMonitorItem(state.result);
           ensureApprovalAlarm();
         }
-        await saveRenewal({ origin: state.origin, tabId: state.tabId, lastGroupUrl: state.result.groupUrl, restricted: state.restricted });
+        await saveRenewal({ ...state, lastGroupUrl: state.result.groupUrl, result: null });
       }
       return { ok: true };
     }
@@ -87,25 +170,31 @@ async function handleRenewalMessage(message, sender) {
       const tab = await chrome.tabs.get(state.pending.tabId).catch(() => null);
       if (!tab || (tab.status === "complete" && canonicalGroupUrl(tab.url) !== state.pending.job.groupUrl &&
           Date.now() - state.pending.storedAt >= 15_000)) {
-        await finishRenewal(state, { status: "needs_attention", reason: "The Facebook tab closed or left the group. Check for a submission before retrying.", duplicateRisk: Boolean(state.pending.prepared) });
-        return { ok: true, result: (await readRenewal()).result };
+        await finishRenewal(state, { status: "needs_attention", reason: "The Facebook tab closed or left the group. Check for a submission before retrying.", duplicateRisk: Boolean(state.pending.submissionStarted || (state.pending.prepared && !state.pending.job.renewal.automatic)) });
+        return { ...report, result: (await readRenewal()).result };
       }
     }
-    if (state.pending && !state.pending.prepared && Date.now() - state.pending.storedAt >= 90_000) {
-      await finishRenewal(state, { status: "needs_attention", reason: "Facebook did not finish preparing the composer" });
-      return { ok: true, result: (await readRenewal()).result };
+    if (state.pending && (!state.pending.prepared || state.pending.job.renewal.automatic) && Date.now() - state.pending.storedAt >= 120_000) {
+      await finishRenewal(state, { status: "needs_attention", reason: state.pending.submissionStarted ? "Facebook did not confirm submission. Check before retrying." : "Facebook did not finish preparing the composer",
+        duplicateRisk: Boolean(state.pending.submissionStarted) });
+      return { ...report, result: (await readRenewal()).result };
     }
-    return { ok: true, pending: state.pending ? { ...state.pending.job, prepared: Boolean(state.pending.prepared) } : null,
+    return { ...report, pending: state.pending ? { ...state.pending.job, prepared: Boolean(state.pending.prepared) } : null,
       result: state.result || null };
   }
   const pending = state.pending;
-  if (!pending || pending.tabId !== sender?.tab?.id || pending.job.id !== message.jobId ||
+  if (!pending || pending.tabId !== sender?.tab?.id || pending.job.id !== message.jobId || senderOrigin(sender) !== "https://www.facebook.com" ||
       canonicalGroupUrl(sender.url) !== pending.job.groupUrl) return { ok: false };
   if (message.type === "GROUP_RENEWAL_READY") {
     await saveRenewal({ ...state, restricted: false, pending: { ...pending, prepared: true } });
+  } else if (message.type === "BEGIN_GROUP_RENEWAL_SUBMISSION") {
+    if (!pending.prepared || !pending.job.renewal.automatic || !state.automation?.enabled || state.restricted ||
+        pending.submissionStarted) return { ok: false };
+    await saveRenewal({ ...state, pending: { ...pending, submissionStarted: Date.now() } });
   } else {
     const detail = message.result || {};
-    if (detail.status === "submitted" && (!pending.prepared || !["accepted", "pending", "submitted"].includes(detail.approvalState))) return { ok: false };
+    if (detail.status === "submitted" && (!pending.prepared || (pending.job.renewal.automatic && !pending.submissionStarted) ||
+        !["accepted", "pending", "submitted"].includes(detail.approvalState))) return { ok: false };
     if (!["submitted", "failed", "needs_attention", "stop"].includes(detail.status)) return { ok: false };
     await finishRenewal(state, { status: detail.status, reason: clean(detail.reason).slice(0, 200),
       duplicateRisk: detail.duplicateRisk === true,
@@ -119,7 +208,14 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   withRenewalLock(async () => {
     const state = await readRenewal();
     if (state.pending?.tabId === tabId) {
-      await finishRenewal(state, { status: "stop", reason: "Facebook requires sign-in or account/security review" });
+      await stopRenewalForRestriction(state, "Facebook requires sign-in or account/security review");
+      return;
+    }
+    const approval = await getGroupAgentState();
+    if (approval?.tabId === tabId && approval.mode === "auto-post-status" && approval.job.groups[0]?.renewalPost) {
+      await stopRenewalForRestriction(state, "Facebook requires sign-in or account/security review");
+      await chrome.tabs.remove(tabId).catch(() => {});
+      await clearGroupAgentState();
     }
   }).catch(() => {});
 });
@@ -431,7 +527,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-discovery",
           "groups-inspection",
           "groups-post-prep",
-          "groups-renewals",
+          "groups-renewals", "groups-automatic-renewals",
           "groups-post-status",
           "groups-auto-approval-monitor",
           "groups-state-recovery",
@@ -745,6 +841,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (state.mode === "auto-post-status") {
         const result = message.result || {};
         const target = state.job.groups?.[0] || {};
+        if (target.renewalPost && result.restricted && state.tabId === sender?.tab?.id) {
+          await withRenewalLock(async () => stopRenewalForRestriction(await readRenewal(), "Facebook reported a security check during renewal verification"));
+          await chrome.tabs.remove(state.tabId).catch(() => {});
+          await clearGroupAgentState();
+          sendResponse({ ok: true });
+          return;
+        }
         const checkedAt = result.checkedAt || new Date().toISOString();
         const event = {
           id: `group-status-event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -872,7 +975,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!current || current.tabId !== sender?.tab?.id ||
             canonicalGroupUrl(sender.url) !== current.job.groupUrl) return null;
         if (current.prepared) {
-          await finishRenewal(state, { status: "needs_attention", reason: "The prepared browser draft was interrupted. Check for a submission before retrying.", duplicateRisk: true });
+          await finishRenewal(state, { status: "needs_attention", reason: "The prepared browser draft was interrupted. Check Facebook before retrying.",
+            duplicateRisk: Boolean(current.submissionStarted || !current.job.renewal.automatic) });
           return null;
         }
         return current.job;
@@ -887,7 +991,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "GROUP_RENEWAL_READY", "GROUP_RENEWAL_OUTCOME"].includes(message?.type)) {
+    if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "SET_GROUP_RENEWAL_AUTOMATION", "DEFER_GROUP_RENEWAL_AUTOMATION",
+        "GROUP_RENEWAL_READY", "BEGIN_GROUP_RENEWAL_SUBMISSION", "GROUP_RENEWAL_OUTCOME"].includes(message?.type)) {
       sendResponse(await withRenewalLock(() => handleRenewalMessage(message, sender)));
       return;
     }
@@ -1017,16 +1122,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  ensureRenewalAlarm();
   ensureApprovalAlarm();
   refreshApprovalBadge().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  ensureRenewalAlarm();
+  withRenewalLock(wakeRenewalDriver).catch(() => {});
   ensureApprovalAlarm();
   refreshApprovalBadge().catch(() => {});
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name === RENEWAL_ALARM) {
+    withRenewalLock(wakeRenewalDriver).catch(() => {});
+    return;
+  }
   if (alarm?.name !== GROUP_APPROVAL_ALARM) return;
   startAutomaticApprovalCheck().catch(() => {});
 });

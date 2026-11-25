@@ -12,7 +12,7 @@ This Chrome extension is the local browser bridge between the Marketing CRM and 
 6. A listing is only reported back as published when the helper saw that manual Publish click and the same Facebook tab then navigated to a real `/marketplace/item/...` URL.
 7. The CRM records the confirmed advert and removes that van from the Marketplace to-do list.
 
-The extension never clicks Publish, never handles Facebook credentials, and contains no CAPTCHA, stealth, fingerprint or enforcement-bypass behaviour.
+The Marketplace listing workflow leaves Publish to the user. The extension never handles Facebook credentials or bypasses account security checks.
 
 ## Marketplace rules
 
@@ -56,8 +56,9 @@ The same extension also supports the separate **Rent2Buy Facebook Groups** and *
 - Discovery runs search Facebook Groups through the user's normal logged-in browser session and return candidate group URLs/names to the CRM.
 - Live checks open a controlled batch of group About pages and record visible membership/posting access, privacy, approval and advertising/link-rule evidence.
 - Rent2Buy and Van Finance use separate search plans and scoring.
-- Group post preparation opens the selected group, attempts to fill the existing CRM caption and stock image, and stops before Facebook's final Post action.
-- The helper never joins a group, requests membership, clicks the final Post button, bypasses CAPTCHA/security checks or attempts to hide automation.
+- Manual group post preparation opens the selected group with the CRM caption and stock image for review.
+- Rent2Buy Proven/Hot renewals can run automatically once enabled in the CRM and browser. The helper uses the existing composer, checks the prepared advert before submitting, and records Facebook’s confirmation. It stops on security checks or account restrictions.
+- Group discovery and membership requests are manual.
 - Discovery and inspection are deliberately batched rather than running as an unattended high-frequency crawler.
 
 The Group agent stores its candidate/check history in the browser-side Marketing CRM state in this first release. No production customer, lead or stock records are altered.
