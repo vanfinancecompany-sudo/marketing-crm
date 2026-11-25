@@ -3,7 +3,7 @@ import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 // minutes; no AI calls). Opens one alert per problem, emails significant new
 // sustained problems once, and resolves alerts automatically when clear.
 import { createClient } from "@supabase/supabase-js";
-import { buildMonitorIssues } from "../lib/conversationsMonitor.js";
+import { buildMonitorIssues, readMarketplaceOutstanding } from "../lib/conversationsMonitor.js";
 import { sendSendGridEmail } from "../lib/emailProviders/sendgrid.js";
 import { readRenewalMonitoring } from "./rent2buy-group-renewals.js";
 import { RENEWAL_MONITOR_CHANNEL } from "../lib/rent2buyGroupRenewalMonitor.js";
@@ -83,7 +83,8 @@ export async function runConversationsMonitor(db, { environment = process.env, n
     environment.VERCEL_ENV === "preview" ? null : readRenewalMonitoring(db, now, environment).catch(() => null),
   ]);
   if (statusRes.error || eventsRes.error || alertsRes.error) throw new Error("Monitoring tables are not available");
-  const issues = [...buildMonitorIssues({ facebook: statusRes.data, events: eventsRes.data || [], now }), ...(renewal?.issues || [])];
+  const outstanding = await readMarketplaceOutstanding(db).catch(() => null);
+  const issues = [...buildMonitorIssues({ facebook: statusRes.data, events: eventsRes.data || [], outstanding, now }), ...(renewal?.issues || [])];
   const open = new Map((alertsRes.data || []).map((row) => [row.fingerprint, row]));
   const stamp = now.toISOString();
   const opened = [], recovered = [];
@@ -115,6 +116,7 @@ export async function runConversationsMonitor(db, { environment = process.env, n
     open.delete(item.fingerprint);
   }
   for (const row of open.values()) {
+    if (outstanding === null && row.fingerprint.startsWith("facebook:outstanding:")) continue;
     const update = { status: "resolved", resolved_at: stamp };
     if (row.channel === RENEWAL_MONITOR_CHANNEL) {
       if (!renewal) continue;
