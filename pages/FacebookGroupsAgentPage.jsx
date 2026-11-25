@@ -860,7 +860,7 @@ export default function FacebookGroupsAgentPage({
             </div>
           </div>
           <div className="posting-card-grid posting-card-grid--dense">
-            {dueGroups.slice(0, 8).map(renderGroupCard)}
+            {dueGroups.slice(0, isRent2Buy ? 30 : 8).map(renderGroupCard)}
           </div>
         </section>
       ) : null}

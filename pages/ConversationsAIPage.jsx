@@ -33,6 +33,8 @@ export default function ConversationsAIPage() {
   const [activityPage, setActivityPage] = useState(null);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState("");
+  const [renewalData, setRenewalData] = useState(null);
+  const [renewalError, setRenewalError] = useState("");
 
   async function refresh(range = days) {
     setError("");
@@ -41,6 +43,11 @@ export default function ConversationsAIPage() {
       if (response.status === 401) { clearMarketingAccessKey(); setAccessStatus("locked"); return; }
       if (!response.ok) throw new Error("Dashboard data could not be loaded.");
       setData(await response.json());
+      try {
+        const renewal = await fetch("/api/rent2buy-group-renewals", { headers: { [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey() } });
+        if (!renewal.ok) throw new Error("Renewal reporting not available");
+        setRenewalData(await renewal.json()); setRenewalError("");
+      } catch (caught) { setRenewalError(caught.message); }
     } catch (caught) { setError(caught.message); }
   }
 
@@ -127,6 +134,14 @@ export default function ConversationsAIPage() {
       </section>
       <section className="panel"><div className="panel__header"><div><div className="eyebrow">Facebook · Marketplace assistant</div><h3>Automatic replies</h3></div></div>
         <div className="competence-metrics"><Metric label="Received" value={num(fb.counts.received)} /><Metric label="Answered (delivery confirmed)" value={num(fb.counts.answered)} /><Metric label="Needing a person" value={num(fb.counts.needs_human)} /><Metric label="Send / confirmation failures" value={num(fb.counts.send_failed)} /><Metric label="Ask Me failures" value={num(fb.counts.ai_failed)} /><Metric label="Auto replies today (assistant)" value={num(fb.detail?.autoRepliesToday)} /></div>
+      </section>
+      <section className="panel"><div className="panel__header"><div><div className="eyebrow">Rent2Buy · Facebook Groups</div><h3>Daily proven-group renewals</h3><p>One daily check. Publication uses the existing manual approval workflow.</p></div></div>
+        {renewalError ? <div className="notice notice--warning">{renewalError}</div> : null}
+        {renewalData ? <><p>{renewalData.enabled ? "Daily check enabled" : "Daily check disabled"} · Last check: {fmt(renewalData.latest?.checkedAt)}</p>
+          {renewalData.latest ? <><div className="competence-metrics"><Metric label="Due at last check" value={renewalData.latest.due} /><Metric label="In daily queue" value={renewalData.latest.queued} /><Metric label="Due requiring review" value={renewalData.latest.needsReview} /><Metric label="CRM renewals recorded today" value={renewalData.latest.date === renewalData.today ? renewalData.latest.recorded : 0} /></div>
+          <details><summary>Review latest queue</summary><div className="competence-report-list">{renewalData.latest.groups.map(g => <div key={g.groupKey}><strong>{g.name}</strong><p>{g.recorded ? "CRM submission recorded" : g.issues.length ? g.issues.join(" · ") : "Ready for manual confirmation"}</p></div>)}</div></details>
+          <details><summary>Daily renewal history</summary>{renewalData.history.map(h => <p key={h.date}>{h.date}: {h.recorded} recorded / {h.queued} queued · {h.needsReview} due requiring review</p>)}</details></> : <p>No daily check recorded yet.</p>}
+          <small>Recorded submissions are CRM activity, not independent proof of Facebook publication or approval.</small></> : !renewalError ? <p>Loading renewal status…</p> : null}
       </section>
       <section className="panel">
         <div className="panel__header">
