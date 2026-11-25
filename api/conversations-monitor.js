@@ -4,6 +4,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildMonitorIssues } from "../lib/conversationsMonitor.js";
 import { sendSendGridEmail } from "../lib/emailProviders/sendgrid.js";
+import { readRenewalMonitoring } from "./rent2buy-group-renewals.js";
+import { RENEWAL_MONITOR_CHANNEL } from "../lib/rent2buyGroupRenewalMonitor.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -29,20 +31,73 @@ async function email(environment, subject, lines) {
   return true;
 }
 
+async function saveRenewalIncident(db, item, previous, stamp) {
+  const common = { channel: item.channel, severity: item.severity, title: item.title, detail: item.detail,
+    last_seen_at: stamp, occurrences: (previous?.occurrences || 0) + 1 };
+  const fresh = { ...common, status: "open", first_seen_at: stamp, resolved_at: null, emailed_at: null,
+    email_claimed_at: null, recovery_emailed_at: null };
+  const table = "conversation_monitor_alerts";
+  if (previous) {
+    const { error } = await db.from(table).update(common).eq("fingerprint", item.fingerprint)
+      .eq("status", "open").eq("first_seen_at", previous.first_seen_at);
+    if (error) throw error;
+    return;
+  }
+  const inserted = await db.from(table).upsert({ ...fresh, fingerprint: item.fingerprint },
+    { onConflict: "fingerprint", ignoreDuplicates: true });
+  if (inserted.error) throw inserted.error;
+  const reset = await db.from(table).update(fresh).eq("fingerprint", item.fingerprint).eq("status", "resolved");
+  if (reset.error) throw reset.error;
+}
+
+async function emailRenewalIncident(db, item, previous, stamp, environment, sendEmail) {
+  if (!previous || item.severity !== "critical" || previous.emailed_at || previous.email_claimed_at ||
+      Date.parse(stamp) - Date.parse(previous.first_seen_at) < 5 * 60_000) return false;
+  const sameIncident = (patch) => db.from("conversation_monitor_alerts").update(patch)
+    .eq("fingerprint", item.fingerprint).eq("first_seen_at", previous.first_seen_at);
+  const claim = await sameIncident({ email_claimed_at: stamp }).eq("status", "open")
+    .is("emailed_at", null).is("email_claimed_at", null).select("fingerprint").maybeSingle();
+  if (claim.error) throw claim.error;
+  if (!claim.data) return false;
+  let delivered = false;
+  try {
+    delivered = await sendEmail(environment, "Problem: " + item.title,
+      [item.title, item.detail || "", "First seen " + previous.first_seen_at]);
+  } catch (error) {
+    console.error("RENEWAL ALERT EMAIL FAILED", String(error?.message || error).slice(0, 300));
+    // An ambiguous provider/network response may have delivered the message.
+    if (!(error?.providerStatusCode >= 400)) return false;
+  }
+  const save = await sameIncident(delivered ? { emailed_at: stamp } : { email_claimed_at: null }).eq("email_claimed_at", stamp);
+  if (save.error) throw save.error;
+  return delivered;
+}
+
 export async function runConversationsMonitor(db, { environment = process.env, now = new Date(), sendEmail = email } = {}) {
   const since = new Date(now.getTime() - 2 * 3_600_000).toISOString();
-  const [statusRes, eventsRes, alertsRes] = await Promise.all([
+  const [statusRes, eventsRes, alertsRes, renewal] = await Promise.all([
     db.from("conversation_channel_status").select("*").eq("channel", "facebook_marketplace").maybeSingle(),
     db.from("conversation_events").select("source_id,channel,kind,occurred_at,reason").gte("occurred_at", since).limit(2000),
     db.from("conversation_monitor_alerts").select("*").eq("status", "open"),
+    environment.VERCEL_ENV === "preview" ? null : readRenewalMonitoring(db, now, environment).catch(() => null),
   ]);
   if (statusRes.error || eventsRes.error || alertsRes.error) throw new Error("Monitoring tables are not available");
-  const issues = buildMonitorIssues({ facebook: statusRes.data, events: eventsRes.data || [], now });
+  const issues = [...buildMonitorIssues({ facebook: statusRes.data, events: eventsRes.data || [], now }), ...(renewal?.issues || [])];
   const open = new Map((alertsRes.data || []).map((row) => [row.fingerprint, row]));
   const stamp = now.toISOString();
   const opened = [], recovered = [];
   for (const item of issues) {
     const previous = open.get(item.fingerprint);
+    if (item.channel === RENEWAL_MONITOR_CHANNEL) {
+      try {
+        await saveRenewalIncident(db, item, previous, stamp);
+        if (await emailRenewalIncident(db, item, previous, stamp, environment, sendEmail)) opened.push(item.fingerprint);
+      } catch (error) {
+        console.error("RENEWAL INCIDENT SAVE FAILED", String(error?.message || error).slice(0, 200));
+      }
+      open.delete(item.fingerprint);
+      continue;
+    }
     const row = {
       fingerprint: item.fingerprint, channel: item.channel, severity: item.severity, title: item.title, detail: item.detail,
       status: "open", last_seen_at: stamp, resolved_at: null,
@@ -60,6 +115,14 @@ export async function runConversationsMonitor(db, { environment = process.env, n
   }
   for (const row of open.values()) {
     const update = { status: "resolved", resolved_at: stamp };
+    if (row.channel === RENEWAL_MONITOR_CHANNEL) {
+      if (!renewal) continue;
+      const closed = await db.from("conversation_monitor_alerts").update(update).eq("fingerprint", row.fingerprint)
+        .eq("status", "open").eq("first_seen_at", row.first_seen_at).select("fingerprint").maybeSingle();
+      if (closed.error) console.error("RENEWAL INCIDENT RECOVERY FAILED", String(closed.error.message || "").slice(0, 200));
+      if (closed.data) recovered.push(row.fingerprint);
+      continue;
+    }
     // Recovery is automatic and visible on the dashboard. Avoid routine
     // recovery emails: these multiply noise after a temporary outage.
     // Operators can opt in explicitly if they need email confirmations.

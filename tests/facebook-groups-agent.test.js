@@ -249,7 +249,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.28");
+  assert.equal(manifest.version, "1.2.31");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -642,12 +642,14 @@ function loadGroupHelperTestHooks({
   controls = [],
   labels = [],
   images = [],
+  feedback = [],
   locationHref = "https://www.facebook.com/groups/test/",
   runtimeSendMessage,
 } = {}) {
   const hooks = {};
   const appended = [];
   const calls = [];
+  const listeners = new Map();
   let activeElement = null;
   let clock = 0;
 
@@ -697,12 +699,13 @@ function loadGroupHelperTestHooks({
       if (selector === 'button, [role="button"], a') return controls;
       if (selector === "div, span") return labels;
       if (selector === "img") return images;
+      if (selector.startsWith('[role="alert"]')) return feedback;
       return [];
     },
     getElementById: () => null,
     createElement: () => ({ style: {}, innerHTML: "", remove() {} }),
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    removeEventListener(type, listener) { if (listeners.get(type) === listener) listeners.delete(type); },
     execCommand(command) {
       if ((command === "selectAll" || command === "delete") && activeElement) {
         activeElement.innerText = "";
@@ -752,9 +755,117 @@ function loadGroupHelperTestHooks({
     document,
     appended,
     calls,
+    dispatch(type, event) { listeners.get(type)?.(event); },
     setActive(element) { activeElement = element; },
   };
 }
+
+test("renewal receipts require a trusted Post click and fresh, matching Facebook confirmation", async () => {
+  async function observe({ preexisting, newFeedback, caption = "REGISTRATION: AB12 CDE" }) {
+    const alert = (text) => ({ innerText: text, getBoundingClientRect: () => ({ width: 150, height: 24 }) });
+    const feedback = preexisting ? [alert(preexisting)] : [];
+    const receipts = [];
+    const harness = loadGroupHelperTestHooks({ feedback, runtimeSendMessage(message) {
+      receipts.push(message.result);
+      return { ok: true };
+    } });
+    const post = { ...alert("Post"), getAttribute: () => null };
+    harness.hooks.watchRenewalPost({ id: "job-one", registration: "AB12CDE" },
+      { contains: (element) => element === post }, { innerText: caption });
+    const click = { target: { closest: () => post } };
+    harness.dispatch("click", { ...click, isTrusted: false });
+    assert.equal(receipts.length, 0);
+    harness.dispatch("click", { ...click, isTrusted: true });
+    if (newFeedback) feedback.push(alert(newFeedback));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(receipts.length, 1);
+    return receipts[0];
+  }
+  const posted = await observe({ newFeedback: "Your post was published." });
+  assert.equal(posted.status, "submitted");
+  assert.equal(posted.approvalState, "submitted");
+  const pending = await observe({ newFeedback: "Your post is pending approval" });
+  assert.equal(pending.approvalState, "pending");
+  const stale = await observe({ preexisting: "Your post was published." });
+  assert.equal(stale.status, "needs_attention");
+  assert.equal(stale.duplicateRisk, true);
+  const wrongCaption = await observe({ newFeedback: "Your post was published.", caption: "" });
+  assert.equal(wrongCaption.duplicateRisk, true);
+  assert.equal(wrongCaption.status, "needs_attention");
+  assert.equal((await observe({ newFeedback: "Your account is restricted" })).status, "stop");
+  assert.equal((await observe({ newFeedback: "Couldn't publish your post" })).status, "failed");
+});
+
+test("automatic renewal verifies the prepared advert before one native Post action", async () => {
+  const job = { id: "auto-renewal", registration: "AB12CDE", caption: "REGISTRATION: AB12CDE", renewal: { automatic: true } };
+  const rectangle = () => ({ width: 150, height: 24 });
+  async function run({ visiblePhoto = true, authorised = true, response = "Your post was published." } = {}) {
+    const fixture = createVerifiedComposerFixture();
+    const feedback = [];
+    const outcome = [];
+    const harness = loadGroupHelperTestHooks({ feedback, runtimeSendMessage(message) {
+      if (message.type === "BEGIN_GROUP_RENEWAL_SUBMISSION") return { ok: authorised };
+      if (message.type === "GROUP_RENEWAL_OUTCOME") outcome.push(message.result);
+      return { ok: true };
+    } });
+    const query = fixture.dialog.querySelectorAll.bind(fixture.dialog);
+    fixture.dialog.querySelectorAll = (selector) => selector.startsWith("img[src") ?
+      (visiblePhoto ? [{ getBoundingClientRect: rectangle }] : []) : query(selector);
+    fixture.editor.innerText = "";
+    fixture.editor.textContent = "";
+    fixture.editor.dispatchEvent = (event) => {
+      if (event.type === "paste") fixture.editor.innerText = event.clipboardData.getData("text/plain");
+    };
+    const post = fixture.dialog.querySelectorAll('button, [role="button"]').find((button) => button.innerText === "Post");
+    let clicks = 0;
+    post.click = () => {
+      assert.ok(harness.calls.includes("BEGIN_GROUP_RENEWAL_SUBMISSION"));
+      clicks += 1;
+      if (response) feedback.push({ innerText: response, getBoundingClientRect: rectangle });
+    };
+    await harness.hooks.submitAutomaticRenewal(job, fixture.dialog, fixture.editor);
+    assert.equal(outcome.length, 1);
+    return { clicks, result: outcome[0] };
+  }
+  const success = await run();
+  assert.equal(success.clicks, 1);
+  assert.equal(success.result.status, "submitted");
+  const noPhoto = await run({ visiblePhoto: false });
+  assert.equal(noPhoto.clicks, 0);
+  assert.equal(noPhoto.result.status, "needs_attention");
+  assert.equal((await run({ authorised: false })).clicks, 0);
+  const unclear = await run({ response: "" });
+  assert.equal(unclear.clicks, 1);
+  assert.equal(unclear.result.duplicateRisk, true);
+  assert.equal((await run({ response: "Your account is restricted" })).result.status, "stop");
+});
+
+test("renewal acceptance ignores old adverts and honours current moderation status", async () => {
+  const url = "https://www.facebook.com/groups/test/";
+  const postedAt = "2026-11-25T09:00:00.000Z";
+  const resultFor = async (notice, date = postedAt) => {
+    const results = [];
+    const harness = loadGroupHelperTestHooks({ runtimeSendMessage(message) {
+      results.push(message.result);
+      return { ok: true };
+    } });
+    const original = harness.document.querySelectorAll.bind(harness.document);
+    harness.document.querySelectorAll = (selector) => selector === '[role="article"], article' ? [{
+      innerText: "Rent2Buy van\nREGISTRATION: AB12CDE\n" + notice,
+      getBoundingClientRect: () => ({ width: 200, height: 150 }),
+      querySelector: (selector) => selector.startsWith("a[") ? { href: url + "posts/42/" } : { getAttribute: () => date },
+    }] : original(selector);
+    await harness.hooks.checkPostedStatus({ groupIndex: 0, job: { id: "check-42",
+      groups: [{ url, postedAt, registration: "AB12CDE", renewalPost: true }] } });
+    return results[0];
+  };
+  assert.equal((await resultFor("")).accepted, true);
+  const pending = await resultFor("Awaiting admin approval");
+  assert.equal(pending.accepted, false);
+  assert.equal(pending.pending, true);
+  assert.equal((await resultFor("Your post was declined")).declined, true);
+  assert.equal((await resultFor("", "2026-11-18T09:00:00.000Z")).accepted, false);
+});
 
 test("Facebook group comment and reply editors are rejected", () => {
   const harness = loadGroupHelperTestHooks();
@@ -985,7 +1096,7 @@ test("group preparation attaches image, leaves caption box untouched, and instru
     ),
   );
   assert.doesNotMatch(groupsHelperSource, /execCommand\("(?:insertText|insertHTML|insertLineBreak)"/);
-  assert.doesNotMatch(groupsHelperSource, /ClipboardEvent/);
+  assert.doesNotMatch(groupsHelperSource.slice(groupsHelperSource.indexOf("async function prepareGroupPost")), /ClipboardEvent/);
   assert.doesNotMatch(groupsHelperSource, /reactSetText/);
 });
 

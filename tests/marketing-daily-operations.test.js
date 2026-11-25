@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { recordActivity } from "../api/marketing-daily-operations.js";
+import { groupActivitySourceId } from "../lib/rent2buyGroupRenewals.js";
 import {
   DEFAULT_DAILY_TARGETS,
   aggregatePeriod,
@@ -48,6 +50,43 @@ test("Marketplace, Facebook Groups and Google Business have separate daily targe
   assert.equal(summary.metrics.rent2buy_groups_post.completed, 3);
   assert.equal(summary.metrics.van_finance_marketplace_post.completed, 4);
   assert.equal(summary.metrics.rent2buy_marketplace_post.completed, 5);
+});
+
+test("automatic renewal and manual group adverts count once in the existing Rent2Buy totals", async () => {
+  const rows = [];
+  const db = { rpc: async () => ({ data: [] }), from(table) {
+    const where = [];
+    const matching = () => table === "marketing_daily_activity_events" ? rows.filter((row) => where.every(([key, value]) => row[key] === value)) : [];
+    const q = { select() { return q; }, eq(...filter) { where.push(filter); return q; }, gte() { return q; },
+      lte() { return q; }, lt() { return q; }, in() { return q; }, order() { return q; }, limit() { return q; },
+      maybeSingle: async () => ({ data: matching()[0] || null }),
+      range: async () => ({ data: matching() }),
+      then: (resolve) => resolve({ data: matching() }),
+      insert: async (row) => {
+        if (rows.some((saved) => saved.activity_type === row.activity_type && saved.source === row.source && saved.source_id === row.source_id)) {
+          return { error: { code: "23505" } };
+        }
+        rows.push({ ...row, id: rows.length + 1 });
+        return {};
+      },
+    };
+    return q;
+  } };
+  const date = "2026-11-25";
+  const event = (mode, group, product = "rent2buy") => ({
+    activity_date: date, activity_type: product === "rent2buy" ? "rent2buy_groups_post" : "van_finance_groups_post", source: "facebook_groups",
+    source_id: groupActivitySourceId(product, "https://www.facebook.com/groups/" + group + "/", "AB12 CDE", date),
+    metadata: { posting_mode: mode },
+  });
+  const auto = event("automatic", "proven");
+  await Promise.all([recordActivity(db, auto), recordActivity(db, auto)]);
+  await recordActivity(db, event("manual", "manual"));
+  await recordActivity(db, event("manual", "finance", "finance"));
+  const { day } = await recordActivity(db, auto);
+  const total = aggregatePeriod([day]);
+  assert.equal(total.rent2buy_groups_post.completed, 2);
+  assert.equal(total.van_finance_groups_post.completed, 1);
+  assert.equal(rows.length, 3);
 });
 
 test("every visible Content Operations placement has its own target and durable metric", () => {

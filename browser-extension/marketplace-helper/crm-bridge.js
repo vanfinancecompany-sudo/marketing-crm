@@ -196,6 +196,16 @@
       return;
     }
 
+    if (message.source === "vfc-marketing-crm" && message.type === "VFC_GROUP_RENEWAL_REQUEST") {
+      const command = message.command;
+      if (!["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "SET_GROUP_RENEWAL_AUTOMATION",
+          "DEFER_GROUP_RENEWAL_AUTOMATION", "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL"].includes(command)) return;
+      const result = await chrome.runtime.sendMessage({ type: command, jobId: message.jobId, enabled: message.enabled, until: message.until }).catch(() => null);
+      window.postMessage({ source: "vfc-facebook-helper", type: "VFC_GROUP_RENEWAL_RESPONSE",
+        id: message.id, ...(result || { ok: false, error: "Renewal helper unavailable" }) }, window.location.origin);
+      return;
+    }
+
     if (message.source === "vfc-marketing-crm" && message.type === GROUP_POST_JOB) {
       const id = message.id || message.job?.id || "";
       try {
@@ -264,6 +274,10 @@
   });
 
   chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === "GROUP_RENEWAL_WAKE") {
+      window.postMessage({ source: "vfc-facebook-helper", type: "VFC_GROUP_RENEWAL_WAKE" }, window.location.origin);
+      return;
+    }
     if (message?.type === "MARKETPLACE_PUBLISHED" && message.receipt) {
       window.postMessage({
         source: "vfc-marketplace-extension",
