@@ -128,6 +128,12 @@ function renderPayload(root, payload) {
     result.appendChild(element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", `${processingCount} additional selected DealerKit photo(s) are still processing in Wix Media.${publishNote}`));
   }
 
+  const submitButton = root.querySelector("[data-dealerkit-pricing-submit]");
+  if (submitButton && !submitButton.disabled && plan.mode === "finance" && plan.vfc?.pricingReconciliation?.eligible) submitButton.textContent = "Resolve pricing & publish";
+  if (plan.mode === "finance" && plan.vfc?.pricingReconciliation?.eligible) {
+    const notice = element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", "Verified pricing reconciliation available. Submit to review the existing and calculated monthly prices and approve the correction. No manual Wix edit is needed.");
+    result.appendChild(notice);
+  }
   if (plan.blockers?.length) {
     const blockers = element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--blockers");
     blockers.appendChild(element("strong", "", `Publish blockers (${plan.blockers.length})`));
@@ -151,7 +157,7 @@ function renderPayload(root, payload) {
   const heading = root.querySelector(".dealerkit-wix-preview__copy strong");
   if (heading) heading.textContent = updateExisting ? `Reconcile ${label} advert` : `Publish to ${label}`;
   const applyButton = root.querySelector("[data-controlled-publish-apply]");
-  if (applyButton) applyButton.textContent = updateExisting ? updateActionLabel : `Publish to ${label}`;
+  if (applyButton) applyButton.textContent = plan.mode === "finance" && plan.vfc?.pricingReconciliation?.eligible ? "Resolve pricing & publish" : updateExisting ? updateActionLabel : `Publish to ${label}`;
 
   const statusText = plan.canPublish
     ? (updateExisting ? "READY TO RECONCILE" : "READY TO PUBLISH")
@@ -286,6 +292,8 @@ function createPanel(registration, product = "finance") {
       ? `RECONCILE ${registration} ON LIVE ${labelText.toUpperCase()} WIX?\n\nExisting Wix item IDs will be reused where present. Controlled fields will be updated, missing selected rows may be created, Draft selected rows restored, and stale category rows moved to Draft where applicable.`
       : `PUBLISH ${registration} TO LIVE ${labelText.toUpperCase()} WIX?\n\nThis is the final live-write confirmation.`);
     if (!approved) return;
+    const pricingText = pricingApprovalText(payload.plan);
+    if (pricingText && !window.confirm(pricingText)) return;
     publish.disabled = true;
     prepare.disabled = true;
     publish.textContent = "Publishing…";
@@ -300,6 +308,7 @@ function createPanel(registration, product = "finance") {
         ? { action: updateExisting ? "update_existing_car" : "publish_new_car", registration, confirmRegistration: normaliseRegistration(input.value), confirmation: payload.plan.confirmation }
         : { action: updateExisting ? "update_existing_vehicle" : "publish_new_vehicle", registration, confirmRegistration: normaliseRegistration(input.value), productMode: root.dataset.product, confirmation: payload.plan.confirmation };
       body.resumePartial = true;
+      if (pricingText) body.pricingApproval = true;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: buildMarketingAccessHeaders({ accept: "application/json", "content-type": "application/json" }),
@@ -383,9 +392,17 @@ async function publishingRequest(url, body) {
   return data;
 }
 
+function pricingApprovalText(plan) {
+  const pricing = plan?.vfc?.pricingReconciliation;
+  if (!pricing?.eligible) return "";
+  const rows = pricing.records.filter(row => row.selected).map(row => row.collectionId + ": " + (row.itemId ? row.oldMonthly || "(missing monthly)" : "(new record)") + " → £" + pricing.monthly + " / month");
+  return "RECONCILE VFC PRICING FOR " + pricing.registration + "\n\nVerified DealerKit cash price £" + pricing.retail + " " + pricing.vat + ".\nCash/VAT unchanged on existing selected records; monthly figures use approved VFC rules.\n\n" + rows.join("\n") + "\n\nApprove pricing correction and continue publishing?";
+}
+
 function addSubmit(root, registration, product) {
   const button = element("button", "dealerkit-wix-preview__apply", "Submit");
   button.type = "button";
+  button.dataset.dealerkitPricingSubmit = "true";
   const feedback = element("p", "");
   feedback.setAttribute("role", "status");
   const actions = element("div", "dealerkit-wix-preview__actions");
@@ -469,14 +486,19 @@ function addSubmit(root, registration, product) {
           { retry: error => error instanceof TypeError, delays: [600] },
         ),
         prepare: () => publishingRequest("/api/dealerkit-wix-prepare-media", request),
-        publish: plan => publishingRequest(endpoint, {
+        publish: plan => {
+          const pricingText = pricingApprovalText(plan);
+          if (pricingText && !window.confirm(pricingText)) throw new Error("Pricing correction cancelled. Your saved review is retained.");
+          return publishingRequest(endpoint, {
           ...request,
           action: plan.writeIntent === "update_existing_vehicle"
             ? (product === "cars" ? "update_existing_car" : "update_existing_vehicle")
             : (product === "cars" ? "publish_new_car" : "publish_new_vehicle"),
           confirmation: plan.confirmation,
           resumePartial: true,
-        }),
+          ...(pricingText ? { pricingApproval: true } : {}),
+          });
+        },
         approve,
         repair: recovery => publishingRequest(endpoint, { ...request, action: "approve_recovery", recoveryApproval: recovery.approval }),
         status: message => { feedback.textContent = message + "…"; },
@@ -500,7 +522,7 @@ function addSubmit(root, registration, product) {
       if (error.cause?.capacityReached) {
         feedback.append(" Existing adverts can still be updated when they need no new rows. A site administrator can increase the Wix CMS allowance or review retired records for separate approval.");
       }
-      button.textContent = requiresReview ? "Review required" : error.cause?.capacityReached ? "Retry after freeing CMS capacity" : "Retry";
+      button.textContent = requiresReview ? "Review required" : error.cause?.capacityReached ? "Retry after freeing CMS capacity" : root._controlledPublishPayload?.plan?.vfc?.pricingReconciliation?.eligible ? "Resolve pricing & publish" : "Retry";
     } finally {
       button.disabled = requiresReview;
       fallback.hidden = requiresReview;

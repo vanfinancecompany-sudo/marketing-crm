@@ -329,3 +329,37 @@ test("draft-aware guard leaves published reads, publish tasks and explicit optio
   const unrelated = { dataCollectionId: "CARFINANCE", patch: { dataItemId: "car" } };
   assert.equal(draftAwareControlledWixBody("/wix-data/v2/items/car", "GET", unrelated), unrelated);
 });
+
+import { inspectVfcPricingHold, buildControlledVfcTargets, buildControlledPublishConfirmation, controlledPublishConfirmationMatches } from "../lib/dealerKitControlledPublishPlan.js";
+import { VAN_FINANCE_WIX_COLLECTIONS } from "../lib/vanscoWixPrice.js";
+const heldVan = { registration: "YK23ZYA", supplierStockId: "stock-held", status: "in_stock", make: "Renault", model: "Trafic", retailPrice: 12495, vatStatus: "plus_vat", sourceUpdatedAt: "2026-11-25T10:00:00Z" };
+const heldReview = { registration: heldVan.registration, persisted: true, reviewStatus: "reviewed", reviewedSourceUpdatedAt: heldVan.sourceUpdatedAt, financeEnabled: true, financeCategories: ["all_vans", "medium_mwb"] };
+const heldResults = () => VAN_FINANCE_WIX_COLLECTIONS.map(collection => ({ collection, items: collection.id === "VANFINANCEPAGES" ? [{ id: "old-detail", data: { title: heldVan.registration, titleText: "Renault Trafic", priceVat: "£12,495 +VAT", mthPrice: "£250", _publishStatus: "PUBLISHED" } }] : [] }));
+test("historical VFC hold with verified current identity, cash and VAT offers monthly reconciliation", () => {
+  const pricing = inspectVfcPricingHold(heldVan, heldReview, heldResults());
+  assert.equal(pricing.eligible, true);
+  assert.equal(pricing.monthly, 263);
+  assert.equal(pricing.records.find(row => row.itemId === "old-detail").oldMonthly, "£250");
+  const plan = buildControlledVfcTargets({ vehicle: heldVan, decision: heldReview, wixResults: heldResults(), imageSets: { vanFinance: { ready: true, mainUrl: "main", listingImageUrl: "main", galleryUrls: ["main"] } } });
+  assert.equal(plan.canPublish, true);
+  assert.equal(plan.blockers.length, 0);
+  assert.equal(plan.targets.find(row => row.collectionId === "VANFINANCEPAGES").data.mthPrice, "£263");
+  assert.equal(plan.targets.find(row => row.collectionId === "VANFINANCEPAGES").itemId, "old-detail");
+});
+test("historic VFC hold remains fail closed for incomplete reads, cash/VAT or identity mismatch, stale review and duplicates", () => {
+  const check = (vehicle, review, results) => assert.equal(inspectVfcPricingHold(vehicle, review, results).eligible, false);
+  check(heldVan, heldReview, heldResults().slice(1));
+  check({ ...heldVan, retailPrice: 13000 }, heldReview, heldResults());
+  check({ ...heldVan, vatStatus: "no_vat" }, heldReview, heldResults());
+  check({ ...heldVan, model: "Master" }, heldReview, heldResults());
+  check(heldVan, { ...heldReview, reviewedSourceUpdatedAt: "2026-11-24T10:00:00Z" }, heldResults());
+  const dup = heldResults(); const items = dup.find(row => row.items.length).items; items.push({ ...items[0], id: "another" });
+  check(heldVan, heldReview, dup);
+});
+test("VFC pricing approval is bound to old and proposed price snapshots", () => {
+  const p = { vfc: { pricingReconciliation: inspectVfcPricingHold(heldVan, heldReview, heldResults()) } };
+  const confirmation = buildControlledPublishConfirmation(p);
+  assert.equal(controlledPublishConfirmationMatches(confirmation, p), true);
+  const changed = heldResults(); changed.find(row => row.items.length).items[0].data.mthPrice = "£251";
+  assert.equal(controlledPublishConfirmationMatches(confirmation, { vfc: { pricingReconciliation: inspectVfcPricingHold(heldVan, heldReview, changed) } }), false);
+});
