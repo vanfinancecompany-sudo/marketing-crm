@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { redactExcerpt, normaliseReport, buildMonitorIssues, summariseAskMeSessions, countEvents, withoutFacebookSessions, isMonitorTestEvent } from "../lib/conversationsMonitor.js";
 import { handleConversationsReport } from "../api/conversations-report.js";
 import { runConversationsMonitor } from "../api/conversations-monitor.js";
+import { describeRenewalAgent, RENEWAL_MONITOR_CHANNEL } from "../lib/rent2buyGroupRenewalMonitor.js";
 import { buildActivityEntries, getConversationsActivity } from "../api/conversations-activity.js";
 
 const now = new Date("2026-11-24T16:00:00Z");
@@ -55,13 +56,19 @@ function fakeDb(state) {
   return {
     from(table) {
       const rows = (state[table] ||= []);
-      const q = {
-        _filters: [], select() { return q; }, gte() { return q; }, order() { return q; }, limit() { return q; },
-        eq(k, v) { q._filters.push([k, v]); return q; },
-        maybeSingle: async () => ({ data: rows.find((r) => q._filters.every(([k, v]) => r[k] === v)) || null, error: null }),
-        then(resolve) { resolve({ data: rows.filter((r) => q._filters.every(([k, v]) => r[k] === v)), error: null }); },
+      const filters = [];
+      let patch = null;
+      const run = () => {
+        const matching = rows.filter((r) => filters.every(([key, value]) => value === null ? r[key] == null : r[key] === value));
+        if (patch) matching.forEach((row) => Object.assign(row, patch));
+        return matching.map((row) => ({ ...row }));
+      };
+      const q = { select() { return q; }, gte() { return q; }, order() { return q; }, limit() { return q; },
+        eq(k, v) { filters.push([k, v]); return q; }, is(k, v) { filters.push([k, v]); return q; },
+        maybeSingle: async () => ({ data: run()[0] || null, error: null }),
+        then(resolve) { resolve({ data: run(), error: null }); },
         upsert: async (row, opts) => { const list = Array.isArray(row) ? row : [row]; for (const r of list) { const key = opts?.onConflict; const i = rows.findIndex((x) => x[key] === r[key]); if (i >= 0) { if (!opts.ignoreDuplicates) rows[i] = { ...rows[i], ...r }; } else rows.push({ ...r }); } return { error: null }; },
-        update: (patch) => ({ eq: async (k, v) => { rows.filter((r) => r[k] === v).forEach((r) => Object.assign(r, patch)); return { error: null }; } }),
+        update(value) { patch = value; return q; },
       };
       return q;
     },
@@ -95,6 +102,56 @@ test("monitor: one alert per problem, email once after it persists, recovery ema
   await runConversationsMonitor(fakeDb(state), { now: new Date(now.getTime() + 1_800_000), sendEmail });
   assert.equal(sent.filter((s) => s.startsWith("Recovered")).length, 0, "recovery resolves silently by default");
   assert.equal(state.conversation_monitor_alerts[0].status, "resolved");
+});
+
+test("renewal monitoring checks schedules, stale browser, stalled work, publication failures and restrictions", () => {
+  const settings = { enabled: true, updatedAt: ago(24 * 60) };
+  const heartbeat = { last_heartbeat_at: ago(2), status: { state: "ready" } };
+  const run = { run_date: "2026-11-24", checked_at: ago(35), plan: { groups: [] }, outcomes: {} };
+  const check = (inputs = {}) => describeRenewalAgent({ settings, run, heartbeat, now, ...inputs });
+  assert.equal(check().health, "healthy");
+  assert.deepEqual(check({ run: null }).issues.map((item) => item.fingerprint), ["rent2buy-renewal:missed-run"]);
+  const tomorrowGrace = new Date("2026-11-25T07:15:00Z");
+  assert.ok(check({ run: null, now: tomorrowGrace }).issues.some((item) => item.fingerprint === "rent2buy-renewal:missed-run"),
+    "an unresolved missed run stays open during the next morning’s grace period");
+  assert.equal(check({ heartbeat: { ...heartbeat, last_heartbeat_at: ago(30) } }).health, "disconnected");
+  assert.equal(check({ run: { ...run, plan: { groups: [{ groupKey: "one" }] } } }).health, "stalled");
+  assert.equal(check({ heartbeat: { last_heartbeat_at: ago(50), status: { state: "paused" } } }).issues.length, 0);
+  assert.equal(check({ heartbeat: { ...heartbeat, status: { state: "restricted", reason: "Facebook checkpoint" } } }).health, "restricted");
+  const failures = (stage) => Object.fromEntries(["one", "two", "three"].map((group) =>
+    [group, { status: "failed", failureStage: stage, at: ago(2) }]));
+  assert.equal(check({ run: { ...run, outcomes: failures("publication") } }).health, "publication_failures");
+  assert.equal(check({ run: { ...run, outcomes: failures("preparation") } }).health, "healthy");
+  assert.equal(check({ settings: { enabled: false, updatedAt: ago(3) }, run: null }).issues.length, 0);
+  assert.equal(check({ settings: { enabled: true, updatedAt: ago(2) }, run: null }).issues.length, 0);
+});
+
+test("concurrent renewal monitor checks send one problem email and clear it after recovery", async () => {
+  const state = {
+    conversation_channel_status: [
+      { channel: "facebook_marketplace", last_heartbeat_at: ago(1), status: { mode: "auto", monitoring: true, tabReportedAt: ago(1) } },
+      { channel: RENEWAL_MONITOR_CHANNEL, last_heartbeat_at: ago(25), status: { state: "ready" } },
+    ],
+    rent2buy_group_renewal_settings: [{ id: 1, enabled: true, updated_at: ago(24 * 60) }],
+    rent2buy_group_renewal_runs: [{ run_date: "2026-11-24", checked_at: ago(35), plan: {} }],
+  };
+  const db = fakeDb(state);
+  const sent = [];
+  const run = (date, environment = {}) => runConversationsMonitor(db, { now: date, environment,
+    sendEmail: async (_, subject) => { sent.push(subject); return true; } });
+  await run(now, { VERCEL_ENV: "preview" });
+  assert.equal(state.conversation_monitor_alerts.length, 0);
+  await run(now);
+  assert.equal(sent.length, 0);
+  const second = new Date(now.getTime() + 6 * 60_000);
+  await Promise.all([run(second), run(second), run(second)]);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Rent2Buy group renewal browser stopped/);
+  assert.equal(state.conversation_monitor_alerts.length, 1);
+  state.conversation_channel_status[1].last_heartbeat_at = second.toISOString();
+  await run(second);
+  assert.equal(state.conversation_monitor_alerts[0].status, "resolved");
+  assert.equal(sent.length, 1);
 });
 
 test("Ask Me sessions created by the Facebook assistant are not counted as website conversations", () => {

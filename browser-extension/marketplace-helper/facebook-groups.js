@@ -556,8 +556,8 @@
       await chrome.runtime.sendMessage({ type: "GROUP_POST_STATUS_PAGE_RESULT", jobId: state.job.id,
         groupIndex: state.groupIndex, result: { name: target.name, url: target.url,
           registration: target.registration, accepted: Boolean(matched && !matched.pending && !matched.declined),
-          pending: !matched || (matched.pending && !matched.declined), declined: Boolean(matched?.declined),
-          matchedUrl: matched?.url || "", matchMethod: matched ? "dated-renewal-advert" : "",
+          pending: Boolean(matched?.pending && !matched.declined), declined: Boolean(matched?.declined),
+          matchedUrl: matched?.url || "", matchMethod: matched ? "dated-renewal-advert" : "", postedAt: target.postedAt,
           checkedAt: new Date().toISOString() } });
       return;
     }
@@ -644,6 +644,7 @@
         matchedUrl,
         matchMethod,
         checkedAt: new Date().toISOString(),
+        ...(target.postedAt ? { postedAt: target.postedAt } : {}),
       },
     });
   }
@@ -800,7 +801,7 @@
   async function verifyRenewalSubmission(job, previous, captionHasRegistration) {
     const recordConfirmation = (approvalState) => captionHasRegistration
       ? renewalOutcome(job, "submitted", { approvalState })
-      : renewalOutcome(job, "needs_attention", { reason: "Facebook confirmed a post without the prepared stock registration in its caption.", duplicateRisk: true });
+      : renewalOutcome(job, "needs_attention", { reason: "Facebook confirmed a post without the prepared stock registration in its caption.", duplicateRisk: true, failureStage: "publication" });
     for (let attempt = 0; attempt < 15; attempt += 1) {
       await sleep(800);
       if (renewalRestriction()) {
@@ -817,11 +818,11 @@
         return;
       }
       if (feedback.some((text) => /couldn.t (?:publish|create|share) your post|post couldn.t be (?:published|shared)|failed to post/i.test(text))) {
-        await renewalOutcome(job, "failed", { reason: "Facebook reported that the post failed" });
+        await renewalOutcome(job, "failed", { reason: "Facebook reported that the post failed", failureStage: "publication" });
         return;
       }
     }
-    await renewalOutcome(job, "needs_attention", { reason: "Facebook did not confirm submission. Check for the post before retrying.", duplicateRisk: true });
+    await renewalOutcome(job, "needs_attention", { reason: "Facebook did not confirm submission. Check for the post before retrying.", duplicateRisk: true, failureStage: "publication" });
   }
 
   function actionableRenewalPost(element) {

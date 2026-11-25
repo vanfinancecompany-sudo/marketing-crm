@@ -275,7 +275,7 @@ async function saveOverride(supabase, body) {
   return overview(supabase, activityDate);
 }
 
-async function recordActivity(supabase, body) {
+export async function recordActivity(supabase, body) {
   const activityType = String(body.activity_type || "");
   if (!EVENT_ACTIVITY_TYPES.includes(activityType)) {
     throw new ApiError(400, "Unsupported daily activity type.");
@@ -308,7 +308,7 @@ async function recordActivity(supabase, body) {
   } else {
     result = await supabase.from("marketing_daily_activity_events").insert(payload);
   }
-  if (result.error) throw result.error;
+  if (result.error && !(sourceId && result.error.code === "23505")) throw result.error;
   return overview(supabase, activityDate);
 }
 

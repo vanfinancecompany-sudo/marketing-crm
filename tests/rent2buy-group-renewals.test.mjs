@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRenewalPlan, summarizeRenewalRun, londonDay, nextRunAt } from "../lib/rent2buyGroupRenewals.js";
+import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt } from "../lib/rent2buyGroupRenewals.js";
 import { groupDueState, groupPipeline } from "../services/facebookGroupsAgent.js";
 import { runDailyRenewalCheck, handlePost, readRenewals } from "../api/rent2buy-group-renewals.js";
 
@@ -49,14 +49,14 @@ test("statuses: confirmed submission, acceptance, awaiting, skipped, stopped; co
 
 // Minimal Supabase double for the run/settings tables.
 function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
-  const t = { rent2buy_group_renewal_settings: [{ id: 1, enabled, max_daily: maxDaily }], rent2buy_group_renewal_runs: [], facebook_group_state: groups, marketing_daily_activity_events: [] };
+  const t = { rent2buy_group_renewal_settings: [{ id: 1, enabled, max_daily: maxDaily }], rent2buy_group_renewal_runs: [], facebook_group_state: groups, marketing_daily_activity_events: [], conversation_channel_status: [] };
   return { t, from(name) {
     let filters = [], extraFilters = [], op = "select", payload = null, opts = {};
     const rows = () => (t[name] || []).filter((r) => filters.every(([k, v]) => v === null ? r[k] == null :
       String(typeof r[k] === "object" ? JSON.stringify(r[k]) : r[k]) === String(v)) && extraFilters.every((match) => match(r)));
     const run = () => {
       if (op === "upsert") {
-        const key = name === "rent2buy_group_renewal_runs" ? "run_date" : "id";
+        const key = name === "rent2buy_group_renewal_runs" ? "run_date" : name === "conversation_channel_status" ? "channel" : "id";
         const hit = t[name].find((r) => r[key] === payload[key]);
         if (hit) { if (!opts.ignoreDuplicates) Object.assign(hit, payload); } else t[name].push({ ...payload });
         return { error: null };
@@ -147,6 +147,52 @@ test("automatic posting requires recorded acceptance and compatible group rules"
     const claim = await handlePost(db, { action: "claim", groupUrl: url(name), jobId: "auto-preparation-" + name, automatic: true }, now);
     assert.equal(claim.prepare, allowed, name);
   }
+});
+
+test("the CRM shows separate heartbeat and retains confirmed and failed advert history", async () => {
+  const groups = ["auto", "broken"].map((id) => ({ ...fixture(id), group_key: url(id) }));
+  const db = fakeDb({ groups });
+  await runDailyRenewalCheck(db, now);
+  const runDate = "2026-11-25";
+  const postedAt = "2026-11-25T07:05:00.000Z";
+  for (const [group, registration] of [["auto", "AB12CDE"], ["broken", "XY34ZZZ"]]) {
+    assert.equal((await handlePost(db, { action: "claim", groupUrl: url(group), automatic: true, registration,
+      jobId: "renewal-job-" + group }, now)).prepare, true);
+  }
+  const receipt = { action: "submission", groupUrl: url("auto"), registration: "AB12CDE", postedAt, runDate, jobId: "renewal-job-auto" };
+  assert.equal((await handlePost(db, receipt, new Date(postedAt))).ok, false, "drafts do not produce a submission");
+  db.t.marketing_daily_activity_events.push(
+    { id: "auto", activity_date: runDate, activity_type: "rent2buy_groups_post", source: "facebook_groups", occurred_at: postedAt,
+      source_id: groupActivitySourceId("rent2buy", url("auto"), "AB12CDE", runDate),
+      metadata: { group_name: "Auto", group_url: url("auto"), registration: "AB12CDE", posting_mode: "automatic",
+        submitted_at: postedAt, renewal_run_date: runDate, renewal_job_id: "renewal-job-auto", approval_outcome: "pending" } },
+    { id: "manual", activity_date: runDate, activity_type: "rent2buy_groups_post", source: "facebook_groups", occurred_at: postedAt,
+      metadata: { group_name: "Manual", group_url: url("manual"), registration: "JK22AAA", posting_mode: "manual" } },
+  );
+  assert.equal((await handlePost(db, receipt, new Date(postedAt))).ok, true);
+  assert.equal((await handlePost(db, receipt, new Date(postedAt))).ok, true, "receipt replay is idempotent");
+  await handlePost(db, { action: "outcome", groupUrl: url("broken"), jobId: "renewal-job-broken", runDate,
+    status: "failed", failureStage: "publication", reason: "Facebook reported that the post failed" }, new Date(postedAt));
+  const checkedAt = "2026-11-25T07:10:00.000Z";
+  for (const [state, environment] of [["ready", {}], ["restricted", { VERCEL_ENV: "preview" }]]) {
+    assert.equal((await handlePost(db, { action: "heartbeat", state }, new Date(checkedAt), environment)).ok, true);
+  }
+  const pending = await readRenewals(db, new Date(checkedAt));
+  assert.deepEqual([pending.latest.confirmedSubmissions, pending.latest.awaitingApproval, pending.latest.failures], [1, 1, 1]);
+  await handlePost(db, { action: "approval", approval: "accepted", groupUrl: url("auto"), registration: "AB12CDE", postedAt,
+    checkedAt }, new Date(checkedAt));
+  const report = await readRenewals(db, new Date(checkedAt));
+  assert.equal(report.latest.accepted, 1);
+  assert.equal(report.agent.health, "healthy");
+  assert.equal(report.agent.lastHeartbeatAt, checkedAt);
+  const history = new Map(report.advertHistory.map((event) => [event.name.toLowerCase(), event]));
+  assert.equal(history.get("auto").status, "accepted");
+  assert.equal(history.get("auto").postedAt, postedAt);
+  assert.equal(history.get("manual").mode, "manual");
+  assert.equal(history.get("auto").mode, "automatic");
+  assert.equal(history.get("broken").registration, "XY34ZZZ");
+  assert.equal(history.get("broken").postedAt, null);
+  assert.match(history.get("broken").reason, /post failed/);
 });
 
 test("London day and next run time", () => {

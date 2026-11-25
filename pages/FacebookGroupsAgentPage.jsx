@@ -36,6 +36,7 @@ import {
   startFacebookPostStatusCheck,
 } from "../services/facebookGroupsAgent.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
+import { RENEWAL_HEARTBEAT_INTERVAL_MS } from "../lib/rent2buyGroupRenewalMonitor.js";
 import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, MARKETING_ACCESS_HEADER } from "../services/marketingAccess.js";
 
@@ -51,7 +52,7 @@ function clearAutomaticRenewalClaim(jobId) {
 }
 
 async function renewalRequest(body) {
-  const response = await fetch("/api/rent2buy-group-renewals", {
+  const response = await fetch(body ? "/api/rent2buy-group-renewals" : "/api/rent2buy-group-renewals?view=queue", {
     headers: { [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey(), ...(body ? { "Content-Type": "application/json" } : {}) },
     ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
     cache: "no-store",
@@ -175,8 +176,9 @@ export default function FacebookGroupsAgentPage({
   const [renewalMessage, setRenewalMessage] = useState("");
   const renewalWork = useRef(false);
   const renewalRunningRef = useRef(false);
+  const lastRenewalHeartbeat = useRef({ at: 0, attemptedAt: 0, state: "" });
 
-  function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt, renewalDate }) {
+  function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt, renewalDate, jobId, automatic, approvalState }) {
     const activityDate = londonDateKey(postedAt ? new Date(postedAt) : new Date());
     const canonicalUrl = normalizeFacebookGroupUrl(groupUrl || "");
     const sourceId = [
@@ -196,10 +198,29 @@ export default function FacebookGroupsAgentPage({
         group_url: canonicalUrl,
         group_name: clean(groupName),
         registration: clean(registration).toUpperCase(),
-        ...(renewalDate ? { renewal_run_date: renewalDate, submitted_at: postedAt } : {}),
+        ...(isRent2Buy ? { submitted_at: postedAt || new Date().toISOString(), posting_mode: automatic ? "automatic" : "manual" } : {}),
+        ...(renewalDate ? { renewal_run_date: renewalDate, renewal_job_id: jobId, approval_outcome: approvalState || "submitted" } : {}),
       },
     });
   }
+  function recordGroupApproval(event) {
+    if (!isRent2Buy || !event?.postedAt) return Promise.resolve();
+    const approval = event.accepted ? "accepted" : event.declined ? "declined" : event.pending ? "pending" : "";
+    return approval ? renewalRequest({ action: "approval", groupUrl: event.groupUrl || event.url, registration: event.registration,
+      postedAt: event.postedAt, checkedAt: event.checkedAt || new Date().toISOString(), approval, reason: event.reason }) : Promise.resolve();
+  }
+  async function reportRenewalHeartbeat(state, reason) {
+    const previous = lastRenewalHeartbeat.current;
+    const immediate = ["paused", "restricted"].includes(state) && state !== previous.state;
+    if (!immediate && (Date.now() - previous.at < RENEWAL_HEARTBEAT_INTERVAL_MS || Date.now() - previous.attemptedAt < 60_000)) return;
+    if (immediate && Date.now() - previous.attemptedAt < 60_000 && state === previous.attemptedState) return;
+    previous.attemptedAt = Date.now();
+    previous.attemptedState = state;
+    await renewalRequest({ action: "heartbeat", state, reason, extension: helperStatus.version });
+    previous.at = Date.now();
+    previous.state = state;
+  }
+
   const [message, setMessage] = useState("");
   const [lastRun, setLastRun] = useState(null);
   const [helperStatus, setHelperStatus] = useState({
@@ -302,7 +323,11 @@ export default function FacebookGroupsAgentPage({
       setRenewalAutomatic(enabled);
       setRenewalPolling(enabled);
       setRenewalMessage(enabled ? "Automatic renewals enabled in this Edge profile." : "Automatic renewals paused.");
-      if (enabled) void advanceRenewals();
+      if (enabled) {
+        lastRenewalHeartbeat.current.at = 0;
+        lastRenewalHeartbeat.current.attemptedAt = 0;
+        void advanceRenewals();
+      } else await reportRenewalHeartbeat("paused");
     } catch (error) {
       setRenewalMessage(error.message);
     }
@@ -319,6 +344,17 @@ export default function FacebookGroupsAgentPage({
     try {
       const helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
       const automatic = helper.automatic && helper.driver;
+      if (helper.driver && (automatic || helper.restrictionReason)) {
+        const state = helper.restrictionReason ? "restricted" : helper.pending ? "processing" : "ready";
+        await reportRenewalHeartbeat(state, helper.restrictionReason).catch(() => {});
+        if (helper.restrictionReportPending && lastRenewalHeartbeat.current.state === "restricted") {
+          await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESTRICTION");
+        }
+      }
+      for (const approval of helper.approvalReceipts || []) {
+        await recordGroupApproval(approval);
+        await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_APPROVAL", approval.id);
+      }
       setRenewalAutomatic(Boolean(helper.automatic));
       if (helper.automatic && !helper.driver) setRenewalRun(false);
       setRenewalPending(Boolean(helper.pending));
@@ -342,6 +378,8 @@ export default function FacebookGroupsAgentPage({
         // Only acknowledge the browser's durable receipt after both CRM writes.
         await persistFacebookGroupsRemote(updated);
         await recordGroupPostActivity({ ...result, renewalDate: result.date });
+        await renewalRequest({ action: "submission", groupUrl: result.groupUrl, registration: result.registration,
+          postedAt: result.postedAt, runDate: result.date, jobId: result.jobId });
         saveFacebookGroups(updated, { remote: false });
         setGroups(updated);
         markVehicleUsed(result.registration, result.vehicleId);
@@ -351,9 +389,10 @@ export default function FacebookGroupsAgentPage({
       }
       if (result) {
         await renewalRequest(result.status === "stop"
-          ? { action: "stop", reason: result.reason }
+          ? { action: "stop", reason: result.reason, groupUrl: result.groupUrl, jobId: result.jobId,
+            runDate: result.date, duplicateRisk: result.duplicateRisk }
           : { action: "outcome", groupUrl: result.groupUrl, runDate: result.date,
-            jobId: result.jobId, status: result.status, reason: result.reason, duplicateRisk: result.duplicateRisk });
+            jobId: result.jobId, status: result.status, reason: result.reason, duplicateRisk: result.duplicateRisk, failureStage: result.failureStage });
         await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
         if (result.status === "stop") {
           setRenewalRun(false);
@@ -417,7 +456,7 @@ export default function FacebookGroupsAgentPage({
       if (automatic) window.localStorage.setItem(AUTOMATIC_RENEWAL_CLAIM_KEY, JSON.stringify({
         date: today, groupKey: group.groupKey, jobId: renewal.jobId, vehicleId: vehicleKey(vehicle),
       }));
-      const claimed = await renewalRequest({ action: "claim", groupUrl: group.url, jobId: renewal.jobId, automatic });
+      const claimed = await renewalRequest({ action: "claim", groupUrl: group.url, jobId: renewal.jobId, automatic, registration: vehicle.registration || vehicle.reg });
       if (!claimed.prepare) {
         clearAutomaticRenewalClaim(renewal.jobId);
         setRenewalMessage(group.name + " · " + claimed.reason);
@@ -638,6 +677,7 @@ export default function FacebookGroupsAgentPage({
       if (payload.type === GROUP_POST_STATUS_PROGRESS) {
         if (payload.productKey && payload.productKey !== productKey) return;
         persist((current) => markGroupPostStatus(current, payload.result));
+        void recordGroupApproval(payload.result).catch(() => {});
         return;
       }
 
@@ -660,8 +700,10 @@ export default function FacebookGroupsAgentPage({
 
       if (payload.type === GROUP_POST_STATUS_EVENT && payload.event) {
         const statusEvent = payload.event;
+        if (statusEvent.crmOrigin && statusEvent.crmOrigin !== window.location.origin) return;
         if (statusEvent.productKey && statusEvent.productKey !== productKey) return;
         persist((current) => markGroupPostStatus(current, statusEvent));
+        if (!statusEvent.automatic) void recordGroupApproval(statusEvent).catch(() => {});
         window.postMessage({
           source: "vfc-marketing-crm",
           type: GROUP_POST_STATUS_EVENT_ACK,
@@ -860,6 +902,7 @@ export default function FacebookGroupsAgentPage({
       registration: group.pendingRegistration,
     });
     persistGroups(updated);
+    void recordGroupApproval({ url: group.url, registration: group.pendingRegistration, postedAt: group.lastPostedAt, accepted: true }).catch(() => {});
     setMessage(`${group.name} is now Proven/Hot. It will come back to the top when its repeat interval is due.`);
   }
 
@@ -871,6 +914,7 @@ export default function FacebookGroupsAgentPage({
       checkedAt: new Date().toISOString(),
     });
     persistGroups(updated);
+    void recordGroupApproval({ url: group.url, registration: group.pendingRegistration, postedAt: group.lastPostedAt, declined: true }).catch(() => {});
     setMessage(`${group.name} marked declined and moved straight to Archived.`);
   }
 

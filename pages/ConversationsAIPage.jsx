@@ -25,7 +25,35 @@ const RENEWAL_STATUS = {
   awaiting_approval: "Awaiting admin approval", declined: "Declined by the group", skipped: "Skipped", failed: "Failed", needs_attention: "Needs manual attention", stopped: "Stopped (account problem)",
 };
 
-// Rent2Buy Facebook group renewals: separate from the Marketplace assistant.
+const RENEWAL_HEALTH = {
+  healthy: "Healthy", processing: "Processing", paused: "Paused", disabled: "Disabled",
+  waiting: "Waiting for first heartbeat", disconnected: "Browser disconnected", stalled: "Stalled",
+  missed_run: "Daily run missed", publication_failures: "Repeated publication failures", restricted: "Account restriction",
+};
+const renewalTime = (value) => value ? new Date(value).toLocaleString("en-GB", {
+  timeZone: "Europe/London", dateStyle: "short", timeStyle: "short",
+}) : "—";
+
+function RenewalAdvertHistory({ entries }) {
+  if (!entries?.length) return null;
+  return <details>
+    <summary>Advert history ({entries.length} records in the last 14 days)</summary>
+    <div style={{ overflowX: "auto" }}>
+      <table className="data-table">
+        <thead><tr><th>Group</th><th>Vehicle</th><th>Mode</th><th>Posted (UK time)</th><th>Outcome</th><th>Outcome recorded (UK time)</th><th>Reason</th></tr></thead>
+        <tbody>{entries.map((entry) => <tr key={entry.id}>
+          <td><a href={entry.url} target="_blank" rel="noreferrer">{entry.name}</a></td>
+          <td>{entry.registration || "—"}</td>
+          <td>{entry.mode === "automatic" ? "Automatic" : "Manual"}</td>
+          <td>{renewalTime(entry.postedAt)}</td>
+          <td>{RENEWAL_STATUS[entry.status] || entry.status}</td>
+          <td>{renewalTime(entry.outcomeAt)}</td>
+          <td>{entry.reason || "—"}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </details>;
+}
 function RenewalsPanel({ data, error, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [maxDaily, setMaxDaily] = useState("");
@@ -42,24 +70,30 @@ function RenewalsPanel({ data, error, onChanged }) {
   const latest = data?.latest;
   const isToday = latest && latest.date === data.today;
   return (
-    <section className="panel"><div className="panel__header"><div><div className="eyebrow">Rent2Buy · Facebook Groups</div><h3>Group renewals (every 7 days)</h3>
-      <p>Daily 07:00 GMT queue of due Proven/Hot Rent2Buy groups. Posts are prepared with the existing helper and confirmed manually; one group never blocks the rest.</p></div></div>
+    <section className="panel"><div className="panel__header"><div><div className="eyebrow">Rent2Buy · Facebook Groups</div><h3>Rent2Buy Group Renewal Agent</h3>
+      <p>Daily 07:00 GMT renewal queue for previously accepted Rent2Buy group adverts.</p></div></div>
       {error ? <div className="notice notice--warning">{error}</div> : null}
       {!data ? (!error ? <p>Loading renewal status…</p> : null) : <>
+        <div className="competence-metrics">
+          <Metric label="Agent health" value={RENEWAL_HEALTH[data.agent?.health] || "Unavailable"} />
+          <Metric label="Last heartbeat (UK time)" value={renewalTime(data.agent?.lastHeartbeatAt)} />
+          <Metric label="Last daily run (UK time)" value={renewalTime(latest?.checkedAt)} />
+          <Metric label="Next scheduled run (UK time)" value={renewalTime(data.nextRunAt)} />
+        </div>
+        {data.agent?.restriction ? <p className="notice notice--warning">{data.agent.restriction}</p> : null}
         <p>
           <label><input type="checkbox" checked={data.settings.enabled} disabled={busy} onChange={(e) => post({ action: "settings", enabled: e.target.checked }, e.target.checked ? "Enable the daily renewal queue?" : "Disable the daily renewal queue?")} /> Daily renewals enabled</label>
           {" · "}Max per day{" "}
           <input type="number" min="1" max="30" style={{ width: 60 }} value={maxDaily || data.settings.maxDaily} disabled={busy} onChange={(e) => setMaxDaily(e.target.value)} onBlur={() => maxDaily && Number(maxDaily) !== data.settings.maxDaily && post({ action: "settings", maxDaily: Number(maxDaily) }).then(() => setMaxDaily(""))} />
-          {" · "}Last daily run: {fmt(latest?.checkedAt)} · Next run: {fmt(data.nextRunAt)}
         </p>
         {latest ? <>
           <div className="competence-metrics">
             <Metric label="Groups due" value={latest.due} /><Metric label="In queue" value={latest.queued} /><Metric label="Processed" value={latest.processed} />
-            <Metric label="Submissions confirmed today" value={isToday ? latest.confirmedSubmissions : 0} /><Metric label="Accepted" value={latest.accepted} />
-            <Metric label="Awaiting approval" value={latest.awaitingApproval} /><Metric label="Skipped / failed" value={latest.skippedOrFailed} /><Metric label="Needs attention" value={latest.needsAttention} />
+            <Metric label="Confirmed submissions" value={latest.confirmedSubmissions} /><Metric label="Accepted" value={latest.accepted} />
+            <Metric label="Pending approvals" value={latest.awaitingApproval} /><Metric label="Failures" value={latest.failures} /><Metric label="Groups requiring attention" value={latest.needsAttention} />
           </div>
           {latest.stopped ? <div className="notice notice--warning">Stopped {fmt(latest.stopped.at)}: {latest.stopped.reason}</div> : null}
-          <details><summary>Today's queue ({latest.queued})</summary><div className="competence-report-list">{latest.groups.map((g) => (
+          <details><summary>Queue for {latest.date} ({latest.queued})</summary><div className="competence-report-list">{latest.groups.map((g) => (
             <div key={g.groupKey}><strong><a href={g.url} target="_blank" rel="noreferrer">{g.name}</a></strong> · {RENEWAL_STATUS[g.status] || g.status}{g.reason ? ` (${g.reason})` : ""}
               {g.status === "queued" && g.issues.length ? <p>Check first: {g.issues.join(" · ")}</p> : null}
               {isToday && g.status === "queued" && !latest.stopped ? <p>
@@ -70,7 +104,7 @@ function RenewalsPanel({ data, error, onChanged }) {
           {isToday && !latest.stopped ? <p><button type="button" className="button button--small" disabled={busy} onClick={() => post({ action: "stop", reason: window.prompt("Account restriction or security challenge details?") || "Account problem" }, "Stop all remaining renewals today?")}>Stop today (account problem)</button></p> : null}
           <details><summary>Daily renewal history</summary>{data.history.map((h) => <p key={h.date}>{h.date}: {h.confirmedSubmissions} confirmed / {h.queued} queued · {h.accepted} accepted · {h.awaitingApproval} awaiting · {h.skippedOrFailed} skipped/failed · {h.needsAttention} attention{h.stopped ? " · stopped" : ""}</p>)}</details>
         </> : <p>No daily run recorded yet.</p>}
-        <small>Confirmed submissions come from the helper's recorded posts; acceptance comes from the existing acceptance check. Prepared adverts or an opened composer are never counted.</small>
+        <RenewalAdvertHistory entries={data.advertHistory} />
       </>}
     </section>
   );

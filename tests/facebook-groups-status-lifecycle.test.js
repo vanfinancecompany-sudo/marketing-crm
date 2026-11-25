@@ -247,6 +247,26 @@ test("the alarm reopens the configured renewal driver in the background and reus
   }
 });
 
+test("the renewal driver only reads and acknowledges approval receipts for its CRM origin", async () => {
+  const previousWindow = globalThis.window;
+  const runtime = makeRuntime();
+  globalThis.window = runtime.crmWindow;
+  try {
+    await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled: true });
+    const production = { id: "own", crmOrigin: runtime.crmWindow.location.origin, accepted: true };
+    const preview = { id: "other", crmOrigin: "https://preview.example", accepted: true };
+    runtime.stored.set("vfcRent2BuyRenewalApprovals", [production, preview]);
+    const get = () => requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
+    assert.deepEqual(Array.from((await get()).approvalReceipts, (entry) => entry.id), ["own"]);
+    await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_APPROVAL", "other");
+    await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_APPROVAL", "own");
+    assert.equal((await get()).approvalReceipts.length, 0);
+    assert.deepEqual(Array.from(runtime.stored.get("vfcRent2BuyRenewalApprovals"), (entry) => entry.id), ["other"]);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
 test("automatic posting rejects a lookalike CRM origin and allows the verified branch alias", async () => {
   const previousWindow = globalThis.window;
   const enable = () => requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled: true });

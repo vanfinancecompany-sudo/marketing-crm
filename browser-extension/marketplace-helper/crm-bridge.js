@@ -199,7 +199,7 @@
     if (message.source === "vfc-marketing-crm" && message.type === "VFC_GROUP_RENEWAL_REQUEST") {
       const command = message.command;
       if (!["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "SET_GROUP_RENEWAL_AUTOMATION",
-          "DEFER_GROUP_RENEWAL_AUTOMATION"].includes(command)) return;
+          "DEFER_GROUP_RENEWAL_AUTOMATION", "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL"].includes(command)) return;
       const result = await chrome.runtime.sendMessage({ type: command, jobId: message.jobId, enabled: message.enabled, until: message.until }).catch(() => null);
       window.postMessage({ source: "vfc-facebook-helper", type: "VFC_GROUP_RENEWAL_RESPONSE",
         id: message.id, ...(result || { ok: false, error: "Renewal helper unavailable" }) }, window.location.origin);
