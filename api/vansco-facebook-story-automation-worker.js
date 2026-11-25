@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import {storyArtworkEnabled} from "../lib/storyArtworkPolicy.js";
 import {prepareSelectedStoryArtwork} from "./_story-artwork.js";
 import {
@@ -140,7 +141,7 @@ function recoverableStoryError(error) {
   return "";
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!["GET", "POST"].includes(request.method)) {
     response.setHeader("Allow", "GET, POST");
@@ -367,3 +368,5 @@ export default async function handler(request, response) {
     return response.status(status).json(payload);
   }
 }
+
+export default withCronHealth("/api/vansco-facebook-story-automation-worker", handler);

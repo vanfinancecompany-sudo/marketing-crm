@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { createClient } from "@supabase/supabase-js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
@@ -217,7 +218,7 @@ async function repairOne(supabase, send) {
   return { send_id: send.id, ...decision, changed };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!authorize(request)) {
     json(response, 401, { ok: false, message: "Campaign orphan worker access denied." });
@@ -240,3 +241,5 @@ export default async function handler(request, response) {
     json(response, 500, { ok: false, message: error?.message || "Campaign orphan recovery failed." });
   }
 }
+
+export default withCronHealth("/api/marketing-template-campaign-send-orphan-worker", handler);

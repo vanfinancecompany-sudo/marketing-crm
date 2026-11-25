@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import {
   bufferDormantPayload,
   isBufferScheduledRunDue,
@@ -261,7 +262,7 @@ async function chooseResolvedCandidate({
   return { vehicle: null, held };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!["GET", "POST"].includes(request.method)) {
     response.setHeader("Allow", "GET, POST");
@@ -693,3 +694,5 @@ export default async function handler(request, response) {
     return response.status(status).json(payload);
   }
 }
+
+export default withCronHealth("/api/vansco-facebook-automation-worker", handler);

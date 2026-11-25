@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { createClient } from "@supabase/supabase-js";
 import {
   assessSavedCompetenceResult,
@@ -164,7 +165,7 @@ export async function runAssistantLearningWorker({
   return { ok: true, recovered, processed, completed, retried, failed };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader?.("Cache-Control", "no-store, max-age=0");
   if (!assistantLearningWorkerAuthorised(request)) {
     return response.status(401).json({ ok: false, message: "Assistant learning worker access denied." });
@@ -183,3 +184,5 @@ export default async function handler(request, response) {
     return response.status(500).json({ ok: false, message: "Assistant learning worker failed." });
   }
 }
+
+export default withCronHealth("/api/ai-assistant-learning-worker", handler);

@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import {
   bufferDormantPayload,
   isBufferScheduledRunDue,
@@ -73,7 +74,7 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!["GET", "POST"].includes(request.method)) {
     response.setHeader("Allow", "GET, POST");
@@ -147,3 +148,5 @@ export default async function handler(request, response) {
     worker: lastPayload,
   });
 }
+
+export default withCronHealth("/api/buffer-facebook-automation-cron", handler);

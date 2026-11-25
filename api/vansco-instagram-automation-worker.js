@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 
 import {bufferDormantPayload,isBufferScheduledRunDue} from "../lib/bufferActiveWindow.js";
 import {bufferDeferredPayload,isBufferRateLimitCooldownError} from "../lib/bufferRuntimeGuard.js";
@@ -59,7 +60,7 @@ export function instagramRemainingCapacity({state,target=TARGET,organisationCapa
   MAX_CREATE_PER_RUN
  ));
 }
-export default async function handler(request,response){
+async function handler(request,response){
  response.setHeader("Cache-Control","no-store");
  if(!["GET","POST"].includes(request.method))return response.status(405).json({ok:false,error:"Method not allowed"});
  if(!authorised(request))return response.status(401).json({ok:false,error:"Not authorised"});
@@ -206,3 +207,5 @@ export default async function handler(request,response){
   return response.status(500).json({ok:false,enabled,stage,error:message.slice(0,250)});
  }
 }
+
+export default withCronHealth("/api/vansco-instagram-automation-worker", handler);

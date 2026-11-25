@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import { controlledCarWixConfiguration } from "./_dealerkit-car-controlled-publish-state.js";
 import { controlledWixRequest } from "./_dealerkit-controlled-publish-state.js";
@@ -234,7 +235,7 @@ async function syncCarsStock({ allowLargeReconciliation = false } = {}) {
   };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   const automatic = automaticRun(request);
 
@@ -292,3 +293,5 @@ export default async function handler(request, response) {
     });
   }
 }
+
+export default withCronHealth("/api/sync-cars-stock", handler);

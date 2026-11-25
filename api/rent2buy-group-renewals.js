@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 // Rent2Buy Facebook group renewals: daily queue, reporting and controls.
 // GET ?run=1 (Vercel cron, CRON_SECRET): build today's queue once.
 // GET (CRM key): reporting and queue. POST (CRM key): settings, browser status, and advert outcomes.
@@ -244,7 +245,7 @@ export async function handlePost(db, body, now = new Date(), environment = proce
   return { ok: false, error: "Unknown action" };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
   const bearer = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "");
@@ -266,3 +267,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Renewal data unavailable" });
   }
 }
+
+export default withCronHealth("/api/rent2buy-group-renewals", handler);

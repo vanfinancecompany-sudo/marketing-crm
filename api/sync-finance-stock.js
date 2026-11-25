@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import { getSupabaseServiceAdmin } from "./_vansco-cache-utils.js";
 import { loadCompleteWixStockSnapshot } from "../lib/wixStockSnapshot.js";
 
@@ -244,7 +245,7 @@ function htmlResponse(result, status = 200) {
   });
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   if (!["GET", "POST"].includes(request.method || "")) {
     response.status(405).json({ ok: false, message: "Method not allowed." });
     return;
@@ -276,3 +277,5 @@ export default async function handler(request, response) {
     response.status(500).json(payload);
   }
 }
+
+export default withCronHealth("/api/sync-finance-stock", handler);

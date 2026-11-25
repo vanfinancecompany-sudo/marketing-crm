@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import {storyArtworkEnabled} from "../lib/storyArtworkPolicy.js";
 import {prepareSelectedStoryArtwork} from "./_story-artwork.js";
 import { createClient } from "@supabase/supabase-js";
@@ -582,7 +583,7 @@ async function safeStep(label, action) {
   }
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!["GET", "POST"].includes(request.method)) {
     response.status(405).json({ ok: false, error: "Method not allowed." });
@@ -699,3 +700,5 @@ export default async function handler(request, response) {
     response.status(500).json({ ok: false, error: message });
   }
 }
+
+export default withCronHealth("/api/buffer-facebook-story-automation", handler);

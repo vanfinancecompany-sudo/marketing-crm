@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -509,7 +510,7 @@ async function processOneQueuedSend(supabase) {
   };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
   if (!authorize(request)) {
     json(response, 401, { ok: false, message: "Campaign send worker access denied." });
@@ -529,3 +530,5 @@ export default async function handler(request, response) {
     json(response, 500, { ok: false, message: error?.message || "Campaign send worker failed." });
   }
 }
+
+export default withCronHealth("/api/marketing-template-campaign-send-worker", handler);

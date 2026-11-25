@@ -1,3 +1,4 @@
+import {withCronHealth} from "../lib/cronHealthTelemetry.js";
 // Independent cloud monitor for Conversations & AI (Vercel cron, every 10
 // minutes; no AI calls). Opens one alert per problem, emails significant new
 // sustained problems once, and resolves alerts automatically when clear.
@@ -135,7 +136,7 @@ export async function runConversationsMonitor(db, { environment = process.env, n
   return { checkedAt: stamp, issues: issues.length, emailedProblems: opened, emailedRecoveries: recovered };
 }
 
-export default async function handler(request, response) {
+async function handler(request, response) {
   response.setHeader?.("Cache-Control", "no-store");
   if (!allowed(request, process.env)) return response.status(401).json({ error: "Unauthorised" });
   try {
@@ -145,3 +146,5 @@ export default async function handler(request, response) {
     return response.status(500).json({ error: String(error?.message || "Monitor failed").slice(0, 200) });
   }
 }
+
+export default withCronHealth("/api/conversations-monitor", handler);
