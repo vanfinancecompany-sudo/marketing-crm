@@ -189,6 +189,9 @@ export default async function handler(request, response) {
     if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix Cars state is not safe for reconciliation.", { blockers: state.plan.blockers });
     if (!carPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The Cars publish preview is stale. Rebuild the final preview before publishing.");
 
+    if (state.plan.pricingReconciliation?.eligible && (request.body?.pricingApproval !== true || request.body?.resumePartial !== true)) {
+      throw new ControlledPublishError(409, "Approve the displayed Cars pricing reconciliation before publishing. A verified recovery audit is required.");
+    }
     const targets = orderedTargets(state.plan.targets);
     if (targets.length !== 2 || !targets.some((target) => target.collectionId === "CARFINANCE") || !targets.some((target) => target.collectionId === "CARPAGES")) {
       throw new ControlledPublishError(409, "The verified Cars write plan must contain exactly CARFINANCE and CARPAGES.");
