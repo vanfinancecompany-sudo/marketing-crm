@@ -419,7 +419,8 @@ export async function reconcileRecoverableTargets(state, registration, product, 
     ? controlledWixCreateId(configurationForTarget(state, target).siteId, target.collectionId, registration)
     : target.itemId;
   const operations = targets.map(target => ({ ...verifiedWrite(target, identity(target), target.operation), desiredPublishStatus: target.desiredPublishStatus }));
-  await audit(state, product, "publish_started", { operations, ...(state.plan?.vfc?.pricingReconciliation?.eligible ? { pricingReconciliation: state.plan.vfc.pricingReconciliation } : {}) });
+  const pricingReconciliation = product === "cars" ? state.plan?.pricingReconciliation : product === "finance" ? state.plan?.vfc?.pricingReconciliation : null;
+  await audit(state, product, "publish_started", { operations, ...(pricingReconciliation?.eligible ? { pricingReconciliation } : {}) });
 
   const getItem = async (target, configuration, { readLive = false } = {}) => {
     const items = await query(configuration, target.collectionId, registration, { includeDraftItems: !readLive });
