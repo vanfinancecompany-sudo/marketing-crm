@@ -277,3 +277,34 @@ test('car with disputed Wix cash price is blocked in future DealerKit publishing
  assert.equal(plan.canPublish,false);
  assert.ok(plan.blockers.some(b=>b.code==='pricing_review_hold'));
 });
+
+const heldCarFixture = () => ({
+  vehicle: vehicle({registration: "JM10ASM", vatStatus: "no_vat"}),
+  decision: decision({registration: "JM10ASM"}), imageSet: imageSet(), completePricingLookup: true,
+  carListingRows: [{id: "held-list", data: {title: "JM10ASM", vanDescription: "BMW 3 Series", price: "£21,795", salePrice: "FROM £292 P/M"}}],
+  carDetailRows: [{id: "held-detail", data: {title: "JM10ASM", titleText: "BMW 3 Series", priceVat: "£21,795", salePrice: "£307"}}],
+});
+test("Cars historical hold offers reconciliation with complete identity and matching cash/VAT", () => {
+  const plan = buildDealerKitCarWixPlan(heldCarFixture());
+  assert.equal(plan.canPublish, true);
+  assert.equal(plan.pricingReconciliation.eligible, true);
+  assert.equal(plan.targets.find(t => t.collectionId === "CARPAGES").itemId, "held-detail");
+  assert.equal(plan.targets.find(t => t.collectionId === "CARPAGES").data.salePrice, "£458");
+});
+test("Cars historical hold keeps genuine cash, VAT, identity, stale review and incomplete read blockers", () => {
+  const block = mutate => { const fixture = heldCarFixture(); mutate(fixture); const plan = buildDealerKitCarWixPlan(fixture); assert.equal(plan.canPublish, false); assert.ok(plan.blockers.some(b => b.code === "pricing_review_hold")); };
+  block(f => f.completePricingLookup = false);
+  block(f => f.carDetailRows[0].data.priceVat = "£21.795");
+  block(f => f.carDetailRows[0].data.priceVat = "£22,795");
+  block(f => f.vehicle.vatStatus = "plus_vat");
+  block(f => f.vehicle.vatStatus = "unknown");
+  block(f => f.carDetailRows[0].data.titleText = "Ford Focus");
+  block(f => f.decision.reviewedSourceUpdatedAt = "2026-09-10T00:00:00Z");
+  block(f => f.carListingRows.push({...f.carListingRows[0], id:"duplicate"}));
+});
+test("Cars approval expires on a change to prior Wix monthly figures", () => {
+  const f = heldCarFixture(); const plan = buildDealerKitCarWixPlan(f); const confirmation = buildCarPublishConfirmation(plan);
+  assert.equal(carPublishConfirmationMatches(confirmation, plan), true);
+  f.carDetailRows[0].data.salePrice = "£308";
+  assert.equal(carPublishConfirmationMatches(confirmation, buildDealerKitCarWixPlan(f)), false);
+});
