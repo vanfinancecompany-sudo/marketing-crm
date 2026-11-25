@@ -177,11 +177,13 @@ test("the CRM shows separate heartbeat and retains confirmed and failed advert h
   for (const [state, environment] of [["ready", {}], ["restricted", { VERCEL_ENV: "preview" }]]) {
     assert.equal((await handlePost(db, { action: "heartbeat", state }, new Date(checkedAt), environment)).ok, true);
   }
-  const pending = await readRenewals(db, new Date(checkedAt));
+  const pending = await readRenewals(db, new Date(checkedAt), { environment: {} });
   assert.deepEqual([pending.latest.confirmedSubmissions, pending.latest.awaitingApproval, pending.latest.failures], [1, 1, 1]);
   await handlePost(db, { action: "approval", approval: "accepted", groupUrl: url("auto"), registration: "AB12CDE", postedAt,
     checkedAt }, new Date(checkedAt));
-  const report = await readRenewals(db, new Date(checkedAt));
+  const report = await readRenewals(db, new Date(checkedAt), { environment: {} });
+  const previewReport = await readRenewals(db, new Date(checkedAt), { environment: { VERCEL_ENV: "preview" } });
+  assert.equal(previewReport.agent.health, "restricted", "preview restriction stays in the preview channel");
   assert.equal(report.latest.accepted, 1);
   assert.equal(report.agent.health, "healthy");
   assert.equal(report.agent.lastHeartbeatAt, checkedAt);
