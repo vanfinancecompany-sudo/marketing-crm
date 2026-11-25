@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { RENT2BUY_WEBSITE } from "../reply-policy.mjs";
+import { FINANCE_WEBSITE, RENT2BUY_WEBSITE } from "../reply-policy.mjs";
 
 // "auto": automatic replies to brand-new Rent2Buy conversations only (see the
 // Automatic replies section). Never restored after a restart.
@@ -37,6 +37,8 @@ export function emptyState() {
 export function loadState(file) {
   try {
     const state = { ...emptyState(), ...JSON.parse(readFileSync(file, "utf8")) };
+    // First start with Van Finance support: finance messages before now are history.
+    state.financeFrom ??= new Date().toISOString();
     // A send instruction that was handed out but never reported back is
     // treated as unconfirmed after a restart. It is never repeated.
     for (const thread of Object.values(state.threads)) {
@@ -482,10 +484,20 @@ export function cleanMessageText(text) {
 }
 
 
-export function resolveProduct(listingTitle, defaultProduct) {
+// Product from the advert title and website domain only, for example
+// "... - Visit us at Rent2BuyVans.co.uk" or "... VanFinanceCompany.co.uk".
+// Unidentified or ambiguous adverts get no product, so they go to a person.
+// The live service passes no default; an explicit default (test harness only)
+// applies solely when the title names neither product.
+const RENT2BUY_ADVERT = /rent[\s-]*(?:2|to)[\s-]*buy|rent2buyvans\.co\.uk/i;
+const FINANCE_ADVERT = /vanfinancecompany|vanfinance\.co\b|\bvan[\s-]*finance\b/i;
+export function resolveProduct(listingTitle, defaultProduct = null) {
   const text = String(listingTitle || "");
-  if (/\brent[\s-]*(?:2|to)[\s-]*buy\b/i.test(text)) return "rent2buy";
-  if (/\bfinance\b/i.test(text)) return "finance";
+  const rent2buy = RENT2BUY_ADVERT.test(text);
+  const finance = FINANCE_ADVERT.test(text);
+  if (rent2buy && !finance) return "rent2buy";
+  if (finance && !rent2buy) return "finance";
+  if (rent2buy && finance) return null;
   return defaultProduct === "finance" || defaultProduct === "rent2buy" ? defaultProduct : null;
 }
 
@@ -603,14 +615,16 @@ export function inspectThread(state, snapshot, { defaultProduct } = {}) {
       logEvent(state, "left-for-person", { threadId, why: "Not the test buyer" });
       return { action: "none", reason: "Not the test buyer" };
     }
-    const from = autoFrom(state);
+    // Van Finance conversations: never answer messages from before finance
+    // support was installed (state.financeFrom), so history is not reopened.
+    const from = thread.product === "finance" ? Math.max(autoFrom(state), Date.parse(state.financeFrom || "") || Infinity) : autoFrom(state);
     const covered = new Set(thread.jobs.filter((j) => ["confirmed", "claimed", "typed", "unconfirmed"].includes(j.status)).flatMap((j) => j.messageIds || []));
     const lastOutgoing = messages.findLastIndex((m) => m.direction === "outgoing");
     const recent = messages.slice(lastOutgoing + 1)
       .filter((m) => m.direction === "incoming" && !covered.has(m.id))
       .map((m) => ({ ...m, sentAt: messageTime(m.id) }))
       .filter((m) => m.sentAt === null || m.sentAt >= from);
-    if (!recent.length) return { action: "none", reason: "No unanswered customer message since " + new Date(from).toISOString() };
+    if (!recent.length) return { action: "none", reason: "No unanswered customer message since " + (Number.isFinite(from) ? new Date(from).toISOString() : "finance support started") };
     if (recent.some((m) => m.sentAt === null)) {
       thread.needsHuman = "Message time could not be verified";
       logEvent(state, "escalate", { threadId, reason: thread.needsHuman });
@@ -777,9 +791,15 @@ export function confidentRent2Buy(listingTitle) {
 }
 function autoSendBlock(state, thread, decision, job) {
   if (!decision.auto) return "Not checked for an automatic reply";
-  if (thread.product !== "rent2buy" || !confidentRent2Buy(thread.listingTitle)) return "Listing not confidently identified as Rent2Buy";
+  if (thread.product === "finance") {
+    if (resolveProduct(thread.listingTitle) !== "finance") return "Listing not confidently identified as Van Finance";
+    // Separate owner switch: finance replies stay with a person until enabled.
+    if (state.financeAuto !== true) return "Van Finance automatic replies are not switched on";
+  } else if (thread.product !== "rent2buy" || !confidentRent2Buy(thread.listingTitle)) return "Listing not confidently identified as Rent2Buy";
   if (!thread.listingId) return "Listing not verified in the conversation";
-  if (!String(job.text).includes(RENT2BUY_WEBSITE)) return "Reply does not contain the Rent2Buy website link";
+  if (thread.product === "finance" ? !String(job.text).includes(FINANCE_WEBSITE) : !String(job.text).includes(RENT2BUY_WEBSITE)) {
+    return thread.product === "finance" ? "Reply does not contain the Van Finance website link" : "Reply does not contain the Rent2Buy website link";
+  }
   if (thread.jobs.some((other) => other !== job && OPEN_JOB.has(other.status))) return "Another reply is already in progress";
   if (accountProblem(state)) return accountProblem(state);
   return null;
@@ -821,6 +841,8 @@ export function recordDraft(state, decision, draft) {
     if (blocked) {
       thread.needsHuman = "Not sent automatically: " + blocked;
       logEvent(state, "draft", { threadId: thread.id, jobId: job.id, sendBlocked: blocked });
+      // Reported to the CRM as needing a person (never left silently unanswered).
+      logEvent(state, "escalate", { threadId: thread.id, jobId: job.id, reason: thread.needsHuman });
       return { action: "none", reason: thread.needsHuman, draft: draft.text };
     }
     job.auto = true;
@@ -948,7 +970,7 @@ export function publicStatus(state) {
     allowAll: state.allowAll,
     allowThreads: state.allowThreads,
     enabledAt: state.enabledAt,
-    auto: { sentToday: autoSentToday(state), from: new Date(autoFrom(state)).toISOString(), testBuyer: state.autoTestBuyer || null },
+    auto: { sentToday: autoSentToday(state), from: new Date(autoFrom(state)).toISOString(), testBuyer: state.autoTestBuyer || null, financeAuto: state.financeAuto === true, financeFrom: state.financeFrom || null },
     baselineUnread: state.inboxBaseline?.unread.length ?? null,
     observedUnread: state.mode === "observe" ? (state.observedUnread || []) : [],
     pendingOpen: state.pendingOpen,

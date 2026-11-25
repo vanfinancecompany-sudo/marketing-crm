@@ -1,6 +1,6 @@
 import { buildAskMeRequest } from "../../lib/askme/contract.js";
 import { businessFactsFor } from "../../lib/askme/businessFacts.js";
-import { marketplaceProduct, marketplaceReplyRoute, rent2BuyWebsiteReply } from "./reply-policy.mjs";
+import { financeWebsiteReply, marketplaceProduct, marketplaceReplyRoute, rent2BuyWebsiteReply } from "./reply-policy.mjs";
 import { referencedKnowledgeQuestion } from "../../lib/askme/knowledgeRetrieval.js";
 import { answerCustomerMessage } from "../../lib/askme/leanEngine.js";
 import { redactSensitiveCustomerData } from "../../lib/publicAssistantFoundation.js";
@@ -70,7 +70,8 @@ export async function draftMarketplaceReply({ product: knownProduct, vehicle, me
   if (result.actions?.some((action) => action.type === "contact")) {
     return finish({ reason: "Ask Me referred this question to the team" }, engineMs);
   }
-  const text = product === "rent2buy" ? rent2BuyWebsiteReply(result.reply, result.actions, request.history) : result.reply;
+  const text = product === "rent2buy" ? rent2BuyWebsiteReply(result.reply, result.actions, request.history) : financeWebsiteReply(result.reply);
+  if (!text) return finish({ reason: "Finance reply mentioned approval, rates, payments or availability" }, engineMs);
   return finish({ text }, engineMs);
 }
 

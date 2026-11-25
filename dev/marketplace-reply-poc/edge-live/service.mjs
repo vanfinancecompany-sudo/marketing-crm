@@ -27,7 +27,8 @@ const DIAGNOSTICS_FILE = join(dirname(STATE_FILE), "inbox-diagnostics.json");
 // Latest structural snapshot per source (the assistant tab, or your own tab via
 // the popup). Kept outside the ledger; no message text is ever included.
 let diagnostics = existsSync(DIAGNOSTICS_FILE) ? JSON.parse(readFileSync(DIAGNOSTICS_FILE, "utf8")) : {};
-const DEFAULT_PRODUCT = process.env.R2B_DEFAULT_PRODUCT ?? "rent2buy";
+// No default product: unidentified adverts always go to a person (25 Nov 2026).
+const DEFAULT_PRODUCT = null;
 // The extension in this install. When its version on disk is newer than the
 // one running in Edge, the extension reloads itself (see background.js).
 const EXTENSION_DIR = process.env.R2B_EXTENSION_DIR || join(HERE, "extension");
@@ -206,6 +207,11 @@ const ROUTES = {
       if (accountProblem(state)) throw new Error(accountProblem(state));
       if (state.openerTrip || state.openerHold) throw new Error("Clear the safety stop first");
       if (state.heartbeat?.list !== "marketplace") throw new Error("The Marketplace list is not open in the assistant tab yet");
+    }
+    // Owner switch for automatic Van Finance replies (off by default).
+    if (typeof body.financeAuto === "boolean") {
+      state.financeAuto = body.financeAuto;
+      logEvent(state, "finance-auto", { on: state.financeAuto });
     }
     // Catch-up start for automatic replies (default 12:00 UK, 24 Nov 2026).
     if (body.autoFrom) {

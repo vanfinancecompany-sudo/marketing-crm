@@ -1,4 +1,15 @@
 export const RENT2BUY_WEBSITE = "https://www.rent2buyvans.co.uk/";
+export const FINANCE_WEBSITE = "https://www.vanfinancecompany.co.uk/";
+export const websiteFor = (product) => (product === "finance" ? FINANCE_WEBSITE : RENT2BUY_WEBSITE);
+
+// Owner's rule (25 Nov 2026): we do not offer daily or short-term van hire.
+const SHORT_TERM_HIRE = /\b(?:daily|day|short[\s-]*term|weekend|one[\s-]*day|two[\s-]*day|few days?)\s+(?:van\s+)?(?:hire|rental|rent|let)\b|\b(?:hire|rent)\s+(?:a\s+|the\s+|this\s+|it\s+)?(?:van\s+)?(?:for|by)\s+(?:the|a|one|two|three|a few|\d+)\s+(?:day|days|weekend|nights?)\b|\bper day\b|\bday rate\b/i;
+const SHORT_TERM_REPLY = {
+  rent2buy: "Thanks for your message. We don't offer daily or short-term van hire, sorry. Rent2Buy is a longer-term way to rent a van with a route to owning it. You can find out more at " + RENT2BUY_WEBSITE,
+  finance: "Thanks for your message. We don't offer daily or short-term van hire, sorry. We help customers buy a van on finance. You can find out more at " + FINANCE_WEBSITE,
+};
+// Finance replies must not promise approval, rates, specific payments or availability.
+const FINANCE_UNSAFE = /\bguarantee(?:d|s)?\b|\b(?:definitely|certainly) (?:be )?(?:approved|accepted)\b|\byou(?:'ll|’ll| will) (?:be|get) (?:approved|accepted)\b|\b\d+(?:\.\d+)?\s?%|£\s?\d[\d,]*(?:\.\d{1,2})?\s*(?:per|a|\/|each)\s*(?:month|week)\b|\b(?:in stock|still available|available now)\b/i;
 
 const RENT2BUY = /\brent[\s-]*(?:2|to)[\s-]*buy\b/i;
 const FINANCE = /\b(?:van finance|finance application|lenders?|apr|hire purchase|pcp)\b/i;
@@ -37,8 +48,18 @@ export function marketplaceProduct(product, message = "") {
 export function marketplaceReplyRoute(product, message) {
   if (HUMAN.test(message)) return { reason: "Customer needs the team" };
   if (!product) return { reason: "No verified listing match" };
+  if (SHORT_TERM_HIRE.test(message)) return { text: SHORT_TERM_REPLY[product] };
   if ((product === "rent2buy" ? FINANCE : RENT2BUY).test(message)) {
     return { reason: "Question crosses the listing's product boundary" };
+  }
+  // Finance: availability, prices and payments go to the website (no promises);
+  // vehicle specification questions stay with the Van Finance Ask Me engine.
+  if (product === "finance" && (
+    CURRENT_STOCK.test(message) || PERSONAL_PRICE.test(message) || VEHICLE_DETAIL.test(message)
+    || (LISTED_VEHICLE.test(message) && SPECIFIC_REQUEST.test(message))
+  )) return { text: "Check the live website for current vans, availability, vehicle details and prices. You can apply for finance online there.\n\n" + FINANCE_WEBSITE };
+  if (product === "finance" && /\b(?:how|where) (?:do|can|should) i (?:apply|(?:start|complete|submit) (?:my |an? )?application)\b/i.test(message)) {
+    return { text: "You can apply for van finance online at " + FINANCE_WEBSITE };
   }
   if (product === "rent2buy" && (
     CURRENT_STOCK.test(message) || SPECIFICATION.test(message) || PERSONAL_PRICE.test(message) || VEHICLE_DETAIL.test(message)
@@ -49,6 +70,15 @@ export function marketplaceReplyRoute(product, message) {
     return { text: "You can complete your Rent2Buy application online at " + RENT2BUY_WEBSITE };
   }
   return null;
+}
+
+// Finance: unsafe wording goes to a person (null); every reply carries the link.
+export function financeWebsiteReply(reply) {
+  // "Approval isn't guaranteed" is the disclaimer we want; only promises are unsafe.
+  const promises = reply.replace(/\b(?:isn['’]t|is not|are not|aren['’]t|not|never|can['’]t|cannot|can not|no)\s+(?:a\s+|be\s+)?guarantee(?:d|s)?\b/gi, "");
+  if (FINANCE_UNSAFE.test(promises)) return null;
+  if (reply.includes(FINANCE_WEBSITE)) return reply;
+  return reply + "\n\nYou can find out more and apply online at " + FINANCE_WEBSITE;
 }
 
 export function rent2BuyWebsiteReply(reply, actions, history) {

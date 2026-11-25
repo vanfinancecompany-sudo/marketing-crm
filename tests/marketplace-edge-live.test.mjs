@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   authoriseSend, emptyState, inspectInbox, inspectThread, loadState, publicStatus, recordDraft, recordHeartbeat,
-  recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict, pilotTimeout,
+  recordSendResult, resumeThread, saveState, setMode, startupMode, startPilot, verifyPilot, finishPilot, monitoringVerdict, pilotTimeout, resolveProduct,
 } from "../dev/marketplace-reply-poc/edge-live/ledger.mjs";
 import { liveResponder } from "../dev/marketplace-reply-poc/edge-live/askme-live.mjs";
 import { draftMarketplaceReply } from "../dev/marketplace-reply-poc/assistant.mjs";
@@ -574,6 +574,7 @@ test("a message whose time cannot be verified, an unclear listing, a handover, a
   ];
   for (const [name, messages, title, draft] of cases) {
     const state = autoOn();
+    state.financeFrom = "2026-11-24T00:00:00.000Z"; // finance support installed; finance auto still off
     const d = open(state, "600", messages, title);
     if (d.action === "draft") assert.equal(recordDraft(state, d, draft).action, "none", name);
     assert.equal(state.events.some((e) => e.type === "claim"), false, name);
@@ -632,4 +633,96 @@ test("Auto stays on after a restart; STOP cancels a claimed reply; 2 unconfirmed
   }
   assert.equal(failing.mode, "observe");
   assert.equal(failing.events.at(-1).type, "auto-stopped");
+});
+
+// ---- Van Finance support (25 Nov 2026) ----
+const VFC_TITLE = "Marketplace £9,995 – 2019 Ford Transit Custom - Visit us at VanFinanceCompany.co.uk View buyer More Options";
+const VFC_LINK = "https://www.vanfinancecompany.co.uk/";
+const financeReady = () => { const s = autoOn(); s.financeFrom = "2026-11-24T00:00:00.000Z"; return s; };
+
+test("products come from the advert title and domain; unidentified or ambiguous go to a person", () => {
+  assert.equal(resolveProduct(R2B_TITLE), "rent2buy");
+  assert.equal(resolveProduct(VFC_TITLE), "finance");
+  assert.equal(resolveProduct("2019 Ford Transit - vanfinancecompany.co.uk"), "finance");
+  assert.equal(resolveProduct("Rent2Buy - Van Finance Company"), null, "ambiguous");
+  assert.equal(resolveProduct("2019 Ford Transit Custom"), null, "unidentified, no default");
+  const state = financeReady();
+  if (!state.pendingOpen.includes("650")) state.pendingOpen.push("650");
+  const d = inspectThread(state, { threadId: "650", listingId: "1", listingTitle: "2019 Ford Transit Custom", messages: [cust("12:10")] }, {});
+  assert.equal(d.action, "none");
+  assert.equal(state.threads["650"].needsHuman, "No verified listing product");
+  assert.equal(state.threads["650"].product, null, "not classified as Rent2Buy in the CRM");
+});
+
+test("verified finance adverts auto-reply only with the switch on and the finance link", () => {
+  const state = financeReady();
+  state.financeAuto = true;
+  const d = open(state, "660", [cust("12:10", "Can I get finance if I'm self-employed?")], VFC_TITLE);
+  assert.equal(d.action, "draft");
+  assert.equal(d.product, "finance");
+  assert.equal(answer(state, d, "Yes, self-employed applicants can apply.\n\nYou can find out more and apply online at " + VFC_LINK).action, "send");
+  const noLink = financeReady(); noLink.financeAuto = true;
+  const d2 = open(noLink, "661", [cust("12:10")], VFC_TITLE);
+  assert.equal(recordDraft(noLink, d2, { text: "Answer " + LINK }).action, "none", "Rent2Buy link is not enough");
+  assert.match(noLink.threads["661"].needsHuman, /Van Finance website link/);
+});
+
+test("finance switch off: reply is held for a person and reported as needs_human", () => {
+  const state = financeReady();
+  const d = open(state, "670", [cust("12:10")], VFC_TITLE);
+  assert.equal(recordDraft(state, d, { text: "Answer " + VFC_LINK }).action, "none");
+  assert.match(state.threads["670"].needsHuman, /Van Finance automatic replies are not switched on/);
+  assert.ok(state.events.some((e) => e.type === "escalate" && e.threadId === "670"), "CRM sees it as needing a person");
+  assert.equal(state.events.some((e) => e.type === "claim"), false);
+});
+
+test("blocked Rent2Buy replies are also reported as needs_human", () => {
+  const state = autoOn();
+  const d = open(state, "675", [cust("12:10")]);
+  assert.equal(recordDraft(state, d, { text: "Answer without the website." }).action, "none");
+  assert.ok(state.events.some((e) => e.type === "escalate" && e.threadId === "675"));
+});
+
+test("historical finance conversations are never answered automatically", () => {
+  const state = autoOn();
+  state.financeFrom = new Date(at("12:30")).toISOString();
+  state.financeAuto = true;
+  const d = open(state, "680", [cust("12:10", "Old finance question")], VFC_TITLE);
+  assert.equal(d.action, "none");
+  assert.equal(state.threads["680"].needsHuman, null, "not reopened or flagged");
+  const noStart = autoOn(); noStart.financeAuto = true; // no financeFrom recorded: everything is history
+  assert.equal(open(noStart, "681", [cust("12:10")], VFC_TITLE).action, "none");
+  const loaded = loadState(join(mkdtempSync(join(tmpdir(), "fbm-")), "missing.json"));
+  assert.equal(loaded.financeAuto, undefined, "finance auto is off by default");
+});
+
+test("finance questions route to the Van Finance Ask Me engine with safe wording", async () => {
+  const urls = [];
+  const fetchImpl = async (url, init) => {
+    urls.push(String(url));
+    const body = JSON.parse(init.body);
+    return { ok: true, json: async () => (body.action === "start" ? { status: "ready", conversation_id: "c1" } : { status: "ready", reply: "Yes, you can apply." }) };
+  };
+  const thread = { id: "690" };
+  const draft = await draftMarketplaceReply({ product: "finance", message: "Can I apply if I'm a sole trader?" }, { respond: liveResponder(thread, { fetchImpl }) });
+  assert.ok(urls.every((u) => u.startsWith("https://www.vanfinancecompany.co.uk/api/jasmine")));
+  assert.equal(draft.text, "Yes, you can apply.\n\nYou can find out more and apply online at " + VFC_LINK);
+  const disclaimer = await draftMarketplaceReply({ product: "finance", message: "Bad credit?" }, { respond: async () => ({ status: "ready", reply: "You can apply. Approval isn’t guaranteed; it depends on affordability." }) });
+  assert.ok(disclaimer.text, "a not-guaranteed disclaimer is safe");
+  for (const unsafe of ["You are guaranteed approval.", "Rates from 9.9% APR.", "It would be £250 per month.", "This van is still available."]) {
+    const held = await draftMarketplaceReply({ product: "finance", message: "Tell me more" }, { respond: async () => ({ status: "ready", reply: unsafe }) });
+    assert.ok(held.reason && !held.text, unsafe);
+  }
+});
+
+test("short-term hire enquiries get a polite no with the right website", async () => {
+  for (const [product, link] of [["rent2buy", LINK], ["finance", VFC_LINK]]) {
+    for (const message of ["Do you do daily hire?", "Can I hire a van for the weekend?", "Looking for short term van rental", "What's your day rate?"]) {
+      const draft = await draftMarketplaceReply({ product, message }, { respond: async () => { throw new Error("should not reach Ask Me"); } });
+      assert.match(draft.text, /don't offer daily or short-term van hire/, message);
+      assert.ok(draft.text.includes(link), product + " link");
+    }
+  }
+  const weekly = await draftMarketplaceReply({ product: "rent2buy", message: "Is the weekly rental fixed?" }, { respond: async () => ({ status: "ready", reply: "Yes." }) });
+  assert.doesNotMatch(weekly.text, /short-term/, "Rent2Buy weekly rental is not short-term hire");
 });
