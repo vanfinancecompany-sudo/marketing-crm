@@ -558,7 +558,7 @@ export default async function handler(request, response) {
     if (!state.plan.canPublish) throw new ControlledPublishError(409, "The fresh DealerKit/Wix state is not safe for controlled reconciliation.", { blockers: state.plan.blockers });
     if (!controlledPublishConfirmationMatches(request.body?.confirmation, state.plan)) throw new ControlledPublishError(409, "The publish preview is stale. Rebuild the final preview before publishing.");
 
-    if (state.plan.vfc?.pricingReconciliation?.eligible && (request.body?.pricingApproval !== true || request.body?.resumePartial !== true)) {
+    if (state.plan.vfc?.pricingReconciliation?.eligible && (state.plan.mode !== "finance" || request.body?.pricingApproval !== true || request.body?.resumePartial !== true)) {
       throw new ControlledPublishError(409, "Approve the displayed VFC pricing reconciliation before publishing. A verified recovery audit is required.");
     }
     const targets = orderedTargets(state.plan.targets);
