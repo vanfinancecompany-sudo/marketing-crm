@@ -129,8 +129,8 @@ function renderPayload(root, payload) {
   }
 
   const submitButton = root.querySelector("[data-dealerkit-pricing-submit]");
-  if (submitButton && !submitButton.disabled && plan.mode === "finance" && plan.vfc?.pricingReconciliation?.eligible) submitButton.textContent = "Resolve pricing & publish";
-  if (plan.mode === "finance" && plan.vfc?.pricingReconciliation?.eligible) {
+  if (submitButton && !submitButton.disabled && productPricingReconciliation(plan)?.eligible) submitButton.textContent = "Resolve pricing & publish";
+  if (productPricingReconciliation(plan)?.eligible) {
     const notice = element("div", "dealerkit-wix-preview__messages dealerkit-wix-preview__messages--warnings", "Verified pricing reconciliation available. Submit to review the existing and calculated monthly prices and approve the correction. No manual Wix edit is needed.");
     result.appendChild(notice);
   }
@@ -157,7 +157,7 @@ function renderPayload(root, payload) {
   const heading = root.querySelector(".dealerkit-wix-preview__copy strong");
   if (heading) heading.textContent = updateExisting ? `Reconcile ${label} advert` : `Publish to ${label}`;
   const applyButton = root.querySelector("[data-controlled-publish-apply]");
-  if (applyButton) applyButton.textContent = plan.mode === "finance" && plan.vfc?.pricingReconciliation?.eligible ? "Resolve pricing & publish" : updateExisting ? updateActionLabel : `Publish to ${label}`;
+  if (applyButton) applyButton.textContent = productPricingReconciliation(plan)?.eligible ? "Resolve pricing & publish" : updateExisting ? updateActionLabel : `Publish to ${label}`;
 
   const statusText = plan.canPublish
     ? (updateExisting ? "READY TO RECONCILE" : "READY TO PUBLISH")
@@ -392,11 +392,15 @@ async function publishingRequest(url, body) {
   return data;
 }
 
+function productPricingReconciliation(plan) {
+  return plan?.mode === "cars" ? plan.pricingReconciliation : plan?.mode === "finance" ? plan.vfc?.pricingReconciliation : null;
+}
+
 function pricingApprovalText(plan) {
-  const pricing = plan?.vfc?.pricingReconciliation;
+  const pricing = productPricingReconciliation(plan);
   if (!pricing?.eligible) return "";
   const rows = pricing.records.filter(row => row.selected).map(row => row.collectionId + ": " + (row.itemId ? row.oldMonthly || "(missing monthly)" : "(new record)") + " → £" + pricing.monthly + " / month");
-  return "RECONCILE VFC PRICING FOR " + pricing.registration + "\n\nVerified DealerKit cash price £" + pricing.retail + " " + pricing.vat + ".\nCash/VAT unchanged on existing selected records; monthly figures use approved VFC rules.\n\n" + rows.join("\n") + "\n\nApprove pricing correction and continue publishing?";
+  return "RECONCILE " + (plan.mode === "cars" ? "CARS" : "VFC") + " PRICING FOR " + pricing.registration + "\n\nVerified DealerKit cash price £" + pricing.retail + " " + pricing.vat + ".\nCash/VAT unchanged on existing selected records; monthly figures use approved VFC rules.\n\n" + rows.join("\n") + "\n\nApprove pricing correction and continue publishing?";
 }
 
 function addSubmit(root, registration, product) {
@@ -522,7 +526,7 @@ function addSubmit(root, registration, product) {
       if (error.cause?.capacityReached) {
         feedback.append(" Existing adverts can still be updated when they need no new rows. A site administrator can increase the Wix CMS allowance or review retired records for separate approval.");
       }
-      button.textContent = requiresReview ? "Review required" : error.cause?.capacityReached ? "Retry after freeing CMS capacity" : root._controlledPublishPayload?.plan?.vfc?.pricingReconciliation?.eligible ? "Resolve pricing & publish" : "Retry";
+      button.textContent = requiresReview ? "Review required" : error.cause?.capacityReached ? "Retry after freeing CMS capacity" : productPricingReconciliation(root._controlledPublishPayload?.plan)?.eligible ? "Resolve pricing & publish" : "Retry";
     } finally {
       button.disabled = requiresReview;
       fallback.hidden = requiresReview;
