@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { approvalMonitorHealth } from "../lib/crmHealthRegistry.js";
 import { clearMarketingAccessKey, getStoredMarketingAccessKey, isMarketingAccessDenied, MARKETING_ACCESS_HEADER, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
 
 const CHANNEL_LABELS = { ask_me: "Ask Me (websites)", facebook_marketplace: "Facebook Marketplace", facebook_page: "Facebook Page Messenger", whatsapp: "WhatsApp" };
@@ -71,6 +72,8 @@ function RenewalsPanel({ data, error, onChanged }) {
   }
   const latest = data?.latest;
   const isToday = latest && latest.date === data.today;
+  const approval = data?.agent?.approvalMonitor;
+  const approvalHealth = approvalMonitorHealth(approval);
   return (
     <section className="panel"><div className="panel__header"><div><div className="eyebrow">Rent2Buy � Facebook Groups</div><h3>Rent2Buy Group Renewal Agent</h3>
     <p>Hourly renewal checks for Rent2Buy groups that have accepted an advert before.</p></div></div>
@@ -79,9 +82,12 @@ function RenewalsPanel({ data, error, onChanged }) {
         <div className="competence-metrics">
           <Metric label="Agent health" value={RENEWAL_HEALTH[data.agent?.health] || "Unavailable"} />
           <Metric label="Last heartbeat (UK time)" value={renewalTime(data.agent?.lastHeartbeatAt)} />
-          <Metric label="Last daily run (UK time)" value={renewalTime(latest?.checkedAt)} />
-    <Metric label="Next hourly check (UK time)" value={renewalTime(data.nextRunAt)} />
+          <Metric label="Last successful hourly scan (UK time)" value={renewalTime(latest?.lastScanAt)} />
+          {latest?.lastScanAt ? <Metric label="Hourly scan outcome" value={`${latest.due} due � ${num(latest.lastScanReviewCount)} need review`} /> : null}
+          <Metric label="Next hourly check (UK time)" value={renewalTime(data.nextRunAt)} />
+          <Metric label="Last approval alarm (UK time)" value={renewalTime(approval?.lastAlarmAt)} />
         </div>
+        <p className={approvalHealth.state === "warning" ? "notice notice--warning" : ""}>{approvalHealth.detail}</p>
         {data.agent?.restriction ? <p className="notice notice--warning">{data.agent.restriction}</p> : null}
         {(data.agent?.issues || []).filter(issue => issue.severity === "warning").map(issue =>
           <p key={issue.fingerprint} className="notice notice--warning">{issue.detail}</p>)}
