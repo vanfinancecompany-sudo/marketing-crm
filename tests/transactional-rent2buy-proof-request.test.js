@@ -76,6 +76,17 @@ test("personal proof-link email makes document completion explicit", () => {
   assert.doesNotMatch(email.html, /whenever it’s convenient/i);
 });
 
+test("personal proof-link email includes privacy guidance in both formats", () => {
+  const uploadUrl = "https://www.rent2buyvans.co.uk/upload-your-documents?proofToken=synthetic-test-token";
+  const message = renderRent2BuyProofLinkEmail({ uploadUrl, applicationRef: "R2B-TEST01" });
+  for (const content of [message.html, message.plain]) {
+    assert.ok(content.includes(uploadUrl));
+    assert.match(content, /official upload link in this email/);
+    assert.match(content, /online banking password, PIN or security codes/);
+    assert.match(content, /vanfinancecompany\.co\.uk\/privacy-policy/);
+  }
+});
+
 test("normalizes the trusted CRM proof request payload", () => {
   const payload = normalizeRent2BuyProofRequestPayload({
     lead_id: "lead-123",
