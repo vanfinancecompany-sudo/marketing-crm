@@ -61,6 +61,10 @@ test("approval monitoring distinguishes an alarm from results and reports unreso
  const alarm={scheduled:true,lastAlarmAt:"2026-11-26T09:00Z",lastCheckAt:"2026-11-26T09:01Z"};
  assert.equal(approvalMonitorHealth({scheduled:true},now).state,"unverified");
  assert.equal(approvalMonitorHealth({...alarm,pendingCount:0},now).state,"idle");
+ const idle = approvalMonitorHealth({...alarm,pendingCount:0,outcome:"timeout"},now);
+ assert.equal(idle.state,"idle");
+ assert.equal(idle.lastAt,alarm.lastAlarmAt);
+ assert.match(idle.detail,/No adverts are awaiting approval/);
  assert.equal(approvalMonitorHealth({...alarm,pendingCount:2,outcome:"pending"},now).state,"healthy");
  assert.equal(approvalMonitorHealth({...alarm,pendingCount:2,unresolvedCount:1},now).state,"warning");
  assert.equal(approvalMonitorHealth({...alarm,outcome:"timeout"},now).state,"warning");
