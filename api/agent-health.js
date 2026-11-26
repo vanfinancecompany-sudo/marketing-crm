@@ -3,7 +3,7 @@ import {timingSafeEqual} from "node:crypto";
 import coreHealth from "./system-health.js";
 import {readRenewalMonitoring} from "./rent2buy-group-renewals.js";
 import {buildMonitorIssues,isMonitorTestEvent,withoutFacebookSessions} from "../lib/conversationsMonitor.js";
-import {WORKERS,workerHealth,normaliseExisting,healthCounts} from "../lib/crmHealthRegistry.js";
+import {WORKERS,workerHealth,normaliseExisting,healthCounts,approvalMonitorHealth,isCurrentServiceRow} from "../lib/crmHealthRegistry.js";
 
 const AUTH="x-marketing-customer-database-key";
 function authorised(req,env){
@@ -14,20 +14,25 @@ function item(key,label,category,state,detail,extra={}){return {key,label,catego
 async function data(query){const result=await query;if(result.error)throw result.error;return result.data;}
 function severity(issues){return issues.some(x=>x.severity==="critical")?"critical":issues.some(x=>x.severity==="warning")?"warning":"healthy";}
 const describe=issues=>issues.map(x=>x.title).join(" · ");
-function probe(key,label,category,task){return Promise.resolve().then(task).catch(()=>[item(key,label,category,"unverified","Telemetry unavailable; check this source directly.")]);}
+function probe(key,label,category,task){return Promise.resolve().then(task).catch(()=>[item(key,label,category,"warning","Could not read this evidence. Check the source and refresh the health panel.")]);}
 export async function collectAgentHealth(db,{now=new Date(),environment=process.env,collectCore=async()=>coreHealth({method:"GET"},{setHeader(){},status(){return this;},json(body){return body;}})}={}){
  const ms=now.getTime(),since=new Date(ms-24*3600000).toISOString();
  const sources=await Promise.all([
   probe("core","Core services","Services",async()=>{
    const core=await collectCore();
    if(!Array.isArray(core?.automations))throw Error("Missing core data");
-   const rows=core.automations.filter(x=>x.key!=="vansco_stock_refresh").map(normaliseExisting);
-   for(const [key,label] of [["supabase","Supabase connection"],["reel_duplicate_protection","Reel duplicate protection"],["email_delivery","Email delivery"]]){
-    rows.push(item(key,label,"Services",core.checks?.[key]===true?"healthy":core.checks?.[key]===false?"critical":"unverified","Existing core service check.",{lastAt:core.checked_at}));
+   const rows=core.automations.filter(isCurrentServiceRow).map(normaliseExisting);
+   for(const [key,label,detail] of [["supabase","Supabase connection","CRM activity query"],["reel_duplicate_protection","Reel duplicate protection","Checks recent recorded reel activity for duplicate publications"]]){
+    rows.push(item(key,label,"Services",core.checks?.[key]===true?"healthy":core.checks?.[key]===false?"critical":"unverified",detail,{lastAt:core.checked_at}));
    }
    for(const x of core.issues||[])rows.push(item("core-issue:"+x.key,x.label,"Current incidents","critical",x.message,{lastAt:core.checked_at}));
    for(const x of core.degraded||[])rows.push(item("degraded:"+x.key,x.key,"Current incidents","warning",x.reason,{lastAt:core.checked_at}));
    return rows;
+  }),
+  probe("email-delivery","Email delivery","Integrations",async()=>{
+   const latest=await data(db.from("marketing_email_send_recipients").select("last_event_at")
+     .eq("send_type","production").eq("status","delivered").gte("last_event_at",since).order("last_event_at",{ascending:false}).limit(1).maybeSingle());
+   return [item("email-delivery","Email delivery","Integrations",latest?"healthy":"idle",latest?"SendGrid recorded a delivered production email in the last 24 hours.":"No production delivery receipt in the last 24 hours. Campaign failures and unknown provider outcomes are reported separately.",{lastAt:latest?.last_event_at,source:"Delivery webhook receipt"})];
   }),
   probe("worker-telemetry","Scheduled worker telemetry","Scheduled workers",async()=>{
    const rows=await data(db.from("crm_worker_health").select("worker_key,started_at,completed_at,outcome,http_status,detail,last_success_at"));
@@ -44,8 +49,9 @@ export async function collectAgentHealth(db,{now=new Date(),environment=process.
   }),
   probe("renewals","Rent2Buy Group Renewal Agent","Agents",async()=>{
    const r=await readRenewalMonitoring(db,now,environment);
-   const state=({disabled:"disabled",paused:"disabled",healthy:"healthy",processing:"running",waiting:"unverified",restricted:"critical",missed_run:"critical",disconnected:"critical",stalled:"critical",publication_failures:"critical"})[r.health]||"unverified";
-   return [item("renewals","Rent2Buy Group Renewal Agent","Agents",state,describe(r.issues||[])||"Agent state: "+r.health,{lastAt:r.lastHeartbeatAt,href:"/conversations-ai",source:"Renewal heartbeat and queue monitor"})];
+   const state=({disabled:"disabled",paused:"disabled",healthy:"healthy",idle:"idle",processing:"running",waiting:"unverified",outcomes_need_attention:"warning",restricted:"critical",missed_run:"critical",disconnected:"critical",stalled:"critical",publication_failures:"critical"})[r.health]||"unverified";
+   const detail=(r.issues||[]).map(issue=>issue.detail).join(" · ")||({disabled:"Daily queue is intentionally disabled.",paused:"Automatic renewals were paused in Edge.",idle:"The daily queue ran and found no adverts due.",waiting:"Waiting for a confirmed Facebook outcome or the first run."}[r.health] || `${r.confirmed} confirmed submissions across ${r.due} queued groups.`);
+   return [item("renewals","Rent2Buy Group Renewal Agent","Agents",state,detail,{lastAt:r.checkedAt||r.lastHeartbeatAt,href:"/conversations-ai",source:"Queue outcomes and browser evidence"}),approvalMonitorHealth(r.approvalMonitor,now)];
   }),
   probe("conversation-source","Marketplace and Ask Me","Agents",async()=>{
    const [fb,events,sessions]=await Promise.all([
@@ -56,9 +62,9 @@ export async function collectAgentHealth(db,{now=new Date(),environment=process.
    const actual=(events||[]).filter(e=>!isMonitorTestEvent(e));
    const issues=buildMonitorIssues({facebook:fb,events:actual,now});
    const fbi=issues.filter(x=>x.channel==="facebook_marketplace");
-   const fbState=fbi.length?severity(fbi):fb?.status?.monitoring&&fb?.status?.mode==="auto"?"healthy":"unverified";
    const answered=actual.filter(e=>e.channel==="facebook_marketplace"&&e.kind==="answered");
-   const rows=[item("marketplace-replies","Marketplace automatic replies","Agents",fbState,describe(fbi)||"Browser and service reporting; "+answered.length+" confirmed replies in 24 hours.",{lastAt:fb?.last_heartbeat_at,href:"/conversations-ai",source:"Browser heartbeat and delivery receipts"})];
+   const fbState=fbi.length?severity(fbi):fb?.status?.mode==="paused"?"disabled":fb?.status?.monitoring&&fb?.status?.mode==="auto"?(answered.length?"healthy":"idle"):"unverified";
+   const rows=[item("marketplace-replies","Marketplace automatic replies","Agents",fbState,describe(fbi)||(fbState==="disabled"?"Automatic replies were paused.":answered.length+" confirmed replies in 24 hours."),{lastAt:answered[0]?.occurred_at||fb?.last_heartbeat_at,href:"/conversations-ai",source:"Browser heartbeat and delivery receipts"})];
    const web=withoutFacebookSessions(sessions||[],actual.filter(e=>e.channel==="facebook_marketplace"));
    const aiIssues=issues.filter(x=>x.channel==="ask_me");
    for(const [product,label] of [["finance","Ask Me · Van Finance"],["rent2buy","Ask Me · Rent2Buy"]]){

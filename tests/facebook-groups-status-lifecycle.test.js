@@ -78,7 +78,7 @@ function makeRuntime(origin = "https://marketing-crm-six.vercel.app") {
       async remove() {},
       onUpdated: { addListener() {} },
     },
-    alarms: { create() {}, onAlarm: { addListener(listener) { alarmHandler = listener; } } },
+    alarms: { create() {}, async get() { return { scheduledTime: Date.now() + 60000 }; }, onAlarm: { addListener(listener) { alarmHandler = listener; } } },
     action: { async setBadgeText() {}, async setTitle() {} },
   };
   vm.runInNewContext(backgroundSource, { chrome: chromeWorker, URL, Date, console, setTimeout }, { filename: "background.js" });
@@ -265,6 +265,34 @@ test("the renewal driver only reads and acknowledges approval receipts for its C
   } finally {
     globalThis.window = previousWindow;
   }
+});
+
+test("a historical renewal check uses a read-only tab and durably returns the exact approval result", async () => {
+  const previousWindow = globalThis.window;
+  const runtime = makeRuntime();
+  globalThis.window = runtime.crmWindow;
+  try {
+    const groupUrl = "https://www.facebook.com/groups/example/";
+    const identity = "attempt|2026-11-26|renewal-id|BW72VFG|2026-11-26T07:01:00Z";
+    await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled: true });
+    const review = { url: groupUrl, name: "Group", registration: "BW72VFG", postedAt: "2026-11-26T07:01:00Z", reviewKind: "attempt", identity };
+    await requestGroupRenewalHelper("START_GROUP_RENEWAL_REVIEW", undefined, { review });
+    assert.equal(runtime.tabs.at(-1).url, `${groupUrl}search/?q=BW72VFG`);
+    assert.equal(runtime.stored.get("vfcRent2BuyGroupRenewal").pending, undefined);
+    assert.equal((await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE")).reviewPending, true);
+    const active = runtime.stored.get("vfcFacebookGroupsAgentState");
+    const checkedAt = new Date().toISOString();
+    assert.equal((await runtime.sendToWorker({ type: "GROUP_POST_STATUS_PAGE_RESULT", jobId: active.job.id, groupIndex: 0,
+      result: { url: groupUrl, registration: "BW72VFG", pending: true, matchedUrl: groupUrl + "posts/85/", checkedAt,
+        observedAt: review.postedAt } }, 2)).ok, true);
+    const current = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
+    assert.equal(current.reviewPending, false);
+    assert.equal(current.approvalReceipts[0].reviewIdentity, identity);
+    assert.equal(current.approvalReceipts[0].pending, true);
+    assert.equal(current.approvalMonitor.lastCheckAt, checkedAt);
+    await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_APPROVAL", current.approvalReceipts[0].id);
+    assert.equal((await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE")).approvalReceipts.length, 0);
+  } finally { globalThis.window = previousWindow; }
 });
 
 test("automatic posting rejects a lookalike CRM origin and allows the verified branch alias", async () => {

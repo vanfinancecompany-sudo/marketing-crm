@@ -109,7 +109,8 @@ test("renewal monitoring checks schedules, stale browser, stalled work, publicat
   const heartbeat = { last_heartbeat_at: ago(2), status: { state: "ready" } };
   const run = { run_date: "2026-11-24", checked_at: ago(35), plan: { groups: [] }, outcomes: {} };
   const check = (inputs = {}) => describeRenewalAgent({ settings, run, heartbeat, now, ...inputs });
-  assert.equal(check().health, "healthy");
+  assert.equal(check().health, "idle");
+  assert.equal(check({ run: { ...run, plan: { groups: [{ groupKey: "one" }] }, outcomes: { one: { status: "submitted", at: ago(2) } } } }).health, "healthy");
   assert.deepEqual(check({ run: null }).issues.map((item) => item.fingerprint), ["rent2buy-renewal:missed-run"]);
   const tomorrowGrace = new Date("2026-11-25T07:15:00Z");
   assert.ok(check({ run: null, now: tomorrowGrace }).issues.some((item) => item.fingerprint === "rent2buy-renewal:missed-run"),
@@ -121,7 +122,9 @@ test("renewal monitoring checks schedules, stale browser, stalled work, publicat
   const failures = (stage) => Object.fromEntries(["one", "two", "three"].map((group) =>
     [group, { status: "failed", failureStage: stage, at: ago(2) }]));
   assert.equal(check({ run: { ...run, outcomes: failures("publication") } }).health, "publication_failures");
-  assert.equal(check({ run: { ...run, outcomes: failures("preparation") } }).health, "healthy");
+  assert.equal(check({ run: { ...run, outcomes: failures("preparation") } }).health, "outcomes_need_attention");
+  assert.equal(check({ run: { ...run, outcomes: { one: { status: "needs_attention", failureStage: "publication", duplicateRisk: true, at: ago(90) } } } }).health,
+    "outcomes_need_attention", "an unresolved publication remains visible after the rapid-alert window");
   assert.equal(check({ settings: { enabled: false, updatedAt: ago(3) }, run: null }).issues.length, 0);
   assert.equal(check({ settings: { enabled: true, updatedAt: ago(2) }, run: null }).issues.length, 0);
 });

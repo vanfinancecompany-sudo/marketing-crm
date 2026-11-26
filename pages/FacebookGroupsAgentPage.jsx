@@ -37,6 +37,7 @@ import {
 } from "../services/facebookGroupsAgent.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import { RENEWAL_HEARTBEAT_INTERVAL_MS } from "../lib/rent2buyGroupRenewalMonitor.js";
+import { renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
 import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, MARKETING_ACCESS_HEADER } from "../services/marketingAccess.js";
 
@@ -178,7 +179,7 @@ export default function FacebookGroupsAgentPage({
   const renewalRunningRef = useRef(false);
   const lastRenewalHeartbeat = useRef({ at: 0, attemptedAt: 0, state: "" });
 
-  function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt, renewalDate, jobId, automatic, approvalState }) {
+  function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt, renewalDate, jobId, automatic, approvalState, permalink }) {
     const activityDate = londonDateKey(postedAt ? new Date(postedAt) : new Date());
     const canonicalUrl = normalizeFacebookGroupUrl(groupUrl || "");
     const sourceId = [
@@ -200,23 +201,29 @@ export default function FacebookGroupsAgentPage({
         registration: clean(registration).toUpperCase(),
         ...(isRent2Buy ? { submitted_at: postedAt || new Date().toISOString(), posting_mode: automatic ? "automatic" : "manual" } : {}),
         ...(renewalDate ? { renewal_run_date: renewalDate, renewal_job_id: jobId, approval_outcome: approvalState || "submitted" } : {}),
+        ...(permalink ? { post_permalink: permalink } : {}),
       },
     });
   }
   function recordGroupApproval(event) {
+    if (event?.reviewIdentity) {
+      return renewalRequest({ action: "review", groupUrl: event.groupUrl, target: event.reviewIdentity,
+        result: event.accepted ? "accepted" : event.declined ? "declined" : event.pending ? "pending" : "unknown",
+        observedAt: event.observedAt, permalink: event.matchedUrl });
+    }
     if (!isRent2Buy || !event?.postedAt) return Promise.resolve();
     const approval = event.accepted ? "accepted" : event.declined ? "declined" : event.pending ? "pending" : "";
     return approval ? renewalRequest({ action: "approval", groupUrl: event.groupUrl || event.url, registration: event.registration,
       postedAt: event.postedAt, checkedAt: event.checkedAt || new Date().toISOString(), approval, reason: event.reason }) : Promise.resolve();
   }
-  async function reportRenewalHeartbeat(state, reason) {
+  async function reportRenewalHeartbeat(state, reason, approvalMonitor) {
     const previous = lastRenewalHeartbeat.current;
     const immediate = ["paused", "restricted"].includes(state) && state !== previous.state;
     if (!immediate && (Date.now() - previous.at < RENEWAL_HEARTBEAT_INTERVAL_MS || Date.now() - previous.attemptedAt < 60_000)) return;
     if (immediate && Date.now() - previous.attemptedAt < 60_000 && state === previous.attemptedState) return;
     previous.attemptedAt = Date.now();
     previous.attemptedState = state;
-    await renewalRequest({ action: "heartbeat", state, reason, extension: helperStatus.version });
+    await renewalRequest({ action: "heartbeat", state, reason, extension: helperStatus.version, approvalMonitor });
     previous.at = Date.now();
     previous.state = state;
   }
@@ -345,8 +352,8 @@ export default function FacebookGroupsAgentPage({
       const helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
       const automatic = helper.automatic && helper.driver;
       if (helper.driver && (automatic || helper.restrictionReason)) {
-        const state = helper.restrictionReason ? "restricted" : helper.pending ? "processing" : "ready";
-        await reportRenewalHeartbeat(state, helper.restrictionReason).catch(() => {});
+        const state = helper.restrictionReason ? "restricted" : helper.pending || helper.reviewPending ? "processing" : "ready";
+        await reportRenewalHeartbeat(state, helper.restrictionReason, helper.approvalMonitor).catch(() => {});
         if (helper.restrictionReportPending && lastRenewalHeartbeat.current.state === "restricted") {
           await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESTRICTION");
         }
@@ -355,6 +362,7 @@ export default function FacebookGroupsAgentPage({
         await recordGroupApproval(approval);
         await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_APPROVAL", approval.id);
       }
+      if (helper.reviewPending) return;
       setRenewalAutomatic(Boolean(helper.automatic));
       if (helper.automatic && !helper.driver) setRenewalRun(false);
       setRenewalPending(Boolean(helper.pending));
@@ -392,7 +400,8 @@ export default function FacebookGroupsAgentPage({
           ? { action: "stop", reason: result.reason, groupUrl: result.groupUrl, jobId: result.jobId,
             runDate: result.date, duplicateRisk: result.duplicateRisk }
           : { action: "outcome", groupUrl: result.groupUrl, runDate: result.date,
-            jobId: result.jobId, status: result.status, reason: result.reason, duplicateRisk: result.duplicateRisk, failureStage: result.failureStage });
+            jobId: result.jobId, status: result.status, reason: result.reason, duplicateRisk: result.duplicateRisk,
+            failureStage: result.failureStage, attemptedAt: result.attemptedAt });
         await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
         if (result.status === "stop") {
           setRenewalRun(false);
@@ -419,7 +428,19 @@ export default function FacebookGroupsAgentPage({
       const interrupted = saved?.date === today && latest.groups.find((item) => item.groupKey === saved.groupKey &&
         ["queued", "preparing"].includes(item.status));
       if (saved && !interrupted) clearAutomaticRenewalClaim(saved.jobId);
-      const group = interrupted || latest.groups.find((item) => item.status === "queued");
+      const cleanGroup = latest.groups.find(item => item.status === "queued" && !item.review && !item.issues?.length);
+      if (automatic && !interrupted && !cleanGroup && helperStatus.capabilities.includes("groups-renewal-reconciliation")) {
+        const held = latest.groups.find(item => item.review && ["queued", "needs_attention", "failed"].includes(item.status));
+        if (held) {
+          setRenewalPolling(true);
+          await requestGroupRenewalHelper("START_GROUP_RENEWAL_REVIEW", undefined, { review: {
+            url: held.url, name: held.name, registration: registrationKey(held.review.registration), postedAt: held.review.postedAt,
+            reviewKind: held.review.kind, permalink: held.review.permalink, identity: renewalReviewIdentity(held.review),
+          } });
+          return;
+        }
+      }
+      const group = interrupted || cleanGroup || latest.groups.find((item) => item.status === "queued");
       if (!group) {
         setRenewalRun(false);
         if (automatic) await deferAutomaticRenewals(nextRunAt);

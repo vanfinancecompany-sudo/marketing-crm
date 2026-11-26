@@ -6,11 +6,24 @@ import { createClient } from "@supabase/supabase-js";
 import {
   OUTCOMES, RUN_TABLE, SETTINGS_TABLE, DEFAULT_DAILY_LIMIT, GROUP_ACTIVITY_SOURCE, RENT2BUY_GROUP_ACTIVITY_TYPE,
   buildRenewalAdvertHistory, buildRenewalPlan, canonicalGroup, clampLimit, groupActivitySourceId, londonDay, nextRunAt, summarizeRenewalRun,
+  renewalPostPermalink, renewalReviewIdentity, renewalReviewTarget, releasedPreviousSubmissionHold, PREVIOUS_SUBMISSION_HOLD, UNRESOLVED_POST,
 } from "../lib/rent2buyGroupRenewals.js";
 import { describeRenewalAgent, renewalHeartbeatChannel } from "../lib/rent2buyGroupRenewalMonitor.js";
+import { markGroupPosted, markGroupPostStatus } from "../services/facebookGroupsAgent.js";
 
 const PAGE = 500;
 const clean = (v, n = 300) => String(v ?? "").trim().slice(0, n);
+const recentRuns = (db) => db.from(RUN_TABLE).select("run_date,checked_at,plan,outcomes,stopped")
+  .order("run_date", { ascending: false }).limit(14);
+
+function approvalMonitorEvidence(value, now) {
+  if (!value || typeof value.scheduled !== "boolean") return null;
+  const timestamp = input => Number.isFinite(Date.parse(input)) && Date.parse(input) <= now.getTime() + 60_000 ? new Date(input).toISOString() : null;
+  const count = input => Math.max(0, Math.min(1000, Math.floor(Number(input) || 0)));
+  return { scheduled: value.scheduled, lastAlarmAt: timestamp(value.lastAlarmAt), lastCheckAt: timestamp(value.lastCheckAt),
+    pendingCount: count(value.pendingCount), unresolvedCount: count(value.unresolvedCount),
+    outcome: ["accepted", "pending", "declined", "unknown", "timeout", "navigation_failed"].includes(value.outcome) ? value.outcome : null };
+}
 
 async function getGroups(db) {
   const rows = [];
@@ -90,7 +103,7 @@ async function saveApproval(db, body, now) {
 
 export async function readRenewals(db, now = new Date(), { queueOnly = false, environment = process.env } = {}) {
   const [{ data: runs, error }, settings] = await Promise.all([
-    db.from(RUN_TABLE).select("run_date,checked_at,plan,outcomes,stopped").order("run_date", { ascending: false }).limit(queueOnly ? 1 : 14),
+    recentRuns(db),
     readSettings(db),
   ]);
   if (error) throw error;
@@ -110,6 +123,12 @@ export async function readRenewals(db, now = new Date(), { queueOnly = false, en
   }
   const history = entries.map((run) => summarizeRenewalRun(run, events, groupStates));
   const latest = history[0] || null;
+  if (queueOnly && latest?.date === today) {
+    for (const group of latest.groups) {
+      const target = renewalReviewTarget(group.groupKey, groupStates[group.groupKey] || {}, entries, today);
+      if (target && entries[0].plan?.reviews?.[group.groupKey]?.target !== renewalReviewIdentity(target)) group.review = target;
+    }
+  }
   const summary = { today, settings, nextRunAt: settings.enabled ? nextRunAt(now) : null, latest };
   if (queueOnly) return summary;
   const heartbeat = await readRenewalHeartbeat(db, environment);
@@ -133,6 +152,66 @@ async function updateToday(db, now, mutate, date = londonDay(now)) {
   return { ok: true };
 }
 
+async function reconcilePreviousSubmission(db, body, now) {
+  const key = canonicalGroup(body.groupUrl);
+  const today = londonDay(now);
+  const [history, group] = await Promise.all([recentRuns(db), db.from("facebook_group_state").select("state,group_name")
+    .eq("group_key", key).eq("rent2buy", true).maybeSingle()]);
+  if (history.error || group.error) throw history.error || group.error;
+  const run = history.data?.[0];
+  const current = group.data?.state;
+  if (!current || run?.run_date !== today || run.stopped || !(run.plan.groups || []).some(g => g.groupKey === key)) {
+    return { ok: false, error: "This group is no longer in today's active renewal queue" };
+  }
+  const priorReview = run.plan.reviews?.[key];
+  if (priorReview?.target === body.target) return { ok: true };
+  const target = renewalReviewTarget(key, current, history.data, today);
+  if (!target || body.target !== renewalReviewIdentity(target)) return { ok: true, stale: true };
+  const status = body.result;
+  if (!["accepted", "pending", "declined", "unknown"].includes(status)) return { ok: false, error: "Invalid reconciliation result" };
+  const observed = Date.parse(body.observedAt);
+  const expected = Date.parse(target.postedAt);
+  const post = renewalPostPermalink(body.permalink, key);
+  const known = renewalPostPermalink(target.permalink, key);
+  if (status !== "unknown" && (!post || (known && post !== known) || !Number.isFinite(observed) || observed > now.getTime() + 60_000 ||
+      !(known || (target.kind === "group" ? londonDay(new Date(observed)) === londonDay(new Date(expected)) : Math.abs(expected - observed) <= 5 * 60_000)))) {
+    return { ok: false, error: "Facebook evidence does not identify the previous advert" };
+  }
+  if (status !== "unknown") {
+    const postedAt = target.kind === "attempt" ? new Date(observed).toISOString() : current.lastPostedAt;
+    if (target.kind === "attempt") {
+      const eventDate = londonDay(new Date(postedAt));
+      const sourceId = groupActivitySourceId("rent2buy", key, target.registration, eventDate);
+      const sourceRun = history.data.find(r => r.run_date === target.runDate);
+      if (observed < Date.parse(sourceRun.checked_at)) return { ok: false, error: "The observed advert predates the renewal run" };
+      const metadata = { group_url: key, group_name: group.data.group_name, destination: "Rent2Buy Facebook Groups",
+        registration: target.registration, submitted_at: postedAt, posting_mode: sourceRun.outcomes[key].mode || "automatic",
+        renewal_run_date: target.runDate, renewal_job_id: target.jobId, approval_outcome: status,
+        approval_checked_at: now.toISOString(), post_permalink: post, reconciled: true };
+      const inserted = await db.from("marketing_daily_activity_events").insert({ activity_date: eventDate, activity_type: RENT2BUY_GROUP_ACTIVITY_TYPE,
+        source: GROUP_ACTIVITY_SOURCE, source_id: sourceId, quantity: 1, occurred_at: postedAt, metadata });
+      if (inserted.error && inserted.error.code !== "23505") throw inserted.error;
+      if (inserted.error && (await readGroupActivity(db, key, target.registration, postedAt))?.metadata?.renewal_job_id !== target.jobId) {
+        return { ok: false, error: "An existing post receipt requires manual identity review" };
+      }
+    }
+    const original = { ...current, url: current.url || key };
+    const [posted] = target.kind === "attempt" ? markGroupPosted([original], key, { postedAt, registration: target.registration, renewalPost: true }) : [original];
+    const [updated] = markGroupPostStatus([posted], { url: key, registration: target.registration,
+      checkedAt: now.toISOString(), matchedUrl: post, matchMethod: "dated-renewal-reconciliation",
+      accepted: status === "accepted", pending: status === "pending", declined: status === "declined" });
+    const result = await db.from("facebook_group_state").update({ state: { ...updated, ...(current.status === "Red" ? { status: "Red" } : {}),
+      lastPostPermalink: post }, updated_at: now.toISOString() })
+      .eq("group_key", key).eq("state", JSON.stringify(current)).select("group_key").maybeSingle();
+    if (result.error) throw result.error;
+    if (!result.data) return { ok: false, error: "The group changed during reconciliation; refresh before continuing" };
+    if (target.kind === "group") await saveApproval(db, { approval: status, groupUrl: key, registration: target.registration, postedAt }, now);
+  }
+  return updateToday(db, now, (latest) => ({ plan: { ...latest.plan, reviews: { ...latest.plan.reviews, [key]: {
+    target: body.target, kind: target.kind, runDate: target.runDate || null, result: status, at: now.toISOString(),
+    reason: status === "unknown" ? "Facebook did not show this exact advert; duplicate hold retained." : "" } } } }));
+}
+
 export async function handlePost(db, body, now = new Date(), environment = process.env) {
   const action = clean(body?.action, 20);
   if (action === "heartbeat") {
@@ -141,12 +220,13 @@ export async function handlePost(db, body, now = new Date(), environment = proce
     const stamp = now.toISOString();
     const { error } = await db.from("conversation_channel_status").upsert({
       channel: renewalHeartbeatChannel(environment), last_heartbeat_at: stamp, updated_at: stamp,
-      status: { state, reason: clean(body.reason, 200), extension: clean(body.extension, 20) },
+      status: { state, reason: clean(body.reason, 200), extension: clean(body.extension, 20), approvalMonitor: approvalMonitorEvidence(body.approvalMonitor, now) },
     }, { onConflict: "channel" });
     if (error) throw error;
     return { ok: true };
   }
   if (action === "approval") return saveApproval(db, body, now);
+  if (action === "review") return reconcilePreviousSubmission(db, body, now);
   if (action === "submission") {
     const groupKey = canonicalGroup(body.groupUrl);
     const registration = clean(body.registration, 24);
@@ -178,7 +258,7 @@ export async function handlePost(db, body, now = new Date(), environment = proce
       .eq("group_key", groupKey).maybeSingle();
     if (error) throw error;
     const stillDue = buildRenewalPlan(current ? [current] : [], now, 1).groups.length > 0;
-    let unresolved = ["pending", "awaiting", "not_found"].includes(current?.state?.postStatus);
+    let unresolved = UNRESOLVED_POST.has(current?.state?.postStatus);
     if (stillDue && !unresolved) {
       // Keep the duplicate check across daily runs until group state records a newer post.
       const prior = await Promise.all([{ status: "preparing" }, { duplicateRisk: true }].map((outcome) =>
@@ -193,14 +273,15 @@ export async function handlePost(db, body, now = new Date(), environment = proce
     const rulesBlockAdvert = group.status === "Red" || group.linksAllowed === false;
     const autoBlocked = body.automatic === true && (!approved || rulesBlockAdvert);
     const prepare = stillDue && !unresolved && !autoBlocked;
-    const reason = unresolved ? "Review the previous submission before renewing this group" :
+    const reason = unresolved ? PREVIOUS_SUBMISSION_HOLD :
       autoBlocked ? "A previously accepted advert and compatible group rules are required for an automatic renewal" :
         "The group is no longer due or eligible";
     const claimed = await updateToday(db, now, (run) => {
       if (run.stopped) return { error: "Renewals have been stopped for today" };
       if (!(run.plan?.groups || []).some((group) => group.groupKey === groupKey)) return { error: "Group is not in today's queue" };
       const existing = run.outcomes?.[groupKey];
-      if (existing) {
+      const review = run.plan.reviews?.[groupKey];
+      if (existing && !releasedPreviousSubmissionHold(existing, review)) {
         if (existing.status !== "preparing" || existing.jobId !== jobId) {
           return { result: { ok: true, prepare: false, reason: "This group was already claimed or handled" } };
         }
@@ -226,7 +307,9 @@ export async function handlePost(db, body, now = new Date(), environment = proce
       if (["submitted", "stopped"].includes(previous?.status)) return { error: "The renewal is already recorded" };
       if (previous?.status === "preparing" && previous.jobId !== body.jobId) return { error: "Review the active browser draft before changing this group" };
       if (body.jobId && previous.status === status) return { outcomes: run.outcomes };
-      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...previous, status, reason: clean(body.reason, 200) || null, at: now.toISOString(),
+      const attemptedAt = Date.parse(body.attemptedAt);
+      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...previous, status, reason: clean(body.reason, 200) || "The browser did not supply an explanation; review this group before retrying.", at: now.toISOString(),
+        ...(body.jobId && Number.isFinite(attemptedAt) && attemptedAt <= now.getTime() + 60_000 ? { attemptedAt: new Date(attemptedAt).toISOString() } : {}),
         ...(body.jobId && body.failureStage === "publication" ? { failureStage: "publication" } : {}),
         ...(body.duplicateRisk === true ? { duplicateRisk: true } : {}) } } };
     }, date);

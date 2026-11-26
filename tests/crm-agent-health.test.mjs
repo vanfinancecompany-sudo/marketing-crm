@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {WORKERS,healthCounts,previousDue,workerHealth,normaliseExisting} from "../lib/crmHealthRegistry.js";
+import {WORKERS,healthCounts,previousDue,workerHealth,normaliseExisting,approvalMonitorHealth,isCurrentServiceRow} from "../lib/crmHealthRegistry.js";
 import {isMonitoredCron,classifyReceipt,withCronHealth} from "../lib/cronHealthTelemetry.js";
 
 test("all scheduled workers are registered and instrumented",()=>{
@@ -54,4 +54,29 @@ test("only one global health widget is mounted and retired stock refresh is remo
  assert.ok(!html.includes("/system-health-monitor.js"));
  assert.ok(!core.includes('key: "vansco_stock_refresh"'));
  assert.ok(!core.includes('.from("vansco_refresh_runs")'));
+});
+
+test("approval monitoring distinguishes an alarm from results and reports unresolved deliveries",()=>{
+ const now=new Date("2026-11-26T10:00Z");
+ const alarm={scheduled:true,lastAlarmAt:"2026-11-26T09:00Z",lastCheckAt:"2026-11-26T09:01Z"};
+ assert.equal(approvalMonitorHealth({scheduled:true},now).state,"unverified");
+ assert.equal(approvalMonitorHealth({...alarm,pendingCount:0},now).state,"idle");
+ assert.equal(approvalMonitorHealth({...alarm,pendingCount:2,outcome:"pending"},now).state,"healthy");
+ assert.equal(approvalMonitorHealth({...alarm,pendingCount:2,unresolvedCount:1},now).state,"warning");
+ assert.equal(approvalMonitorHealth({...alarm,outcome:"timeout"},now).state,"warning");
+ assert.equal(approvalMonitorHealth(alarm,new Date("2026-11-26T11:00Z")).state,"warning");
+ assert.ok(["rent2buy_price_sync","email_orphan_worker","vansco_stock_refresh"].every(key=>!isCurrentServiceRow({key})));
+});
+
+test("price and orphan workers record outcomes even when handlers return JSON strings",()=>{
+ const price="/api/rent2buy-monthly-price-sync",orphan="/api/marketing-template-campaign-send-orphan-worker";
+ assert.equal(classifyReceipt(price,200,{skipped:true}).outcome,"warning");
+ assert.equal(classifyReceipt(price,200,{scanned:120,changes_needed:0,updated:0}).outcome,"idle");
+ assert.equal(classifyReceipt(price,207,{scanned:120,changes_needed:3,updated:2,failures:[{}]}).outcome,"warning");
+ assert.match(classifyReceipt(price,200,{scanned:120,changes_needed:3,updated:3}).detail,/120 stock rows; 3 numeric prices/);
+ assert.equal(classifyReceipt(orphan,200,JSON.stringify({ok:true,inspected:1,results:[{action:"attention",send_id:"private-id"}]})).outcome,"warning");
+ assert.equal(classifyReceipt(orphan,200,{inspected:0,results:[]}).outcome,"idle");
+ const receipt=classifyReceipt(orphan,200,{inspected:2,results:[{action:"release",changed:true,send_id:"private-id"}]});
+ assert.equal(receipt.outcome,"success");
+ assert.ok(!receipt.detail.includes("private-id"));
 });

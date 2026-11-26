@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt } from "../lib/rent2buyGroupRenewals.js";
+import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
 import { groupDueState, groupPipeline } from "../services/facebookGroupsAgent.js";
 import { runDailyRenewalCheck, handlePost, readRenewals } from "../api/rent2buy-group-renewals.js";
 
@@ -51,7 +51,7 @@ test("statuses: confirmed submission, acceptance, awaiting, skipped, stopped; co
 function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
   const t = { rent2buy_group_renewal_settings: [{ id: 1, enabled, max_daily: maxDaily }], rent2buy_group_renewal_runs: [], facebook_group_state: groups, marketing_daily_activity_events: [], conversation_channel_status: [] };
   return { t, from(name) {
-    let filters = [], extraFilters = [], op = "select", payload = null, opts = {};
+    let filters = [], extraFilters = [], op = "select", payload = null, opts = {}, order, count;
     const rows = () => (t[name] || []).filter((r) => filters.every(([k, v]) => v === null ? r[k] == null :
       String(typeof r[k] === "object" ? JSON.stringify(r[k]) : r[k]) === String(v)) && extraFilters.every((match) => match(r)));
     const run = () => {
@@ -61,12 +61,19 @@ function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
         if (hit) { if (!opts.ignoreDuplicates) Object.assign(hit, payload); } else t[name].push({ ...payload });
         return { error: null };
       }
+      if (op === "insert") {
+        if (t[name].some(r => r.source_id === payload.source_id)) return { error: { code: "23505" } };
+        t[name].push({ id: t[name].length + 1, ...payload });
+        return { error: null };
+      }
       if (op === "update") { const matched = rows(); matched.forEach((r) => Object.assign(r, payload)); return { data: matched, error: null }; }
-      return { data: rows(), error: null };
+      const found = rows();
+      if (order) found.sort((a,b) => String(a[order[0]]).localeCompare(String(b[order[0]])) * (order[1] ? 1 : -1));
+      return { data: found.slice(0, count), error: null };
     };
     const b = { select() { return b; }, eq(k, v) { filters.push([k, v]); return b; }, is(k, v) { filters.push([k, v]); return b; }, gte() { return b; }, lt(k, v) { extraFilters.push((r) => r[k] < v); return b; }, gt(k, v) { extraFilters.push((r) => r[k] > v); return b; },
-      contains(k, value) { const [key, fields] = Object.entries(value)[0]; extraFilters.push((r) => Object.entries(fields).every(([field, expected]) => r[k]?.[key]?.[field] === expected)); return b; }, order() { return b; }, limit() { return b; }, range() { return b; },
-      upsert(p, o) { op = "upsert"; payload = p; opts = o || {}; return b; }, update(p) { op = "update"; payload = p; return b; },
+      contains(k, value) { const [key, fields] = Object.entries(value)[0]; extraFilters.push((r) => Object.entries(fields).every(([field, expected]) => r[k]?.[key]?.[field] === expected)); return b; }, order(k, o = {}) { order = [k, o.ascending !== false]; return b; }, limit(n) { count = n; return b; }, range() { return b; },
+      upsert(p, o) { op = "upsert"; payload = p; opts = o || {}; return b; }, update(p) { op = "update"; payload = p; return b; }, insert(p) { op = "insert"; payload = p; return b; },
       maybeSingle() { const r = run(); return Promise.resolve({ data: r.data?.[0] || null, error: null }); }, then(res, rej) { return Promise.resolve(run()).then(res, rej); } };
     return b;
   } };
@@ -185,7 +192,7 @@ test("the CRM shows separate heartbeat and retains confirmed and failed advert h
   const previewReport = await readRenewals(db, new Date(checkedAt), { environment: { VERCEL_ENV: "preview" } });
   assert.equal(previewReport.agent.health, "restricted", "preview restriction stays in the preview channel");
   assert.equal(report.latest.accepted, 1);
-  assert.equal(report.agent.health, "healthy");
+  assert.equal(report.agent.health, "outcomes_need_attention");
   assert.equal(report.agent.lastHeartbeatAt, checkedAt);
   const history = new Map(report.advertHistory.map((event) => [event.name.toLowerCase(), event]));
   assert.equal(history.get("auto").status, "accepted");
@@ -200,4 +207,59 @@ test("the CRM shows separate heartbeat and retains confirmed and failed advert h
 test("London day and next run time", () => {
   assert.equal(londonDay(new Date("2026-07-01T23:30:00Z")), "2026-07-02");
   assert.equal(nextRunAt(new Date("2026-11-25T06:59:00Z")), "2026-11-25T07:00:00.000Z");
+});
+
+test("read-only reviews release only a verified old acceptance and keep absent or pending adverts blocked", async () => {
+  const rows = ["accepted", "pending", "declined", "unknown"].map(id => ({ ...fixture(id, {
+    postStatus: "not_found", pendingRegistration: "BT74HLM", url: url(id),
+  }), group_key: url(id) }));
+  const db = fakeDb({ groups: rows });
+  await runDailyRenewalCheck(db, now);
+  assert.equal((await handlePost(db, { action: "claim", groupUrl: url("accepted"), jobId: "initial-held-claim", automatic: true,
+    registration: "BW72VFG" }, now)).prepare, false);
+  const first = await readRenewals(db, now, { queueOnly: true });
+  assert.equal(first.latest.groups.filter(group => group.review).length, 4);
+  for (const group of first.latest.groups) {
+    const action = { action: "review", groupUrl: group.url, target: renewalReviewIdentity(group.review), result: group.name,
+      observedAt: "2026-11-18T06:03:00Z", permalink: group.url + "posts/41/" };
+    if (group.name === "accepted") {
+      assert.equal((await handlePost(db, { ...action, permalink: url("wrong") + "posts/41/" }, now)).ok, false);
+      assert.equal((await handlePost(db, { ...action, observedAt: "2026-11-17T06:03:00Z" }, now)).ok, false);
+    }
+    assert.equal((await handlePost(db, action, now)).ok, true);
+    assert.equal((await handlePost(db, action, now)).ok, true, "receipt replay is idempotent");
+  }
+  assert.deepEqual(rows.map(row => row.state.postStatus), ["accepted", "pending", "declined", "not_found"]);
+  assert.equal(rows[2].state.archived, true);
+  const reconciled = (await readRenewals(db, now, { queueOnly: true })).latest;
+  assert.equal(reconciled.groups.filter(group => group.review).length, 0);
+  assert.equal(reconciled.groups.find(group => group.name === "accepted").status, "queued");
+  assert.equal(reconciled.previousPending, 1);
+  assert.equal(reconciled.previousDeclined, 1);
+  assert.equal(db.t.marketing_daily_activity_events.length, 0, "checking historic posts does not invent new daily activity");
+  for (const row of rows) assert.equal((await handlePost(db, { action: "claim", groupUrl: row.group_url,
+    jobId: `renewal-claim-${row.group_name}`, automatic: true, registration: "BW72VFG" }, now)).prepare, row.group_name === "accepted");
+});
+
+test("a verified BW72VFG attempt recovers one receipt, resets the interval and cannot be submitted again", async () => {
+  const row = { ...fixture("bw", { url: url("bw") }), group_key: url("bw") };
+  const db = fakeDb({ groups: [row] });
+  const checked = new Date("2026-11-25T07:04:00Z");
+  await runDailyRenewalCheck(db, now);
+  const claim = { action: "claim", groupUrl: row.group_url, jobId: "renewal-job-bw72vfg", automatic: true, registration: "BW72VFG" };
+  assert.equal((await handlePost(db, claim, now)).prepare, true);
+  await handlePost(db, { ...claim, action: "outcome", runDate: londonDay(now), status: "needs_attention", duplicateRisk: true,
+    failureStage: "publication", attemptedAt: "2026-11-25T07:03:00Z", reason: "Facebook did not confirm submission" }, checked);
+  const next = new Date("2026-11-26T07:00:00Z");
+  await runDailyRenewalCheck(db, next);
+  const group = (await readRenewals(db, next, { queueOnly: true })).latest.groups[0];
+  assert.equal(group.review.registration, "BW72VFG");
+  const action = { action: "review", groupUrl: group.url, target: renewalReviewIdentity(group.review), result: "accepted",
+    observedAt: "2026-11-25T07:03:08Z", permalink: group.url + "permalink/72/" };
+  assert.equal((await handlePost(db, action, next)).ok, true);
+  assert.equal((await handlePost(db, action, next)).ok, true);
+  assert.equal(db.t.marketing_daily_activity_events.length, 1);
+  assert.equal(db.t.marketing_daily_activity_events[0].metadata.renewal_job_id, claim.jobId);
+  assert.equal(row.state.lastPostedAt, "2026-11-25T07:03:08.000Z");
+  assert.equal((await handlePost(db, { ...claim, jobId: "renewal-job-tomorrow" }, next)).prepare, false);
 });

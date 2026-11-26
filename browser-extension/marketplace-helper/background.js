@@ -7,6 +7,7 @@ const GROUP_AGENT_STATE_KEY = "vfcFacebookGroupsAgentState";
 const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
 const RENEWAL_STATE_KEY = "vfcRent2BuyGroupRenewal";
 const RENEWAL_APPROVAL_RECEIPTS_KEY = "vfcRent2BuyRenewalApprovals";
+const APPROVAL_HEALTH_KEY = "vfcFacebookGroupApprovalHealth";
 const RENEWAL_ALARM = "vfcRent2BuyGroupRenewalAlarm";
 const RENEWAL_POST_INTERVAL_MS = 60_000;
 const RENEWAL_CRM_ORIGINS = new Set([
@@ -78,6 +79,7 @@ async function finishRenewal(state, detail) {
     ...detail, jobId: job.id, date: job.renewal.date, groupUrl: job.groupUrl,
     groupName: job.groupName, productKey: "rent2buy", registration: job.registration, vehicleId: job.vehicleId, renewalPost: true,
     automatic: job.renewal.automatic === true, crmOrigin: state.origin,
+    attemptedAt: pending.submissionStarted ? new Date(pending.submissionStarted).toISOString() : null,
   };
   const automation = detail.status === "stop" && state.automation ? { ...state.automation, enabled: false } : state.automation;
   const nextSubmissionAt = pending.submissionStarted ? pending.submissionStarted + RENEWAL_POST_INTERVAL_MS : state.nextSubmissionAt;
@@ -152,12 +154,28 @@ async function handleRenewalMessage(message, sender) {
     }
     return { ok: true };
   }
+  if (message.type === "START_GROUP_RENEWAL_REVIEW") {
+    if (!sameDriver || state.automation.tabId !== sender?.tab?.id || !state.automation.enabled || state.restricted) return { ok: false };
+    if (state.pending || state.result || await getGroupAgentState()) return { ok: true, busy: true };
+    const review = message.review || {};
+    const url = canonicalGroupUrl(review.url);
+    if (!url || url !== review.url || !/^[A-Z0-9]{5,8}$/.test(review.registration || "") ||
+        !["group", "attempt"].includes(review.reviewKind) || !Number.isFinite(Date.parse(review.postedAt)) || !review.identity) return { ok: false };
+    const target = { ...review, url, groupUrl: url, renewalPost: true, productKey: "rent2buy", crmOrigin: state.origin };
+    return { ok: await openApprovalCheck(target) };
+  }
   if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT"].includes(message.type)) {
     if (!state.origin || state.origin !== senderOrigin(sender)) return { ok: true };
     const driver = sameDriver && state.automation.tabId === sender?.tab?.id;
     const automatic = Boolean(sameDriver && state.automation.enabled);
+    const activeReview = driver ? await getGroupAgentState() : null;
+    if (activeReview?.mode === "auto-post-status" && activeReview.job.groups?.[0]?.identity && Date.now() - activeReview.startedAt > 90_000) {
+      await finishTimedOutApprovalCheck(activeReview);
+    }
     const report = { ok: true, automatic, driver: Boolean(driver), restrictionReason: state.restrictionReason,
       restrictionReportPending: state.restrictionReportPending, approvalReceipts: driver ? (await readRenewalApprovals()).filter((event) => event.crmOrigin === state.origin) : [],
+      reviewPending: Boolean(activeReview?.mode === "auto-post-status" && activeReview.job.groups?.[0]?.identity && Date.now() - activeReview.startedAt <= 90_000),
+      approvalMonitor: driver ? await readApprovalHealth().catch(() => null) : null,
       wakeAt: driver ? Math.max(state.automation.wakeAt || 0, state.nextSubmissionAt || 0) : 0 };
     if (state.automation?.enabled && !driver) return report;
     if (message.type === "OPEN_GROUP_RENEWAL_DRAFT") {
@@ -212,7 +230,8 @@ async function handleRenewalMessage(message, sender) {
     await finishRenewal(state, { status: detail.status, reason: clean(detail.reason).slice(0, 200),
       duplicateRisk: detail.duplicateRisk === true || (detail.status === "stop" && Boolean(pending.submissionStarted)),
       failureStage: detail.failureStage === "publication" ? "publication" : "",
-      postedAt: detail.status === "submitted" ? new Date().toISOString() : null, approvalState: detail.approvalState });
+      postedAt: detail.status === "submitted" ? new Date(pending.submissionStarted || Date.now()).toISOString() : null,
+      approvalState: detail.approvalState, permalink: verifiedGroupPostUrl(detail.permalink, pending.job.groupUrl) });
   }
   return { ok: true };
 }
@@ -437,9 +456,46 @@ async function saveGroupStatusEvent(event) {
   await broadcastToCrm({ type: "GROUP_POST_STATUS_EVENT", event });
 }
 
+function verifiedGroupPostUrl(value, group) {
+  try {
+    const url = new URL(value);
+    const match = url.pathname.match(/^\/groups\/[^/]+\/(?:posts|permalink)\/(\d+)\/?$/i);
+    return url.origin === "https://www.facebook.com" && match && canonicalGroupUrl(url.href) === canonicalGroupUrl(group)
+      ? `${canonicalGroupUrl(group)}posts/${match[1]}/` : "";
+  } catch { return ""; }
+}
+
+async function recordApprovalHealth(patch) {
+  const stored = await chrome.storage.local.get(APPROVAL_HEALTH_KEY);
+  await chrome.storage.local.set({ [APPROVAL_HEALTH_KEY]: { ...stored[APPROVAL_HEALTH_KEY], ...patch } });
+}
+
+async function readApprovalHealth() {
+  const [stored, alarm, items] = await Promise.all([chrome.storage.local.get(APPROVAL_HEALTH_KEY),
+    chrome.alarms.get(GROUP_APPROVAL_ALARM), getApprovalMonitorItems()]);
+  return { ...stored[APPROVAL_HEALTH_KEY], scheduled: Boolean(alarm), pendingCount: items.length,
+    unresolvedCount: items.filter(item => item.lastResult === "not_found" && item.checkCount >= 3).length };
+}
+
+async function finishTimedOutApprovalCheck(state) {
+  const target = state.job.groups[0];
+  const checkedAt = new Date().toISOString();
+  if (target?.identity) {
+    await chrome.storage.local.set({ [RENEWAL_APPROVAL_RECEIPTS_KEY]: [...(await readRenewalApprovals()), {
+      id: state.job.id, reviewIdentity: target.identity, groupUrl: target.url, crmOrigin: target.crmOrigin, checkedAt,
+    }] });
+  }
+  await recordApprovalHealth({ lastCheckAt: checkedAt, outcome: "timeout" });
+  if (state.tabId) await chrome.tabs.remove(state.tabId).catch(() => {});
+  await clearGroupAgentState();
+}
+
 async function startAutomaticApprovalCheck() {
   const activeState = await getGroupAgentState();
-  if (activeState) return;
+  if (activeState) {
+    if (activeState.mode === "auto-post-status" && Date.now() - activeState.startedAt > 90_000) await finishTimedOutApprovalCheck(activeState);
+    return;
+  }
 
   const items = await getApprovalMonitorItems();
   if (!items.length) {
@@ -448,7 +504,8 @@ async function startAutomaticApprovalCheck() {
   }
 
   const now = Date.now();
-  const { restricted } = await readRenewal();
+  const { restricted, pending } = await readRenewal();
+  if (pending) return;
   const due = [...items]
     .sort((a, b) => new Date(a.lastCheckedAt || a.postedAt || 0) - new Date(b.lastCheckedAt || b.postedAt || 0))
     .find((item) => {
@@ -459,6 +516,10 @@ async function startAutomaticApprovalCheck() {
     });
   if (!due) return;
 
+  await openApprovalCheck(due);
+}
+
+async function openApprovalCheck(due) {
   const state = {
     mode: "auto-post-status",
     job: {
@@ -473,22 +534,23 @@ async function startAutomaticApprovalCheck() {
     startedAt: Date.now(),
   };
 
-  await saveGroupAgentState(state);
   try {
-    const tab = await chrome.tabs.create({
-      url: groupPostSearchUrl(due.groupUrl, due.registration),
-      active: false,
-    });
+    const tab = await chrome.tabs.create({ url: "about:blank", active: false });
     state.tabId = tab.id || null;
     await saveGroupAgentState(state);
+    await chrome.tabs.update(tab.id, { url: verifiedGroupPostUrl(due.permalink, due.groupUrl) || groupPostSearchUrl(due.groupUrl, due.registration) });
+    return true;
   } catch (error) {
+    if (state.tabId) await chrome.tabs.remove(state.tabId).catch(() => {});
     await clearGroupAgentState();
+    await recordApprovalHealth({ lastCheckAt: new Date().toISOString(), outcome: "navigation_failed" });
+    return false;
   }
 }
 
-function ensureApprovalAlarm() {
+async function ensureApprovalAlarm() {
   try {
-    chrome.alarms.create(GROUP_APPROVAL_ALARM, { periodInMinutes: GROUP_APPROVAL_CHECK_MINUTES });
+    if (!await chrome.alarms.get(GROUP_APPROVAL_ALARM)) await chrome.alarms.create(GROUP_APPROVAL_ALARM, { periodInMinutes: GROUP_APPROVAL_CHECK_MINUTES });
   } catch {}
 }
 
@@ -542,10 +604,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-inspection",
           "groups-post-prep",
           "groups-renewals", "groups-automatic-renewals",
+          "groups-renewal-reconciliation",
           "groups-post-status",
           "groups-auto-approval-monitor",
           "groups-state-recovery",
         ],
+        approvalMonitor: await readApprovalHealth().catch(() => null),
       });
       return;
     }
@@ -855,6 +919,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (state.mode === "auto-post-status") {
         const result = message.result || {};
         const target = state.job.groups?.[0] || {};
+        if (state.tabId !== sender?.tab?.id || senderOrigin(sender) !== "https://www.facebook.com") {
+          sendResponse({ ok: false });
+          return;
+        }
         if (target.renewalPost && result.restricted && state.tabId === sender?.tab?.id) {
           await withRenewalLock(async () => stopRenewalForRestriction(await readRenewal(), "Facebook reported a security check during renewal verification"));
           await chrome.tabs.remove(state.tabId).catch(() => {});
@@ -863,6 +931,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         const checkedAt = result.checkedAt || new Date().toISOString();
+        await recordApprovalHealth({ lastCheckAt: checkedAt, outcome: result.accepted ? "accepted" : result.declined ? "declined" : result.pending ? "pending" : "unknown" });
         const event = {
           id: `group-status-event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
           productKey: target.productKey || state.job.productKey || "",
@@ -876,7 +945,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           matchedUrl: result.matchedUrl || "",
           matchMethod: result.matchMethod || "",
           checkedAt, postedAt: target.postedAt || "", automatic: target.automatic === true, crmOrigin: target.crmOrigin || "",
+          observedAt: result.observedAt || "", reviewIdentity: target.identity || "",
         };
+
+        if (target.identity) {
+          await withRenewalLock(async () => chrome.storage.local.set({ [RENEWAL_APPROVAL_RECEIPTS_KEY]: [...(await readRenewalApprovals()), event] }));
+          await chrome.tabs.remove(state.tabId).catch(() => {});
+          await clearGroupAgentState();
+          sendResponse({ ok: true });
+          return;
+        }
 
         if (event.accepted || event.declined || event.unavailable) {
           await removeApprovalMonitorItem(event.groupUrl, event.registration);
@@ -1011,7 +1089,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "SET_GROUP_RENEWAL_AUTOMATION", "DEFER_GROUP_RENEWAL_AUTOMATION",
-        "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL",
+        "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL", "START_GROUP_RENEWAL_REVIEW",
         "GROUP_RENEWAL_READY", "BEGIN_GROUP_RENEWAL_SUBMISSION", "GROUP_RENEWAL_OUTCOME"].includes(message?.type)) {
       sendResponse(await withRenewalLock(() => handleRenewalMessage(message, sender)));
       return;
@@ -1160,7 +1238,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     return;
   }
   if (alarm?.name !== GROUP_APPROVAL_ALARM) return;
-  startAutomaticApprovalCheck().catch(() => {});
+  withRenewalLock(async () => {
+    await recordApprovalHealth({ lastAlarmAt: new Date().toISOString() });
+    await startAutomaticApprovalCheck();
+  }).catch(() => {});
 });
 
 ensureApprovalAlarm();

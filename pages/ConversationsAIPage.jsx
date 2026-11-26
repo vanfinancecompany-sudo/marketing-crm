@@ -21,13 +21,15 @@ function Metric({ label, value }) {
 }
 
 const RENEWAL_STATUS = {
+  previous_pending: "Previous advert awaiting admin approval", previous_declined: "Previous advert rejected", previous_confirmed: "Previous advert confirmed",
   queued: "Queued: open, check and prepare", preparing: "Browser draft or result pending", submitted: "Submission confirmed (awaiting acceptance check)", accepted: "Accepted on Facebook",
   awaiting_approval: "Awaiting admin approval", declined: "Declined by the group", skipped: "Skipped", failed: "Failed", needs_attention: "Needs manual attention", stopped: "Stopped (account problem)",
 };
 
 const RENEWAL_HEALTH = {
   healthy: "Healthy", processing: "Processing", paused: "Paused", disabled: "Disabled",
-  waiting: "Waiting for first heartbeat", disconnected: "Browser disconnected", stalled: "Stalled",
+  waiting: "Waiting for execution evidence", idle: "No groups due", outcomes_need_attention: "Renewal outcomes need attention",
+  disconnected: "Browser disconnected", stalled: "Stalled",
   missed_run: "Daily run missed", publication_failures: "Repeated publication failures", restricted: "Account restriction",
 };
 const renewalTime = (value) => value ? new Date(value).toLocaleString("en-GB", {
@@ -81,6 +83,8 @@ function RenewalsPanel({ data, error, onChanged }) {
           <Metric label="Next scheduled run (UK time)" value={renewalTime(data.nextRunAt)} />
         </div>
         {data.agent?.restriction ? <p className="notice notice--warning">{data.agent.restriction}</p> : null}
+        {(data.agent?.issues || []).filter(issue => issue.severity === "warning").map(issue =>
+          <p key={issue.fingerprint} className="notice notice--warning">{issue.detail}</p>)}
         <p>
           <label><input type="checkbox" checked={data.settings.enabled} disabled={busy} onChange={(e) => post({ action: "settings", enabled: e.target.checked }, e.target.checked ? "Enable the daily renewal queue?" : "Disable the daily renewal queue?")} /> Daily renewals enabled</label>
           {" · "}Max per day{" "}
@@ -92,6 +96,9 @@ function RenewalsPanel({ data, error, onChanged }) {
             <Metric label="Confirmed submissions" value={latest.confirmedSubmissions} /><Metric label="Accepted" value={latest.accepted} />
             <Metric label="Pending approvals" value={latest.awaitingApproval} /><Metric label="Failures" value={latest.failures} /><Metric label="Groups requiring attention" value={latest.needsAttention} />
           </div>
+          {(latest.previousPending || latest.previousDeclined || latest.previousConfirmed) ? <p>
+            Previous submissions reviewed · {latest.previousConfirmed} confirmed · {latest.previousPending} pending · {latest.previousDeclined} rejected
+          </p> : null}
           {latest.stopped ? <div className="notice notice--warning">Stopped {fmt(latest.stopped.at)}: {latest.stopped.reason}</div> : null}
           <details><summary>Queue for {latest.date} ({latest.queued})</summary><div className="competence-report-list">{latest.groups.map((g) => (
             <div key={g.groupKey}><strong><a href={g.url} target="_blank" rel="noreferrer">{g.name}</a></strong> · {RENEWAL_STATUS[g.status] || g.status}{g.reason ? ` (${g.reason})` : ""}

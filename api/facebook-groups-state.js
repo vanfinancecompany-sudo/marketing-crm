@@ -77,6 +77,8 @@ const POST_STATE_FIELDS = Object.freeze([
   "pipeline",
   "postStatus",
   "lastPostedAt",
+  "lastRenewalPostedAt",
+  "lastPostPermalink",
   "lastAcceptedAt",
   "lastPostCheckAt",
   "lastPostDetectedState",
