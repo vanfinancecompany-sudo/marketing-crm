@@ -98,7 +98,7 @@
     },
     {
       "path": "/api/rent2buy-group-renewals?run=1",
-      "schedule": "0 7 * * *"
+      "schedule": "0 * * * *"
     }
   ],
   "functions": {

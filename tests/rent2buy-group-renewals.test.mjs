@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
 import { groupDueState, groupPipeline } from "../services/facebookGroupsAgent.js";
-import { runDailyRenewalCheck, handlePost, readRenewals } from "../api/rent2buy-group-renewals.js";
+import { runDailyRenewalCheck, handlePost, readRenewals, authoriseRenewalRequest } from "../api/rent2buy-group-renewals.js";
 
 const now = new Date("2026-11-25T07:00:00Z");
 const url = (id) => "https://www.facebook.com/groups/" + id + "/";
@@ -59,7 +62,7 @@ function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
         const key = name === "rent2buy_group_renewal_runs" ? "run_date" : name === "conversation_channel_status" ? "channel" : "id";
         const hit = t[name].find((r) => r[key] === payload[key]);
         if (hit) { if (!opts.ignoreDuplicates) Object.assign(hit, payload); } else t[name].push({ ...payload });
-        return { error: null };
+        return { data: hit && opts.ignoreDuplicates ? [] : [hit || payload], error: null };
       }
       if (op === "insert") {
         if (t[name].some(r => r.source_id === payload.source_id)) return { error: { code: "23505" } };
@@ -79,17 +82,106 @@ function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
   } };
 }
 
-test("one run per day (repeat or concurrent cron calls are harmless); disabled means no run", async () => {
-  const db = fakeDb({ groups: [fixture("ok"), fixture("two")] });
+test("hourly scans append newly due groups while preserving the daily cap, outcomes and review holds", async () => {
+  const db = fakeDb({ maxDaily: 2, groups: [fixture("ok"), fixture("later", { lastPostedAt: "2026-11-18T08:00:00Z" }),
+    fixture("after-cap", { lastPostedAt: "2026-11-18T09:00:00Z" })] });
   const first = await runDailyRenewalCheck(db, now);
-  assert.equal(first.queued, 2);
-  assert.equal((await runDailyRenewalCheck(db, new Date("2026-11-25T09:00:00Z"))).alreadyChecked, true);
+  assert.equal(first.queued, 1);
+  const run = db.t.rent2buy_group_renewal_runs[0];
+  run.outcomes[url("ok")] = { status: "needs_attention", duplicateRisk: true };
+  run.plan.reviews = { [url("ok")]: { result: "unknown" } };
+  const later = new Date("2026-11-25T08:01:00Z");
+  assert.equal((await runDailyRenewalCheck(db, later)).added, 1);
+  assert.equal((await runDailyRenewalCheck(db, later)).alreadyChecked, true);
+  assert.equal((await runDailyRenewalCheck(db, new Date("2026-11-25T09:00:00Z"))).added, 0);
+  assert.deepEqual(run.plan.groups.map((group) => group.name), ["ok", "later"]);
+  assert.equal(run.plan.groups[1].queuedAt, later.toISOString());
+  assert.equal(run.plan.reviews[url("ok")].result, "unknown");
+  assert.equal(run.outcomes[url("ok")].duplicateRisk, true);
+  assert.equal(run.checked_at, now.toISOString());
   assert.equal(db.t.rent2buy_group_renewal_runs.length, 1);
   const off = fakeDb({ enabled: false, groups: [fixture("ok")] });
   assert.equal((await runDailyRenewalCheck(off, now)).disabled, true);
   assert.equal(off.t.rent2buy_group_renewal_runs.length, 0);
   const capped = fakeDb({ maxDaily: 1, groups: [fixture("ok"), fixture("two")] });
   assert.equal((await runDailyRenewalCheck(capped, now)).queued, 1, "uses the CRM maximum setting");
+});
+
+test("a worker token can report a heartbeat only, in the environment where it was issued", () => {
+  const environment = { MARKETING_CUSTOMER_DATABASE_API_KEY: "test-only-key", VERCEL_ENV: "production" };
+  const token = createHmac("sha256", environment.MARKETING_CUSTOMER_DATABASE_API_KEY)
+    .update("rent2buy-group-renewals:heartbeat:v1:production").digest("hex");
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  assert.equal(authoriseRenewalRequest(request, { action: "heartbeat" }, environment), "worker");
+  for (const action of ["heartbeat-token", "settings", "claim", "submission", "review", "outcome"]) {
+    assert.equal(authoriseRenewalRequest(request, { action }, environment), "");
+  }
+  assert.equal(authoriseRenewalRequest({ ...request, method: "GET" }, null, environment), "");
+  assert.equal(authoriseRenewalRequest(request, { action: "heartbeat" }, { ...environment, VERCEL_ENV: "preview" }), "");
+});
+
+test("background alarms report while idle, survive a worker restart, and recover the elected tab when due", async () => {
+  const origin = "https://marketing-crm-six.vercel.app";
+  const stateKey = "vfcRent2BuyGroupRenewal";
+  const renewalAlarm = "vfcRent2BuyGroupRenewalAlarm";
+  const approvalAlarm = "vfcFacebookGroupApprovalMonitorAlarm";
+  const storage = {
+    [stateKey]: { origin, automation: { enabled: true, url: `${origin}/rent2buy-groups`, tabId: 5, scheduleVersion: 2, wakeAt: now.getTime() + 3_600_000 } },
+    vfcRent2BuyRenewalHeartbeat: { origin, token: "f".repeat(64) },
+  };
+  const alarms = new Map();
+  const heartbeats = [];
+  const reloaded = [];
+  const wakes = [];
+  let clock = now.getTime();
+  let discarded = false;
+  let acknowledge = true;
+  const source = readFileSync(new URL("../browser-extension/marketplace-helper/background.js", import.meta.url), "utf8");
+  function startWorker() {
+    const listeners = {};
+    const ignoredEvent = { addListener() {} };
+    const worker = runInNewContext(`${source}\n;({ wait: () => Promise.all([renewalWork, renewalTick]) })`, {
+      Date: class extends Date {
+        constructor(...args) { super(...(args.length ? args : [clock])); }
+        static now() { return clock; }
+      },
+      URL, AbortSignal, setTimeout, clearTimeout,
+      fetch: async (url, init) => { heartbeats.push({ url, ...JSON.parse(init.body) }); return { status: 200 }; },
+      chrome: {
+        storage: { local: { get: async () => ({ ...storage }), set: async (patch) => Object.assign(storage, patch) } },
+        alarms: { get: async (key) => alarms.get(key), create: async (key, value) => alarms.set(key, value),
+          onAlarm: { addListener: (listener) => { listeners.alarm = listener; } } },
+        tabs: { get: async (id) => ({ id, url: `${origin}/rent2buy-groups`, discarded }), onUpdated: ignoredEvent,
+          reload: async (id) => { reloaded.push(id); },
+          sendMessage: async (id, message) => { wakes.push(id); return { ok: acknowledge && message.recoverOwnership }; } },
+        runtime: { getManifest: () => ({ version: "1.2.33" }), onInstalled: ignoredEvent, onStartup: ignoredEvent, onMessage: ignoredEvent },
+      },
+    });
+    return async (name) => { listeners.alarm({ name }); await worker.wait(); };
+  }
+
+  let alarm = startWorker();
+  await alarm(renewalAlarm);
+  const firstSchedule = alarms.get(renewalAlarm);
+  assert.equal(firstSchedule.periodInMinutes, 5);
+  assert.equal(alarms.get(approvalAlarm).periodInMinutes, 60);
+  assert.equal(heartbeats[0].state, "ready");
+  assert.equal(wakes.length, 0, "idle heartbeats don't depend on a CRM tab");
+  clock += 300_000;
+  alarm = startWorker();
+  await alarm(renewalAlarm);
+  assert.equal(heartbeats.length, 2);
+  assert.equal(alarms.get(renewalAlarm), firstSchedule, "a worker restart doesn't postpone the alarm");
+  clock = storage[stateKey].automation.wakeAt;
+  await alarm(approvalAlarm);
+  discarded = true;
+  await alarm(renewalAlarm);
+  assert.equal(heartbeats[2].approvalMonitor.lastAlarmAt, new Date(clock).toISOString());
+  assert.deepEqual(reloaded, [5]);
+  discarded = false;
+  acknowledge = false;
+  await alarm(renewalAlarm);
+  assert.deepEqual(reloaded, [5, 5], "a missed wake also reloads the elected driver");
 });
 
 test("outcomes, stop and settings controls", async () => {
@@ -101,7 +193,7 @@ test("outcomes, stop and settings controls", async () => {
   assert.equal((await handlePost(db, { action: "stop", reason: "Security challenge" }, now)).ok, true);
   const report = await readRenewals(db, now);
   assert.deepEqual(report.latest.groups.map((g) => g.status), ["needs_attention", "stopped"]);
-  assert.equal(report.nextRunAt, "2026-11-26T07:00:00.000Z");
+  assert.equal(report.nextRunAt, "2026-11-25T08:00:00.000Z");
   const s = await handlePost(db, { action: "settings", enabled: false, maxDaily: 500 }, now);
   assert.deepEqual([s.settings.enabled, s.settings.maxDaily], [false, 30]);
 });

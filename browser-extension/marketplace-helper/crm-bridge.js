@@ -200,8 +200,10 @@
     if (message.source === "vfc-marketing-crm" && message.type === "VFC_GROUP_RENEWAL_REQUEST") {
       const command = message.command;
       if (!["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "SET_GROUP_RENEWAL_AUTOMATION",
-          "DEFER_GROUP_RENEWAL_AUTOMATION", "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL", "START_GROUP_RENEWAL_REVIEW"].includes(command)) return;
-      const result = await chrome.runtime.sendMessage({ type: command, jobId: message.jobId, enabled: message.enabled, until: message.until, review: message.review }).catch(() => null);
+          "DEFER_GROUP_RENEWAL_AUTOMATION", "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL", "START_GROUP_RENEWAL_REVIEW",
+          "REGISTER_GROUP_RENEWAL_HEARTBEAT"].includes(command)) return;
+      const result = await chrome.runtime.sendMessage({ type: command, jobId: message.jobId, enabled: message.enabled, until: message.until,
+        review: message.review, token: command === "REGISTER_GROUP_RENEWAL_HEARTBEAT" ? message.token : undefined }).catch(() => null);
       window.postMessage({ source: "vfc-facebook-helper", type: "VFC_GROUP_RENEWAL_RESPONSE",
         id: message.id, ...(result || { ok: false, error: "Renewal helper unavailable" }) }, window.location.origin);
       return;
@@ -274,9 +276,10 @@
     }
   });
 
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "GROUP_RENEWAL_WAKE") {
-      window.postMessage({ source: "vfc-facebook-helper", type: "VFC_GROUP_RENEWAL_WAKE" }, window.location.origin);
+      window.postMessage({ source: "vfc-facebook-helper", type: "VFC_GROUP_RENEWAL_WAKE", recoverOwnership: message.recoverOwnership === true }, window.location.origin);
+      sendResponse({ ok: true });
       return;
     }
     if (message?.type === "MARKETPLACE_PUBLISHED" && message.receipt) {

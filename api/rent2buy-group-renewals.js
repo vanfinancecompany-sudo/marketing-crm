@@ -1,6 +1,7 @@
 import {withCronHealth} from "../lib/cronHealthTelemetry.js";
+import { createHmac, timingSafeEqual } from "node:crypto";
 // Rent2Buy Facebook group renewals: daily queue, reporting and controls.
-// GET ?run=1 (Vercel cron, CRON_SECRET): build today's queue once.
+// GET ?run=1 (Vercel cron, CRON_SECRET): append newly due groups to today's queue.
 // GET (CRM key): reporting and queue. POST (CRM key): settings, browser status, and advert outcomes.
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -13,6 +14,20 @@ import { markGroupPosted, markGroupPostStatus } from "../services/facebookGroups
 
 const PAGE = 500;
 const clean = (v, n = 300) => String(v ?? "").trim().slice(0, n);
+const heartbeatToken = (key, environment) => createHmac("sha256", key)
+  .update(`rent2buy-group-renewals:heartbeat:v1:${environment || "local"}`).digest("hex");
+
+export function authoriseRenewalRequest(req, body, environment = process.env) {
+  const bearer = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "");
+  if (req.method === "GET" && req.query?.run === "1") {
+    return environment.CRON_SECRET && bearer === environment.CRON_SECRET ? "cron" : "";
+  }
+  const key = environment.MARKETING_CUSTOMER_DATABASE_API_KEY;
+  if (!key) return "";
+  if (req.headers?.["x-marketing-customer-database-key"] === key || bearer === key) return "crm";
+  if (req.method !== "POST" || body?.action !== "heartbeat" || !/^[a-f0-9]{64}$/.test(bearer)) return "";
+  return timingSafeEqual(Buffer.from(bearer), Buffer.from(heartbeatToken(key, environment.VERCEL_ENV))) ? "worker" : "";
+}
 const recentRuns = (db) => db.from(RUN_TABLE).select("run_date,checked_at,plan,outcomes,stopped")
   .order("run_date", { ascending: false }).limit(14);
 
@@ -47,13 +62,27 @@ export async function runDailyRenewalCheck(db, now = new Date()) {
   const settings = await readSettings(db);
   if (!settings.enabled) return { disabled: true };
   const date = londonDay(now);
-  const previous = await db.from(RUN_TABLE).select("run_date").eq("run_date", date).maybeSingle();
-  if (previous.error) throw previous.error;
-  if (previous.data) return { alreadyChecked: true, date };
-  const plan = buildRenewalPlan(await getGroups(db), now, settings.maxDaily);
-  const saved = await db.from(RUN_TABLE).upsert({ run_date: date, checked_at: now.toISOString(), plan, outcomes: {}, revision: 0 }, { onConflict: "run_date", ignoreDuplicates: true });
-  if (saved.error) throw saved.error;
-  return { date, due: plan.dueCount, queued: plan.groups.length, needsReview: plan.reviewCount };
+  const rows = await getGroups(db);
+  const initial = buildRenewalPlan(rows, now, settings.maxDaily);
+  const inserted = await db.from(RUN_TABLE).upsert({ run_date: date, checked_at: now.toISOString(), plan: initial, outcomes: {}, revision: 0 }, { onConflict: "run_date", ignoreDuplicates: true }).select("run_date").maybeSingle();
+  if (inserted.error) throw inserted.error;
+  if (inserted.data) return { date, due: initial.dueCount, queued: initial.groups.length, added: initial.groups.length, needsReview: initial.reviewCount };
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let summary;
+    const result = await updateToday(db, now, (run) => {
+      const previous = run.plan || {};
+      if (Date.parse(previous.lastScanAt) >= now.getTime()) return { result: { ok: true } };
+      const plan = buildRenewalPlan(rows, now, settings.maxDaily, previous);
+      if (run.stopped) plan.groups = previous.groups || [];
+      summary = { date, due: plan.dueCount, queued: plan.groups.length,
+        added: plan.groups.length - (previous.groups?.length || 0), needsReview: plan.reviewCount };
+      return { plan };
+    }, date);
+    if (result.ok) return summary || { date, alreadyChecked: true };
+    if (!result.conflict) throw new Error(result.error);
+  }
+  throw new Error("The renewal queue changed while scheduling due groups. The next scan can retry safely.");
 }
 
 async function readRenewalHeartbeat(db, environment) {
@@ -212,7 +241,7 @@ async function reconcilePreviousSubmission(db, body, now) {
     reason: status === "unknown" ? "Facebook did not show this exact advert; duplicate hold retained." : "" } } } }));
 }
 
-export async function handlePost(db, body, now = new Date(), environment = process.env) {
+export async function handlePost(db, body, now = new Date(), environment = process.env, auth = "crm") {
   const action = clean(body?.action, 20);
   if (action === "heartbeat") {
     const state = clean(body.state, 20);
@@ -220,7 +249,8 @@ export async function handlePost(db, body, now = new Date(), environment = proce
     const stamp = now.toISOString();
     const { error } = await db.from("conversation_channel_status").upsert({
       channel: renewalHeartbeatChannel(environment), last_heartbeat_at: stamp, updated_at: stamp,
-      status: { state, reason: clean(body.reason, 200), extension: clean(body.extension, 20), approvalMonitor: approvalMonitorEvidence(body.approvalMonitor, now) },
+      status: { state, reason: clean(body.reason, 200), extension: clean(body.extension, 20), approvalMonitor: approvalMonitorEvidence(body.approvalMonitor, now),
+        ...(auth === "worker" ? { source: "extension-worker" } : {}) },
     }, { onConflict: "channel" });
     if (error) throw error;
     return { ok: true };
@@ -328,20 +358,21 @@ export async function handlePost(db, body, now = new Date(), environment = proce
   return { ok: false, error: "Unknown action" };
 }
 
-async function handler(req, res) {
+export async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
-  const bearer = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "");
   const isRun = req.method === "GET" && req.query?.run === "1";
-  const key = process.env.MARKETING_CUSTOMER_DATABASE_API_KEY;
-  const cron = process.env.CRON_SECRET;
-  if (isRun ? !(cron && bearer === cron) : !(key && (req.headers?.["x-marketing-customer-database-key"] === key || bearer === key))) return res.status(401).json({ error: "Unauthorised" });
-  if (isRun && process.env.VERCEL_ENV !== "production") return res.status(200).json({ disabled: true, reason: "Production only" });
   try {
+    const body = req.method === "POST" ? (typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {}) : null;
+    const auth = authoriseRenewalRequest(req, body);
+    if (!auth) return res.status(401).json({ error: "Unauthorised" });
+    if (isRun && process.env.VERCEL_ENV !== "production") return res.status(200).json({ disabled: true, reason: "Production only" });
+    if (auth === "crm" && body?.action === "heartbeat-token") {
+      return res.status(200).json({ token: heartbeatToken(process.env.MARKETING_CUSTOMER_DATABASE_API_KEY, process.env.VERCEL_ENV) });
+    }
     const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
     if (req.method === "POST") {
-      const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
-      const result = await handlePost(db, body);
+      const result = await handlePost(db, body, new Date(), process.env, auth);
       return res.status(result.ok ? 200 : 400).json(result);
     }
     return res.status(200).json(isRun ? await runDailyRenewalCheck(db) : await readRenewals(db, new Date(), { queueOnly: req.query?.view === "queue" }));

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VFC Facebook Helper",
-  "version": "1.2.32",
+  "version": "1.2.33",
   "description": "Controlled Facebook Marketplace and Groups helper for Van Finance Company and Rent2Buy Vans, with opt-in renewal automation for previously approved Rent2Buy group adverts.",
   "permissions": [
     "storage",

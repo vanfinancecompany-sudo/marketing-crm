@@ -37,7 +37,7 @@ import {
 } from "../services/facebookGroupsAgent.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import { RENEWAL_HEARTBEAT_INTERVAL_MS } from "../lib/rent2buyGroupRenewalMonitor.js";
-import { renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
+import { RENEWAL_SCAN_INTERVAL_MS, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
 import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, MARKETING_ACCESS_HEADER } from "../services/marketingAccess.js";
 
@@ -317,6 +317,7 @@ export default function FacebookGroupsAgentPage({
   );
   const supportsRenewals = isRent2Buy && helperStatus.capabilities.includes("groups-renewals");
   const supportsAutomaticRenewals = supportsRenewals && helperStatus.capabilities.includes("groups-automatic-renewals");
+  const supportsBackgroundHeartbeat = helperStatus.capabilities.includes("groups-renewal-background-heartbeat");
 
   function setRenewalRun(on) {
     renewalRunningRef.current = on;
@@ -351,9 +352,21 @@ export default function FacebookGroupsAgentPage({
     try {
       const helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
       const automatic = helper.automatic && helper.driver;
+      let backgroundHeartbeat = helper.backgroundHeartbeat;
+      if (helper.driver && !backgroundHeartbeat && supportsBackgroundHeartbeat) {
+        try {
+          const { token } = await renewalRequest({ action: "heartbeat-token" });
+          const registration = await requestGroupRenewalHelper("REGISTER_GROUP_RENEWAL_HEARTBEAT", undefined, { token });
+          backgroundHeartbeat = registration.ok;
+        } catch {
+          // Older servers can still accept the existing tab heartbeat during rollout.
+        }
+      }
       if (helper.driver && (automatic || helper.restrictionReason)) {
         const state = helper.restrictionReason ? "restricted" : helper.pending || helper.reviewPending ? "processing" : "ready";
-        await reportRenewalHeartbeat(state, helper.restrictionReason, helper.approvalMonitor).catch(() => {});
+        if (!backgroundHeartbeat || helper.restrictionReportPending) {
+          await reportRenewalHeartbeat(state, helper.restrictionReason, helper.approvalMonitor).catch(() => {});
+        }
         if (helper.restrictionReportPending && lastRenewalHeartbeat.current.state === "restricted") {
           await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESTRICTION");
         }
@@ -362,8 +375,11 @@ export default function FacebookGroupsAgentPage({
         await recordGroupApproval(approval);
         await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_APPROVAL", approval.id);
       }
-      if (helper.reviewPending) return;
       setRenewalAutomatic(Boolean(helper.automatic));
+      if (helper.reviewPending) {
+        if (automatic) setRenewalPolling(true);
+        return;
+      }
       if (helper.automatic && !helper.driver) setRenewalRun(false);
       setRenewalPending(Boolean(helper.pending));
       setRenewalDraft(helper.pending || null);
@@ -392,7 +408,7 @@ export default function FacebookGroupsAgentPage({
         setGroups(updated);
         markVehicleUsed(result.registration, result.vehicleId);
         await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
-        setRenewalMessage(result.groupName + " · submission confirmed");
+        setRenewalMessage(result.groupName + " � submission confirmed");
         return;
       }
       if (result) {
@@ -408,7 +424,7 @@ export default function FacebookGroupsAgentPage({
           setRenewalPolling(false);
           setRenewalAutomatic(false);
         }
-        setRenewalMessage(result.groupName + " · " + result.reason);
+        setRenewalMessage(result.groupName + " � " + result.reason);
         return;
       }
       if ((!renewalRunningRef.current && !automatic) || vehiclesLoading || (automatic && helper.wakeAt > Date.now())) return;
@@ -417,7 +433,7 @@ export default function FacebookGroupsAgentPage({
         setRenewalRun(false);
         if (automatic) {
           const next = Date.parse(nextRunAt);
-          const checkAgain = !settings.enabled || latest?.stopped ? 60 * 60_000 : 15 * 60_000;
+          const checkAgain = !settings.enabled || latest?.stopped ? RENEWAL_SCAN_INTERVAL_MS : RENEWAL_HEARTBEAT_INTERVAL_MS;
           const wakeAt = latest?.date !== today ? Math.min(next || Infinity, Date.now() + checkAgain) : next;
           await deferAutomaticRenewals(new Date(Number.isFinite(wakeAt) ? wakeAt : Date.now() + checkAgain).toISOString());
         }
@@ -443,8 +459,12 @@ export default function FacebookGroupsAgentPage({
       const group = interrupted || cleanGroup || latest.groups.find((item) => item.status === "queued");
       if (!group) {
         setRenewalRun(false);
-        if (automatic) await deferAutomaticRenewals(nextRunAt);
-        setRenewalMessage("No further groups to prepare today. Review exceptions in Conversations & AI.");
+        if (automatic) {
+          const scanDueAt = Date.parse(nextRunAt) - RENEWAL_SCAN_INTERVAL_MS;
+          const latestScan = Date.parse(latest.lastScanAt || latest.checkedAt);
+          await deferAutomaticRenewals(latestScan >= scanDueAt ? nextRunAt : new Date(Date.now() + RENEWAL_HEARTBEAT_INTERVAL_MS).toISOString());
+        }
+        setRenewalMessage("No renewals ready. The next hourly check will pick up newly due groups.");
         return;
       }
       if (automatic) setRenewalPolling(true);
@@ -480,14 +500,14 @@ export default function FacebookGroupsAgentPage({
       const claimed = await renewalRequest({ action: "claim", groupUrl: group.url, jobId: renewal.jobId, automatic, registration: vehicle.registration || vehicle.reg });
       if (!claimed.prepare) {
         clearAutomaticRenewalClaim(renewal.jobId);
-        setRenewalMessage(group.name + " · " + claimed.reason);
+        setRenewalMessage(group.name + " � " + claimed.reason);
         return;
       }
       try {
         await prepareFacebookGroupPost({ group, vehicle, productKey, renewal });
         clearAutomaticRenewalClaim(renewal.jobId);
         setRenewalPending(true);
-        setRenewalMessage(group.name + " · preparing the stock photo and caption.");
+        setRenewalMessage(group.name + " � preparing the stock photo and caption.");
       } catch (error) {
         // An acknowledgement can be lost after the extension already stored the job.
         const current = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
@@ -527,7 +547,7 @@ export default function FacebookGroupsAgentPage({
     const copied = await copyGroupCaptionForFallback(renewalDraft.caption);
     try {
       await requestGroupRenewalHelper("OPEN_GROUP_RENEWAL_DRAFT", renewalDraft.id);
-      setRenewalMessage(copied ? "Caption copied. Paste it and approve with Facebook’s Post button." : "Use Copy caption in the Facebook draft.");
+      setRenewalMessage(copied ? "Caption copied. Paste it and approve with Facebook's Post button." : "Use Copy caption in the Facebook draft.");
     } catch (error) {
       setRenewalMessage(error.message);
     }
@@ -637,7 +657,7 @@ export default function FacebookGroupsAgentPage({
           at: new Date().toISOString(),
         });
         setMessage(
-          `Discovery found ${candidates.length} candidate group${candidates.length === 1 ? "" : "s"}. Live-checking the strongest/stalest candidates now…`,
+          `Discovery found ${candidates.length} candidate group${candidates.length === 1 ? "" : "s"}. Live-checking the strongest/stalest candidates now.`,
         );
         setBusy("inspection");
         startFacebookGroupInspection(scoreFacebookGroups(merged, productKey), productKey, 12)
@@ -854,7 +874,7 @@ export default function FacebookGroupsAgentPage({
 
     const captionCopied = await captionCopyPromise;
     setBusy(`post:${group.id}`);
-    setMessage(`Preparing ${selectedVehicle.registration || selectedVehicle.reg || "the selected van"} for ${group.name}…`);
+    setMessage(`Preparing ${selectedVehicle.registration || selectedVehicle.reg || "the selected van"} for ${group.name}.`);
     try {
       await prepareFacebookGroupPost({
         group,
@@ -974,7 +994,7 @@ export default function FacebookGroupsAgentPage({
 
           <h3>{group.name}</h3>
           <p>
-            Score <strong>{group.score || 0}/100</strong> · {group.members || "Size unknown"} · {checkedLabel(group.lastCheckedAt)}
+            Score <strong>{group.score || 0}/100</strong> � {group.members || "Size unknown"} � {checkedLabel(group.lastCheckedAt)}
           </p>
 
           <div className="posting-card__meta">
@@ -986,21 +1006,21 @@ export default function FacebookGroupsAgentPage({
 
           <div className="notice">
             <strong>Post status:</strong> {postStatusLabel(group)}
-            {group.pendingRegistration ? ` · ${group.pendingRegistration}` : ""}
+            {group.pendingRegistration ? ` � ${group.pendingRegistration}` : ""}
             <br />
             Last post: <strong>{dateLabel(group.lastPostedAt)}</strong>
-            {" · "}Accepted posts: <strong>{Number(group.acceptedPostCount || 0)}</strong>
+            {" � "}Accepted posts: <strong>{Number(group.acceptedPostCount || 0)}</strong>
             {group.lastPostDetectedState ? (
               <>
                 <br />
                 Last Facebook check: <strong>{group.lastPostDetectedState}</strong>
-                {group.lastPostMatchMethod ? ` · ${group.lastPostMatchMethod}` : ""}
-                {` · CRM: ${pipeline === "proven" ? "Proven / Hot" : pipeline === "archived" ? "Archived" : "Awaiting"}`}
+                {group.lastPostMatchMethod ? ` � ${group.lastPostMatchMethod}` : ""}
+                {` � CRM: ${pipeline === "proven" ? "Proven / Hot" : pipeline === "archived" ? "Archived" : "Awaiting"}`}
               </>
             ) : null}
             {pipeline === "proven" ? (
               <>
-                {" · "}Repeat every{" "}
+                {" � "}Repeat every{" "}
                 <select
                   value={Number(group.repeatDays || 7)}
                   onChange={(event) => updateRepeatDays(group, event.target.value)}
@@ -1016,7 +1036,7 @@ export default function FacebookGroupsAgentPage({
           {pipeline === "proven" ? (
             <div className="creative-card__meta">
               {due.due
-                ? `Due now · last posted ${due.daysSincePost} day${due.daysSincePost === 1 ? "" : "s"} ago`
+                ? `Due now � last posted ${due.daysSincePost} day${due.daysSincePost === 1 ? "" : "s"} ago`
                 : `Next reminder in ${due.daysUntilDue} day${due.daysUntilDue === 1 ? "" : "s"}`}
             </div>
           ) : null}
@@ -1033,7 +1053,7 @@ export default function FacebookGroupsAgentPage({
             {!group.archived ? (
               <>
                 <button className="button button--primary" type="button" onClick={() => preparePost(group)} disabled={Boolean(busy)}>
-                  {busy === `post:${group.id}` ? "Preparing…" : pipeline === "proven" ? "Prepare Next Post" : "Prepare Test Post"}
+                  {busy === `post:${group.id}` ? "Preparing." : pipeline === "proven" ? "Prepare Next Post" : "Prepare Test Post"}
                 </button>
                 <button className="button button--ghost" type="button" onClick={() => window.open(group.url, "_blank", "noopener,noreferrer")}>
                   Open Group
@@ -1067,7 +1087,7 @@ export default function FacebookGroupsAgentPage({
   }
 
   if (vehiclesLoading) {
-    return <div className="empty-state">Loading live stock…</div>;
+    return <div className="empty-state">Loading live stock.</div>;
   }
 
   return (
@@ -1084,14 +1104,14 @@ export default function FacebookGroupsAgentPage({
           </div>
           <div className="card-actions">
             <button className="button button--primary" type="button" onClick={discoverGroups} disabled={Boolean(busy)}>
-              {busy === "discovery" ? "Discovering…" : "Discover New Groups"}
+              {busy === "discovery" ? "Discovering." : "Discover New Groups"}
             </button>
             <button className="button button--ghost" type="button" onClick={checkNextGroups} disabled={Boolean(busy)}>
-              {busy === "inspection" ? "Checking…" : "Check Next 12"}
+              {busy === "inspection" ? "Checking." : "Check Next 12"}
             </button>
             <button className="button button--ghost" type="button" onClick={checkPostAcceptance} disabled={Boolean(busy) || !counts.awaiting}>
               {busy === "post-status"
-                ? "Checking Posts…"
+                ? "Checking Posts."
                 : counts.awaiting > 25
                   ? `Check next 25 of ${counts.awaiting} Awaiting Posts`
                   : `Check ${counts.awaiting} Awaiting Posts`}
@@ -1119,17 +1139,17 @@ export default function FacebookGroupsAgentPage({
         <div className="notice">
           <strong>Facebook Helper:</strong>{" "}
           {helperStatus.checking
-            ? "checking connection…"
+            ? "checking connection."
             : helperStatus.connected
-              ? `v${helperStatus.version || "unknown"} connected${helperStatus.capabilities.includes("groups-discovery") ? " · Groups ready" : " · Groups support missing"}${helperStatus.capabilities.includes("groups-auto-approval-monitor") ? " · approval monitor on" : ""}`
+              ? `v${helperStatus.version || "unknown"} connected${helperStatus.capabilities.includes("groups-discovery") ? " � Groups ready" : " � Groups support missing"}${helperStatus.capabilities.includes("groups-auto-approval-monitor") ? " � approval monitor on" : ""}`
               : "not connected to this CRM tab"}
-          {helperStatus.hostname ? ` · ${helperStatus.hostname}` : ""}
+          {helperStatus.hostname ? ` � ${helperStatus.hostname}` : ""}
         </div>
 
         {message ? <div className="notice">{message}</div> : null}
         {isRent2Buy ? <div className="notice">
-          <strong>Daily Proven / Hot renewals</strong>
-          <p>{renewalAutomatic ? "The helper posts each eligible renewal in this Edge profile and records Facebook’s results." :
+          <strong>Proven / Hot renewals</strong>
+          <p>{renewalAutomatic ? "The helper posts each eligible renewal in this Edge profile and records Facebook's results." :
             "Enable automatic renewals for previously approved adverts, or review drafts one by one."}</p>
           {supportsAutomaticRenewals ? <button className="button button--small" type="button" disabled={Boolean(busy)}
             onClick={() => void setAutomaticRenewals(!renewalAutomatic)}>
@@ -1137,10 +1157,10 @@ export default function FacebookGroupsAgentPage({
           </button> : null}
           {!renewalAutomatic ? <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
             onClick={() => setRenewalRun(!renewalRunning)}>
-            {renewalRunning ? "Pause after this group" : "Prepare today’s renewal queue"}
+            {renewalRunning ? "Pause after this group" : "Prepare today's renewal queue"}
           </button> : null}
           {renewalDraft && !renewalDraft.renewal?.automatic ? <details>
-            <summary>{renewalDraft.prepared ? "Review prepared advert" : "Preparing advert"} · {renewalDraft.groupName}</summary>
+            <summary>{renewalDraft.prepared ? "Review prepared advert" : "Preparing advert"} � {renewalDraft.groupName}</summary>
             <p>{renewalDraft.registration}</p>
             <img src={renewalDraft.imageUrl} alt="Prepared stock photo" width="200" />
             <p style={{ whiteSpace: "pre-wrap" }}>{renewalDraft.caption}</p>
@@ -1161,7 +1181,7 @@ export default function FacebookGroupsAgentPage({
         <section className="panel">
           <div className="panel__header">
             <div>
-              <h3>🔥 Proven groups due another advert</h3>
+              <h3>?? Proven groups due another advert</h3>
               <p>These groups have accepted a previous advert and have reached their posting interval.</p>
             </div>
           </div>
@@ -1187,7 +1207,7 @@ export default function FacebookGroupsAgentPage({
         <label className="field">
           <span>Van</span>
           <select value={selectedVehicleId} onChange={(event) => setSelectedVehicleId(event.target.value)}>
-            <option value="">Choose a van…</option>
+            <option value="">Choose a van.</option>
             {rotationVehicles.map((vehicle) => (
               <option key={vehicleKey(vehicle)} value={vehicleKey(vehicle)}>
                 {vehicleLabel(vehicle)}
@@ -1247,7 +1267,7 @@ export default function FacebookGroupsAgentPage({
               disabled={Boolean(busy) || !counts.membershipPending}
             >
               {busy === "membership-inspection"
-                ? "Checking Membership…"
+                ? "Checking Membership."
                 : `Check Pending Membership (${counts.membershipPending})`}
             </button>
           ) : null}

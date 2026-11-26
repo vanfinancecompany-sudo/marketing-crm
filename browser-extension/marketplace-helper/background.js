@@ -8,13 +8,16 @@ const GROUP_POST_JOB_KEY = "vfcPendingFacebookGroupPost";
 const RENEWAL_STATE_KEY = "vfcRent2BuyGroupRenewal";
 const RENEWAL_APPROVAL_RECEIPTS_KEY = "vfcRent2BuyRenewalApprovals";
 const APPROVAL_HEALTH_KEY = "vfcFacebookGroupApprovalHealth";
+const RENEWAL_HEARTBEAT_KEY = "vfcRent2BuyRenewalHeartbeat";
 const RENEWAL_ALARM = "vfcRent2BuyGroupRenewalAlarm";
+const RENEWAL_WAKE_VERSION = 2;
 const RENEWAL_POST_INTERVAL_MS = 60_000;
 const RENEWAL_CRM_ORIGINS = new Set([
   "https://marketing-crm-six.vercel.app",
   "https://marketing-crm-git-codex-rent2buy-8e370c-stuart-westons-projects.vercel.app",
 ]);
 let renewalWork = Promise.resolve();
+let renewalTick;
 
 function withRenewalLock(work) {
   const result = renewalWork.then(work);
@@ -42,8 +45,8 @@ function renewalDriverUrl(value) {
   } catch { return ""; }
 }
 
-function ensureRenewalAlarm() {
-  try { chrome.alarms.create(RENEWAL_ALARM, { periodInMinutes: 5 }); } catch {}
+async function ensureRenewalAlarm() {
+  if (!await chrome.alarms.get(RENEWAL_ALARM)) await chrome.alarms.create(RENEWAL_ALARM, { periodInMinutes: 5 });
 }
 
 async function readRenewalApprovals() {
@@ -51,24 +54,77 @@ async function readRenewalApprovals() {
 }
 
 async function wakeRenewalDriver() {
-  const state = await readRenewal();
-  const driver = state.automation;
+  let state = await readRenewal();
+  let driver = state.automation;
   if (!driver?.url) return;
-  if (!driver.enabled && !state.result?.automatic && !state.restrictionReportPending &&
-      !(await readRenewalApprovals()).some((event) => event.crmOrigin === state.origin)) return;
+  if (driver.scheduleVersion !== RENEWAL_WAKE_VERSION) {
+    driver = { ...driver, scheduleVersion: RENEWAL_WAKE_VERSION, wakeAt: 0 };
+    state = { ...state, automation: driver };
+    await saveRenewal(state);
+  }
+  if (!await renewalDriverNeedsWake(state)) return;
 
   let tab = driver.tabId ? await chrome.tabs.get(driver.tabId).catch(() => null) : null;
   if (renewalDriverUrl(tab?.url) !== driver.url) {
     const candidates = await chrome.tabs.query({ url: driver.url + "*" });
-    tab = candidates.find((candidate) => renewalDriverUrl(candidate.url) === driver.url);
+    tab = candidates.find((candidate) => renewalDriverUrl(candidate.url) === driver.url && !candidate.discarded && !candidate.frozen) ||
+      candidates.find((candidate) => renewalDriverUrl(candidate.url) === driver.url);
     if (!tab) tab = await chrome.tabs.create({ url: driver.url, active: false });
     await saveRenewal({ ...state, automation: { ...driver, tabId: tab.id } });
   }
-  if (tab.discarded) {
+  if (tab.discarded || tab.frozen) {
     await chrome.tabs.reload(tab.id);
     return;
   }
-  await chrome.tabs.sendMessage(tab.id, { type: "GROUP_RENEWAL_WAKE" }).catch(() => {});
+  if (tab.status === "loading") return;
+  let timeout;
+  try {
+    const ack = await Promise.race([
+      chrome.tabs.sendMessage(tab.id, { type: "GROUP_RENEWAL_WAKE", recoverOwnership: true }).catch(() => null),
+      new Promise((resolve) => { timeout = setTimeout(resolve, 5000); }),
+    ]);
+    if (!ack?.ok) await chrome.tabs.reload(tab.id);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function renewalDriverNeedsWake(state) {
+  if (state.pending?.job?.renewal?.automatic || state.result?.automatic || state.restrictionReportPending ||
+      (await readRenewalApprovals()).some((event) => event.crmOrigin === state.origin)) return true;
+  if (state.automation?.enabled !== true) return false;
+  if (!(state.automation.wakeAt > Date.now())) return true;
+  const credential = (await chrome.storage.local.get(RENEWAL_HEARTBEAT_KEY))[RENEWAL_HEARTBEAT_KEY];
+  return credential?.origin !== state.origin;
+}
+
+async function reportBackgroundRenewalHeartbeat() {
+  const [stored, state] = await Promise.all([chrome.storage.local.get(RENEWAL_HEARTBEAT_KEY), readRenewal()]);
+  const credential = stored[RENEWAL_HEARTBEAT_KEY];
+  if (!credential || !RENEWAL_CRM_ORIGINS.has(credential.origin) || credential.origin !== state.origin || !state.automation?.url) return;
+  const [approvalMonitor, activeReview] = await Promise.all([readApprovalHealth(), getGroupAgentState()]);
+  const response = await fetch(`${credential.origin}/api/rent2buy-group-renewals`, {
+    method: "POST", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10000),
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${credential.token}` },
+    body: JSON.stringify({ action: "heartbeat", extension: chrome.runtime.getManifest().version, approvalMonitor,
+      state: state.restricted ? "restricted" : !state.automation.enabled ? "paused" :
+        state.pending || activeReview?.mode === "auto-post-status" ? "processing" : "ready",
+      reason: state.restrictionReason || "" }),
+  });
+  if (response.status === 401) await withRenewalLock(async () => {
+    const current = (await chrome.storage.local.get(RENEWAL_HEARTBEAT_KEY))[RENEWAL_HEARTBEAT_KEY];
+    if (current?.origin === credential.origin && current?.token === credential.token) {
+      await chrome.storage.local.remove(RENEWAL_HEARTBEAT_KEY);
+    }
+  });
+}
+
+function runRenewalTick() {
+  if (!renewalTick) renewalTick = Promise.allSettled([
+    reportBackgroundRenewalHeartbeat(),
+    withRenewalLock(wakeRenewalDriver),
+  ]).finally(() => { renewalTick = null; });
+  return renewalTick;
 }
 
 async function finishRenewal(state, detail) {
@@ -82,7 +138,7 @@ async function finishRenewal(state, detail) {
     attemptedAt: pending.submissionStarted ? new Date(pending.submissionStarted).toISOString() : null,
   };
   const automation = detail.status === "stop" && state.automation ? { ...state.automation, enabled: false } : state.automation;
-  const nextSubmissionAt = pending.submissionStarted ? pending.submissionStarted + RENEWAL_POST_INTERVAL_MS : state.nextSubmissionAt;
+  const nextSubmissionAt = pending.submissionStarted ? pending.submissionStarted + RENEWAL_POST_INTERVAL_MS + Math.floor(Math.random() * 30_000) : state.nextSubmissionAt;
   await saveRenewal({ origin: state.origin, tabId: pending.tabId, result, pending: null, automation, nextSubmissionAt,
     restricted: detail.status === "stop" || state.restricted === true, restrictionReason: detail.status === "stop" ? detail.reason : state.restrictionReason,
     restrictionReportPending: detail.status === "stop" ? Boolean(state.automation) : state.restrictionReportPending });
@@ -124,6 +180,12 @@ async function handleRenewalMessage(message, sender) {
   const state = await readRenewal();
   const senderUrl = renewalDriverUrl(sender?.url);
   const sameDriver = Boolean(senderUrl && state.automation?.url === senderUrl);
+  if (message.type === "REGISTER_GROUP_RENEWAL_HEARTBEAT") {
+    if (!sameDriver || state.automation.tabId !== sender?.tab?.id || !/^[a-f0-9]{64}$/.test(message.token || "")) return { ok: false };
+    await chrome.storage.local.set({ [RENEWAL_HEARTBEAT_KEY]: { origin: senderOrigin(sender), token: message.token } });
+    void reportBackgroundRenewalHeartbeat().catch(() => {});
+    return { ok: true };
+  }
   if (message.type === "SET_GROUP_RENEWAL_AUTOMATION") {
     if (!senderUrl || !sender?.tab?.id || (state.origin && state.origin !== senderOrigin(sender) && (state.pending || state.result))) {
       return { ok: false, error: "Open Rent2Buy Groups on the approved Marketing CRM address to enable automatic renewals" };
@@ -135,8 +197,9 @@ async function handleRenewalMessage(message, sender) {
     }
     await saveRenewal({ ...state, origin: senderOrigin(sender), restricted: enabled ? false : state.restricted,
       restrictionReason: enabled ? "" : state.restrictionReason, restrictionReportPending: enabled ? false : state.restrictionReportPending,
-      automation: { enabled, url: senderUrl, tabId: enabled ? sender.tab.id : state.automation.tabId, wakeAt: 0 } });
-    if (enabled) ensureRenewalAlarm();
+      automation: { enabled, url: senderUrl, tabId: enabled ? sender.tab.id : state.automation.tabId, wakeAt: 0,
+        scheduleVersion: RENEWAL_WAKE_VERSION } });
+    if (enabled) void ensureRenewalAlarm().catch(() => {});
     return { ok: true, automatic: enabled, driver: enabled };
   }
   if (["ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL"].includes(message.type)) {
@@ -173,6 +236,8 @@ async function handleRenewalMessage(message, sender) {
       await finishTimedOutApprovalCheck(activeReview);
     }
     const report = { ok: true, automatic, driver: Boolean(driver), restrictionReason: state.restrictionReason,
+      backgroundHeartbeat: Boolean(driver && (await chrome.storage.local.get(RENEWAL_HEARTBEAT_KEY))[RENEWAL_HEARTBEAT_KEY]?.origin === state.origin),
+      recoverOwnership: Boolean(driver && await renewalDriverNeedsWake(state)),
       restrictionReportPending: state.restrictionReportPending, approvalReceipts: driver ? (await readRenewalApprovals()).filter((event) => event.crmOrigin === state.origin) : [],
       reviewPending: Boolean(activeReview?.mode === "auto-post-status" && activeReview.job.groups?.[0]?.identity && Date.now() - activeReview.startedAt <= 90_000),
       approvalMonitor: driver ? await readApprovalHealth().catch(() => null) : null,
@@ -605,6 +670,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-post-prep",
           "groups-renewals", "groups-automatic-renewals",
           "groups-renewal-reconciliation",
+          "groups-renewal-background-heartbeat",
           "groups-post-status",
           "groups-auto-approval-monitor",
           "groups-state-recovery",
@@ -983,7 +1049,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await saveGroupStatusEvent(event);
         if (event.accepted || event.declined) {
           try {
-            await chrome.action.setBadgeText({ text: event.accepted ? "✓" : "×" });
+            await chrome.action.setBadgeText({ text: event.accepted ? "V" : "�" });
             await chrome.action.setTitle({
               title: event.accepted
                 ? `${event.groupName || "Facebook group"} accepted ${event.registration || "your advert"}`
@@ -1089,7 +1155,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "SET_GROUP_RENEWAL_AUTOMATION", "DEFER_GROUP_RENEWAL_AUTOMATION",
-        "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL", "START_GROUP_RENEWAL_REVIEW",
+        "ACK_GROUP_RENEWAL_RESTRICTION", "ACK_GROUP_RENEWAL_APPROVAL", "START_GROUP_RENEWAL_REVIEW", "REGISTER_GROUP_RENEWAL_HEARTBEAT",
         "GROUP_RENEWAL_READY", "BEGIN_GROUP_RENEWAL_SUBMISSION", "GROUP_RENEWAL_OUTCOME"].includes(message?.type)) {
       sendResponse(await withRenewalLock(() => handleRenewalMessage(message, sender)));
       return;
@@ -1220,21 +1286,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  ensureRenewalAlarm();
+  void ensureRenewalAlarm().catch(() => {});
+  void runRenewalTick();
   ensureApprovalAlarm();
   refreshApprovalBadge().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  ensureRenewalAlarm();
-  withRenewalLock(wakeRenewalDriver).catch(() => {});
+  void ensureRenewalAlarm().catch(() => {});
+  void runRenewalTick();
   ensureApprovalAlarm();
   refreshApprovalBadge().catch(() => {});
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm?.name === RENEWAL_ALARM) {
-    withRenewalLock(wakeRenewalDriver).catch(() => {});
+    void runRenewalTick();
     return;
   }
   if (alarm?.name !== GROUP_APPROVAL_ALARM) return;
@@ -1244,6 +1311,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }).catch(() => {});
 });
 
+void ensureRenewalAlarm().catch(() => {});
 ensureApprovalAlarm();
 refreshApprovalBadge().catch(() => {});
 
