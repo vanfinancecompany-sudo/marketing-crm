@@ -27,12 +27,12 @@ test("stale or conflicting records never exclude a proven group; they become che
   const stale = [fixture("unresolved", { postStatus: "pending" }), fixture("conflict", { joined: false, canPost: false }), fixture("gone", { unavailable: true }), fixture("red", { status: "Red" })];
   const plan = buildRenewalPlan([...stale, ...Array.from({ length: 30 }, (_, i) => fixture("g" + i))], now, 30);
   assert.equal(plan.dueCount, 34);
-  assert.equal(plan.reviewCount, 4);
+  assert.equal(plan.reviewCount, 3);
   assert.equal(plan.groups.length, 30, "daily maximum");
   assert.ok(plan.groups.every((g) => !g.issues.length), "clean groups first");
   const all = buildRenewalPlan(stale, now, 30);
   assert.equal(all.groups.length, 4, "all four still queued");
-  assert.match(all.groups.find((g) => g.name === "unresolved").issues[0], /pending approval or a duplicate/);
+  assert.deepEqual(all.groups.find((g) => g.name === "unresolved").issues, []);
   assert.match(all.groups.find((g) => g.name === "conflict").issues.join(" "), /Membership.*Posting permission/);
   assert.equal(buildRenewalPlan(stale, now, 2).groups.length, 2, "custom maximum");
 });
@@ -75,7 +75,8 @@ function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
       return { data: found.slice(0, count), error: null };
     };
     const b = { select() { return b; }, eq(k, v) { filters.push([k, v]); return b; }, is(k, v) { filters.push([k, v]); return b; }, gte() { return b; }, lt(k, v) { extraFilters.push((r) => r[k] < v); return b; }, gt(k, v) { extraFilters.push((r) => r[k] > v); return b; },
-      contains(k, value) { const [key, fields] = Object.entries(value)[0]; extraFilters.push((r) => Object.entries(fields).every(([field, expected]) => r[k]?.[key]?.[field] === expected)); return b; }, order(k, o = {}) { order = [k, o.ascending !== false]; return b; }, limit(n) { count = n; return b; }, range() { return b; },
+      contains(k, value) { extraFilters.push(r => Object.entries(value).every(([key, expected]) => typeof expected === "object"
+        ? Object.entries(expected).every(([field, inner]) => r[k]?.[key]?.[field] === inner) : r[k]?.[key] === expected)); return b; }, order(k, o = {}) { order = [k, o.ascending !== false]; return b; }, limit(n) { count = n; return b; }, range() { return b; },
       upsert(p, o) { op = "upsert"; payload = p; opts = o || {}; return b; }, update(p) { op = "update"; payload = p; return b; }, insert(p) { op = "insert"; payload = p; return b; },
       maybeSingle() { const r = run(); return Promise.resolve({ data: r.data?.[0] || null, error: null }); }, then(res, rej) { return Promise.resolve(run()).then(res, rej); } };
     return b;
@@ -198,7 +199,7 @@ test("outcomes, stop and settings controls", async () => {
   assert.deepEqual([s.settings.enabled, s.settings.maxDaily], [false, 30]);
 });
 
-test("a renewal can be claimed once, unresolved posts are flagged, and the stopped queue rejects new claims", async () => {
+test("a due advert can be claimed once and the stopped queue rejects new claims", async () => {
   const rows = [fixture("one"), fixture("pending", { postStatus: "pending" }), fixture("three")].map((row) => ({ ...row, group_key: row.group_url }));
   const db = fakeDb({ groups: rows });
   await runDailyRenewalCheck(db, now);
@@ -207,9 +208,7 @@ test("a renewal can be claimed once, unresolved posts are flagged, and the stopp
   assert.equal(competitors.filter((entry) => entry.prepare).length, 1);
   const claimedId = db.t.rent2buy_group_renewal_runs[0].outcomes[url("one")].jobId;
   assert.equal((await claim("one", claimedId)).prepare, true, "the same reserved job can recover its handoff");
-  const blocked = await claim("pending", "job-alpha-456");
-  assert.equal(blocked.prepare, false);
-  assert.match(blocked.reason, /previous submission/);
+  assert.equal((await claim("pending", "job-alpha-456")).prepare, true, "old approval state does not block a new cycle");
   await handlePost(db, { action: "stop", reason: "Security challenge" }, now);
   assert.equal((await claim("three", "job-alpha-789")).ok, false);
 });
@@ -244,7 +243,7 @@ test("automatic posting requires recorded acceptance and compatible group rules"
   await runDailyRenewalCheck(db, now);
   for (const [name, allowed] of [["membership-only", false], ["no-links", false], ["approved", true]]) {
     const claim = await handlePost(db, { action: "claim", groupUrl: url(name), jobId: "auto-preparation-" + name, automatic: true }, now);
-    assert.equal(claim.prepare, allowed, name);
+    assert.equal(claim.prepare === true, allowed, name);
   }
 });
 
@@ -301,18 +300,17 @@ test("London day and next run time", () => {
   assert.equal(nextRunAt(new Date("2026-11-25T06:59:00Z")), "2026-11-25T07:00:00.000Z");
 });
 
-test("read-only reviews release only a verified old acceptance and keep absent or pending adverts blocked", async () => {
+test("historical review rows do not gate new adverts, while explicit rejection still archives the group", async () => {
   const rows = ["accepted", "pending", "declined", "unknown"].map(id => ({ ...fixture(id, {
     postStatus: "not_found", pendingRegistration: "BT74HLM", url: url(id),
   }), group_key: url(id) }));
   const db = fakeDb({ groups: rows });
   await runDailyRenewalCheck(db, now);
-  assert.equal((await handlePost(db, { action: "claim", groupUrl: url("accepted"), jobId: "initial-held-claim", automatic: true,
-    registration: "BW72VFG" }, now)).prepare, false);
   const first = await readRenewals(db, now, { queueOnly: true });
-  assert.equal(first.latest.groups.filter(group => group.review).length, 4);
+  assert.equal(first.latest.groups.filter(group => group.review).length, 0);
   for (const group of first.latest.groups) {
-    const action = { action: "review", groupUrl: group.url, target: renewalReviewIdentity(group.review), result: group.name,
+    const target = renewalReviewIdentity({ kind: "group", registration: "BT74HLM", postedAt: rows[0].state.lastPostedAt });
+    const action = { action: "review", groupUrl: group.url, target, result: group.name,
       observedAt: "2026-11-18T06:03:00Z", permalink: group.url + "posts/41/" };
     if (group.name === "accepted") {
       assert.equal((await handlePost(db, { ...action, permalink: url("wrong") + "posts/41/" }, now)).ok, false);
@@ -326,11 +324,59 @@ test("read-only reviews release only a verified old acceptance and keep absent o
   const reconciled = (await readRenewals(db, now, { queueOnly: true })).latest;
   assert.equal(reconciled.groups.filter(group => group.review).length, 0);
   assert.equal(reconciled.groups.find(group => group.name === "accepted").status, "queued");
-  assert.equal(reconciled.previousPending, 1);
-  assert.equal(reconciled.previousDeclined, 1);
   assert.equal(db.t.marketing_daily_activity_events.length, 0, "checking historic posts does not invent new daily activity");
   for (const row of rows) assert.equal((await handlePost(db, { action: "claim", groupUrl: row.group_url,
-    jobId: `renewal-claim-${row.group_name}`, automatic: true, registration: "BW72VFG" }, now)).prepare, row.group_name === "accepted");
+    jobId: `renewal-claim-${row.group_name}`, automatic: true, registration: "BW72VFG" }, now)).prepare, row.group_name !== "declined");
+});
+
+test("old holds are released, but an unconfirmed click starts the configured interval", async () => {
+  const key = url("group");
+  const row = { ...fixture("group", { postStatus: "awaiting", repeatDays: 10 }), group_key: key };
+  const db = fakeDb({ groups: [row] });
+  const claim = (at,id) => handlePost(db, { action:"claim", groupUrl:key, jobId:id, automatic:true, registration:"BW72VFG" }, at);
+  const first = new Date("2026-11-29T07:00:00Z");
+  await runDailyRenewalCheck(db, first);
+  const run = db.t.rent2buy_group_renewal_runs[0];
+  run.outcomes[key] = {status:"needs_attention",reason:"Review the previous submission before renewing this group"};
+  run.plan.reviews = {[key]:{kind:"group",result:"unknown"}};
+  assert.equal((await readRenewals(db, first, {queueOnly:true})).latest.groups[0].status,"queued");
+  assert.equal((await claim(first,"original-claim")).prepare,true);
+  await handlePost(db, {action:"outcome",groupUrl:key,jobId:"original-claim",status:"needs_attention",duplicateRisk:true},first);
+  const early = new Date("2026-12-08T07:00:00Z");
+  await runDailyRenewalCheck(db, early);
+  assert.equal((await claim(early,"too-early-claim")).prepare,false);
+  const due = new Date("2026-12-09T07:00:00Z");
+  await runDailyRenewalCheck(db, due);
+  assert.equal((await claim(due,"now-due-claim")).prepare,true);
+});
+
+test("manual activity blocks an automatic claim even before group state catches up", async () => {
+  const key = url("manual");
+  const db = fakeDb({groups:[{...fixture("manual"),group_key:key}]});
+  await runDailyRenewalCheck(db, now);
+  db.t.marketing_daily_activity_events.push({id:1,activity_date:londonDay(now),activity_type:"rent2buy_groups_post",source:"facebook_groups",
+    metadata:{group_url:key,registration:"YR22YRG",posting_mode:"manual",submitted_at:now.toISOString()}});
+  const result = await handlePost(db,{action:"claim",groupUrl:key,jobId:"automatic-claim",automatic:true,registration:"BW72VFG"},now);
+  assert.equal(result.prepare,false);
+  assert.match(result.reason,/recorded a submission/);
+});
+
+test("an already recorded manual receipt closes a matching automatic job without a second activity row", async () => {
+  const key = url("overlap"), registration = "YR22YRG", runDate = londonDay(now);
+  const db = fakeDb({groups:[{...fixture("overlap"),group_key:key}]});
+  await runDailyRenewalCheck(db, now);
+  const jobId = "automatic-overlap";
+  assert.equal((await handlePost(db,{action:"claim",groupUrl:key,jobId,automatic:true,registration},now)).prepare,true);
+  const event = {id:1,activity_date:runDate,activity_type:"rent2buy_groups_post",source:"facebook_groups",
+    source_id:groupActivitySourceId("rent2buy",key,registration,runDate),
+    metadata:{group_url:key,registration,posting_mode:"manual",submitted_at:now.toISOString()}};
+  db.t.marketing_daily_activity_events.push(event);
+  const confirmation = {action:"submission",groupUrl:key,jobId,runDate,registration,postedAt:now.toISOString()};
+  assert.equal((await handlePost(db,confirmation,now)).ok,true);
+  assert.equal((await handlePost(db,confirmation,now)).ok,true);
+  assert.equal(db.t.marketing_daily_activity_events.length,1);
+  assert.equal(event.metadata.posting_mode,"manual");
+  assert.equal(db.t.rent2buy_group_renewal_runs[0].outcomes[key].status,"skipped");
 });
 
 test("a verified BW72VFG attempt recovers one receipt, resets the interval and cannot be submitted again", async () => {

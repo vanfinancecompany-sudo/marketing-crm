@@ -37,7 +37,7 @@ import {
 } from "../services/facebookGroupsAgent.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
 import { RENEWAL_HEARTBEAT_INTERVAL_MS } from "../lib/rent2buyGroupRenewalMonitor.js";
-import { RENEWAL_SCAN_INTERVAL_MS, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
+import { groupActivitySourceId, RENEWAL_SCAN_INTERVAL_MS, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
 import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, MARKETING_ACCESS_HEADER } from "../services/marketingAccess.js";
 
@@ -170,7 +170,8 @@ export default function FacebookGroupsAgentPage({
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState("");
   const [renewalRunning, setRenewalRunning] = useState(false);
-  const [renewalAutomatic, setRenewalAutomatic] = useState(false);
+  const [renewalAutomatic, setRenewalAutomatic] = useState(null);
+  const [renewalDriver, setRenewalDriver] = useState(false);
   const [renewalPolling, setRenewalPolling] = useState(false);
   const [renewalPending, setRenewalPending] = useState(false);
   const [renewalDraft, setRenewalDraft] = useState(null);
@@ -182,13 +183,7 @@ export default function FacebookGroupsAgentPage({
   function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt, renewalDate, jobId, automatic, approvalState, permalink }) {
     const activityDate = londonDateKey(postedAt ? new Date(postedAt) : new Date());
     const canonicalUrl = normalizeFacebookGroupUrl(groupUrl || "");
-    const sourceId = [
-      "facebook-group",
-      productKey,
-      activityDate,
-      canonicalUrl.toLowerCase(),
-      registrationKey(registration),
-    ].join("::");
+    const sourceId = groupActivitySourceId(productKey, canonicalUrl, registration, activityDate);
 
     return recordDailyMarketingActivity(groupActivityType(productKey), {
       activityDate,
@@ -326,9 +321,10 @@ export default function FacebookGroupsAgentPage({
 
   async function setAutomaticRenewals(enabled) {
     try {
-      await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled });
+      const status = await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled });
       setRenewalRun(false);
-      setRenewalAutomatic(enabled);
+      setRenewalAutomatic(status.automatic === true);
+      setRenewalDriver(status.driver === true);
       setRenewalPolling(enabled);
       setRenewalMessage(enabled ? "Automatic renewals enabled in this Edge profile." : "Automatic renewals paused.");
       if (enabled) {
@@ -349,9 +345,13 @@ export default function FacebookGroupsAgentPage({
   async function advanceRenewals() {
     if (renewalWork.current) return;
     renewalWork.current = true;
+    let readStatus = false;
     try {
       const helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
-      const automatic = helper.automatic && helper.driver;
+      readStatus = true;
+      const automatic = helper.automatic === true && helper.driver === true;
+      setRenewalAutomatic(helper.automatic === true);
+      setRenewalDriver(helper.driver === true);
       let backgroundHeartbeat = helper.backgroundHeartbeat;
       if (helper.driver && !backgroundHeartbeat && supportsBackgroundHeartbeat) {
         try {
@@ -375,7 +375,6 @@ export default function FacebookGroupsAgentPage({
         await recordGroupApproval(approval);
         await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_APPROVAL", approval.id);
       }
-      setRenewalAutomatic(Boolean(helper.automatic));
       if (helper.reviewPending) {
         if (automatic) setRenewalPolling(true);
         return;
@@ -444,9 +443,10 @@ export default function FacebookGroupsAgentPage({
       const interrupted = saved?.date === today && latest.groups.find((item) => item.groupKey === saved.groupKey &&
         ["queued", "preparing"].includes(item.status));
       if (saved && !interrupted) clearAutomaticRenewalClaim(saved.jobId);
-      const cleanGroup = latest.groups.find(item => item.status === "queued" && !item.review && !item.issues?.length);
-      if (automatic && !interrupted && !cleanGroup && helperStatus.capabilities.includes("groups-renewal-reconciliation")) {
-        const held = latest.groups.find(item => item.review && ["queued", "needs_attention", "failed"].includes(item.status));
+      const readyGroups = latest.groups.filter(item => item.status === "queued" && !item.review);
+      const group = interrupted || readyGroups.find(item => !item.issues?.length) || readyGroups[0];
+      if (automatic && !group && helperStatus.capabilities.includes("groups-renewal-reconciliation")) {
+        const held = latest.groups.find(item => item.review?.kind === "attempt" && ["needs_attention", "failed"].includes(item.status));
         if (held) {
           setRenewalPolling(true);
           await requestGroupRenewalHelper("START_GROUP_RENEWAL_REVIEW", undefined, { review: {
@@ -456,7 +456,6 @@ export default function FacebookGroupsAgentPage({
           return;
         }
       }
-      const group = interrupted || cleanGroup || latest.groups.find((item) => item.status === "queued");
       if (!group) {
         setRenewalRun(false);
         if (automatic) {
@@ -521,6 +520,7 @@ export default function FacebookGroupsAgentPage({
       setRenewalRun(false);
       setRenewalPolling(false);
       setRenewalPending(false);
+      if (!readStatus) { setRenewalAutomatic(null); setRenewalDriver(false); }
       setRenewalMessage(error.message || "Could not continue the renewal queue.");
     } finally {
       renewalWork.current = false;
@@ -1149,13 +1149,14 @@ export default function FacebookGroupsAgentPage({
         {message ? <div className="notice">{message}</div> : null}
         {isRent2Buy ? <div className="notice">
           <strong>Proven / Hot renewals</strong>
-          <p>{renewalAutomatic ? "The helper posts each eligible renewal in this Edge profile and records Facebook's results." :
-            "Enable automatic renewals for previously approved adverts, or review drafts one by one."}</p>
-          {supportsAutomaticRenewals ? <button className="button button--small" type="button" disabled={Boolean(busy)}
+          <p>{renewalAutomatic === null ? "Automatic renewal status is unavailable until this tab reads the Groups Helper." :
+            renewalAutomatic ? (renewalDriver ? "Automatic renewals are enabled. This tab prepares new adverts for eligible groups." :
+              "Automatic renewals are enabled in this Edge profile. Another CRM tab is the driver.") : "Automatic renewals are paused in this Edge profile."}</p>
+          {supportsAutomaticRenewals ? <button className="button button--small" type="button" disabled={Boolean(busy) || renewalAutomatic === null}
             onClick={() => void setAutomaticRenewals(!renewalAutomatic)}>
-            {renewalAutomatic ? "Pause automatic renewals" : "Enable automatic renewals"}
+            {renewalAutomatic === null ? "Automatic status unavailable" : renewalAutomatic ? "Pause automatic renewals" : "Enable automatic renewals"}
           </button> : null}
-          {!renewalAutomatic ? <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
+          {renewalAutomatic === false ? <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
             onClick={() => setRenewalRun(!renewalRunning)}>
             {renewalRunning ? "Pause after this group" : "Prepare today's renewal queue"}
           </button> : null}

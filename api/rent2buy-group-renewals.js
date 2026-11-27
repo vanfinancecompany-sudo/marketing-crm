@@ -7,7 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   OUTCOMES, RUN_TABLE, SETTINGS_TABLE, DEFAULT_DAILY_LIMIT, GROUP_ACTIVITY_SOURCE, RENT2BUY_GROUP_ACTIVITY_TYPE,
   buildRenewalAdvertHistory, buildRenewalPlan, canonicalGroup, clampLimit, groupActivitySourceId, londonDay, nextRunAt, summarizeRenewalRun,
-  renewalPostPermalink, renewalReviewIdentity, renewalReviewTarget, releasedPreviousSubmissionHold, PREVIOUS_SUBMISSION_HOLD, UNRESOLVED_POST,
+  renewalPostPermalink, renewalReviewIdentity, renewalReviewTarget, isHistoricalSubmissionHold, isExpiredAttemptHold, recentRenewalAttempt,
 } from "../lib/rent2buyGroupRenewals.js";
 import { describeRenewalAgent, renewalHeartbeatChannel } from "../lib/rent2buyGroupRenewalMonitor.js";
 import { markGroupPosted, markGroupPostStatus } from "../services/facebookGroupsAgent.js";
@@ -150,12 +150,17 @@ export async function readRenewals(db, now = new Date(), { queueOnly = false, en
     }
     if (entries.length) groupStates = Object.fromEntries((await getGroups(db)).map((row) => [canonicalGroup(row.group_url || row.state?.url), row.state || {}]));
   }
-  const history = entries.map((run) => summarizeRenewalRun(run, events, groupStates));
+  const history = entries.map((run) => summarizeRenewalRun(run, events, groupStates, { currentQueue: run.run_date === today, now }));
   const latest = history[0] || null;
   if (queueOnly && latest?.date === today) {
     for (const group of latest.groups) {
-      const target = renewalReviewTarget(group.groupKey, groupStates[group.groupKey] || {}, entries, today);
-      if (target && entries[0].plan?.reviews?.[group.groupKey]?.target !== renewalReviewIdentity(target)) group.review = target;
+      const target = recentRenewalAttempt(group.groupKey, groupStates[group.groupKey] || {}, entries.slice(1), now);
+      if (!target) continue;
+      if (group.status === "queued") {
+        group.status = "needs_attention";
+        group.reason = "A recent posting attempt is still unconfirmed; allow the configured interval before trying again.";
+      }
+      if (target.registration && entries[0].plan?.reviews?.[group.groupKey]?.target !== renewalReviewIdentity(target)) group.review = target;
     }
   }
   const summary = { today, settings, nextRunAt: settings.enabled ? nextRunAt(now) : null, latest };
@@ -167,7 +172,7 @@ export async function readRenewals(db, now = new Date(), { queueOnly = false, en
 
 // Record what happened to one queued group today, or stop the day safely.
 async function updateToday(db, now, mutate, date = londonDay(now)) {
-  const { data: run, error } = await db.from(RUN_TABLE).select("run_date,plan,outcomes,stopped,revision").eq("run_date", date).maybeSingle();
+  const { data: run, error } = await db.from(RUN_TABLE).select("run_date,checked_at,plan,outcomes,stopped,revision").eq("run_date", date).maybeSingle();
   if (error) throw error;
   if (!run) return { ok: false, error: "No renewal run today" };
   const patch = mutate(run);
@@ -261,12 +266,20 @@ export async function handlePost(db, body, now = new Date(), environment = proce
     const groupKey = canonicalGroup(body.groupUrl);
     const registration = clean(body.registration, 24);
     const event = await readGroupActivity(db, groupKey, registration, body.postedAt);
-    if (!event || !body.jobId || event.metadata?.renewal_job_id !== body.jobId ||
-        event.metadata?.renewal_run_date !== body.runDate) return { ok: false, error: "A matching confirmed activity record is required" };
+    const ownReceipt = event?.metadata?.renewal_job_id === body.jobId && event?.metadata?.renewal_run_date === body.runDate;
+    const manualReceipt = event?.metadata?.posting_mode === "manual" && !event.metadata.renewal_job_id;
+    if (!body.jobId || !(ownReceipt || manualReceipt)) return { ok: false, error: "A matching confirmed activity record is required" };
     return updateToday(db, now, (run) => {
       const existing = run.outcomes?.[groupKey];
       if (existing?.jobId !== body.jobId) return { error: "The preparation ID does not match" };
       if (existing.status === "submitted") return { result: { ok: true } };
+      if (manualReceipt) {
+        if (Date.parse(event.metadata.submitted_at) < Date.parse(run.checked_at) || !Number.isFinite(Date.parse(event.metadata.submitted_at))) {
+          return { error: "The manual activity predates this run" };
+        }
+        return { outcomes: { ...run.outcomes, [groupKey]: { ...existing, status: "skipped", at: now.toISOString(),
+          reason: "The CRM already recorded this advert as a manual submission." } } };
+      }
       return { outcomes: { ...run.outcomes, [groupKey]: { ...existing, status: "submitted", at: now.toISOString() } } };
     }, body.runDate);
   }
@@ -288,39 +301,44 @@ export async function handlePost(db, body, now = new Date(), environment = proce
       .eq("group_key", groupKey).maybeSingle();
     if (error) throw error;
     const stillDue = buildRenewalPlan(current ? [current] : [], now, 1).groups.length > 0;
-    let unresolved = UNRESOLVED_POST.has(current?.state?.postStatus);
-    if (stillDue && !unresolved) {
-      // Keep the duplicate check across daily runs until group state records a newer post.
-      const prior = await Promise.all([{ status: "preparing" }, { duplicateRisk: true }].map((outcome) =>
-        db.from(RUN_TABLE).select("run_date").lt("run_date", londonDay(now))
-          .gt("checked_at", new Date(current.state.lastPostedAt).toISOString())
-          .contains("outcomes", { [groupKey]: outcome }).limit(1)));
-      for (const result of prior) if (result.error) throw result.error;
-      unresolved = prior.some((result) => result.data?.length);
-    }
     const group = current?.state || {};
-    const approved = group.postStatus === "accepted" || Number(group.acceptedPostCount) > 0 || Boolean(group.lastAcceptedAt);
+    let unresolved = null;
+    let postedToday = false;
+    if (stillDue) {
+      const activity = db.from("marketing_daily_activity_events").select("id").eq("activity_date", londonDay(now))
+        .eq("activity_type", RENT2BUY_GROUP_ACTIVITY_TYPE).eq("source", GROUP_ACTIVITY_SOURCE)
+        .contains("metadata", { group_url: groupKey }).limit(1);
+      const priorQueries = [{ status: "preparing" }, { duplicateRisk: true }].map((outcome) =>
+        db.from(RUN_TABLE).select("run_date,checked_at,outcomes").lt("run_date", londonDay(now))
+          .contains("outcomes", { [groupKey]: outcome }).order("run_date", { ascending: false }).limit(92));
+      const [receipt, ...prior] = await Promise.all([activity, ...priorQueries]);
+      if (receipt.error) throw receipt.error;
+      for (const result of prior) if (result.error) throw result.error;
+      postedToday = Boolean(receipt.data?.length);
+      unresolved = recentRenewalAttempt(groupKey, group, prior.flatMap(result => result.data || []), now);
+    }
     const rulesBlockAdvert = group.status === "Red" || group.linksAllowed === false;
-    const autoBlocked = body.automatic === true && (!approved || rulesBlockAdvert);
-    const prepare = stillDue && !unresolved && !autoBlocked;
-    const reason = unresolved ? PREVIOUS_SUBMISSION_HOLD :
-      autoBlocked ? "A previously accepted advert and compatible group rules are required for an automatic renewal" :
+    const autoBlocked = body.automatic === true && rulesBlockAdvert;
+    const prepare = stillDue && !unresolved && !postedToday && !autoBlocked;
+    const reason = unresolved ? "A recent posting attempt is still unconfirmed; allow the configured interval before trying again." :
+      postedToday ? "The CRM already recorded a submission for this group today." :
+      autoBlocked ? "The group's rules do not allow this advert or its link." :
         "The group is no longer due or eligible";
     const claimed = await updateToday(db, now, (run) => {
       if (run.stopped) return { error: "Renewals have been stopped for today" };
       if (!(run.plan?.groups || []).some((group) => group.groupKey === groupKey)) return { error: "Group is not in today's queue" };
       const existing = run.outcomes?.[groupKey];
-      const review = run.plan.reviews?.[groupKey];
-      if (existing && !releasedPreviousSubmissionHold(existing, review)) {
+      if (existing && !isHistoricalSubmissionHold(existing) && !isExpiredAttemptHold(existing, now)) {
         if (existing.status !== "preparing" || existing.jobId !== jobId) {
           return { result: { ok: true, prepare: false, reason: "This group was already claimed or handled" } };
         }
-        if (prepare) return { result: { ok: true, prepare: true, reason: null } };
+        return { result: { ok: true, prepare, reason: prepare ? null : reason } };
       }
       const attribution = { registration: clean(body.registration, 24), mode: body.automatic === true ? "automatic" : "manual" };
       const entry = prepare
         ? { ...attribution, status: "preparing", jobId }
-        : { ...attribution, registration: existing?.registration || "", status: "needs_attention", reason };
+        : { ...attribution, registration: existing?.registration || "", status: "needs_attention", reason,
+          ...(unresolved ? { retryAt: unresolved.retryAt } : {}) };
       return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...entry, at: now.toISOString() } } };
     });
     return claimed.ok && claimed.prepare === undefined ? { ...claimed, prepare, reason: prepare ? null : reason } : claimed;
