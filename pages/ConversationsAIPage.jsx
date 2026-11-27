@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { approvalMonitorHealth } from "../lib/crmHealthRegistry.js";
 import { clearMarketingAccessKey, getStoredMarketingAccessKey, isMarketingAccessDenied, MARKETING_ACCESS_HEADER, saveMarketingAccessKey, validateMarketingAccessKey } from "../services/marketingAccess.js";
 
 const CHANNEL_LABELS = { ask_me: "Ask Me (websites)", facebook_marketplace: "Facebook Marketplace", facebook_page: "Facebook Page Messenger", whatsapp: "WhatsApp" };
@@ -21,105 +20,6 @@ function Metric({ label, value }) {
   return <div className="competence-metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-const RENEWAL_STATUS = {
-  previous_pending: "Previous advert awaiting admin approval", previous_declined: "Previous advert rejected", previous_confirmed: "Previous advert confirmed",
-  queued: "Queued: open, check and prepare", preparing: "Browser draft or result pending", submitted: "Submission confirmed (awaiting acceptance check)", accepted: "Accepted on Facebook",
-  awaiting_approval: "Awaiting admin approval", declined: "Declined by the group", skipped: "Skipped", failed: "Failed", needs_attention: "Needs manual attention", stopped: "Stopped (account problem)",
-};
-
-const RENEWAL_HEALTH = {
-  healthy: "Healthy", processing: "Processing", paused: "Paused", disabled: "Disabled",
-  waiting: "Waiting for execution evidence", idle: "No groups due", outcomes_need_attention: "Renewal outcomes need attention",
-  disconnected: "Browser disconnected", stalled: "Stalled",
-  missed_run: "Daily run missed", publication_failures: "Repeated publication failures", restricted: "Account restriction",
-};
-const renewalTime = (value) => value ? new Date(value).toLocaleString("en-GB", {
-  timeZone: "Europe/London", dateStyle: "short", timeStyle: "short",
-}) : "-";
-
-function RenewalAdvertHistory({ entries }) {
-  if (!entries?.length) return null;
-  return <details>
-    <summary>Advert history ({entries.length} records in the last 14 days)</summary>
-    <div style={{ overflowX: "auto" }}>
-      <table className="data-table">
-        <thead><tr><th>Group</th><th>Vehicle</th><th>Mode</th><th>Posted (UK time)</th><th>Outcome</th><th>Outcome recorded (UK time)</th><th>Reason</th></tr></thead>
-        <tbody>{entries.map((entry) => <tr key={entry.id}>
-          <td><a href={entry.url} target="_blank" rel="noreferrer">{entry.name}</a></td>
-          <td>{entry.registration || "-"}</td>
-          <td>{entry.mode === "automatic" ? "Automatic" : "Manual"}</td>
-          <td>{renewalTime(entry.postedAt)}</td>
-          <td>{RENEWAL_STATUS[entry.status] || entry.status}</td>
-          <td>{renewalTime(entry.outcomeAt)}</td>
-          <td>{entry.reason || "-"}</td>
-        </tr>)}</tbody>
-      </table>
-    </div>
-  </details>;
-}
-function RenewalsPanel({ data, error, onChanged }) {
-  const [busy, setBusy] = useState(false);
-  async function post(body, confirmText) {
-    if (busy || (confirmText && !window.confirm(confirmText))) return;
-    setBusy(true);
-    try {
-      const response = await fetch("/api/rent2buy-group-renewals", { method: "POST", headers: { "Content-Type": "application/json", [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey() }, body: JSON.stringify(body) });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.ok) window.alert(result.error || "Not saved.");
-      onChanged();
-    } finally { setBusy(false); }
-  }
-  const latest = data?.latest;
-  const isToday = latest && latest.date === data.today;
-  const approval = data?.agent?.approvalMonitor;
-  const approvalHealth = approvalMonitorHealth(approval);
-  return (
-    <section className="panel"><div className="panel__header"><div><div className="eyebrow">Rent2Buy � Facebook Groups</div><h3>Rent2Buy Group Renewal Agent</h3>
-    <p>Hourly renewal checks for Rent2Buy groups that have accepted an advert before.</p></div></div>
-      {error ? <div className="notice notice--warning">{error}</div> : null}
-      {!data ? (!error ? <p>Loading renewal status.</p> : null) : <>
-        <div className="competence-metrics">
-          <Metric label="Agent health" value={RENEWAL_HEALTH[data.agent?.health] || "Unavailable"} />
-          <Metric label="Last heartbeat (UK time)" value={renewalTime(data.agent?.lastHeartbeatAt)} />
-          <Metric label="Last successful hourly scan (UK time)" value={renewalTime(latest?.lastScanAt)} />
-          {latest?.lastScanAt ? <Metric label="Hourly scan outcome" value={`${latest.due} due � ${num(latest.lastScanReviewCount)} need review`} /> : null}
-          <Metric label="Next hourly check (UK time)" value={renewalTime(data.nextRunAt)} />
-          <Metric label="Last approval alarm (UK time)" value={renewalTime(approval?.lastAlarmAt)} />
-        </div>
-        <p className={approvalHealth.state === "warning" ? "notice notice--warning" : ""}>{approvalHealth.detail}</p>
-        {data.agent?.restriction ? <p className="notice notice--warning">{data.agent.restriction}</p> : null}
-        {(data.agent?.issues || []).filter(issue => issue.severity === "warning").map(issue =>
-          <p key={issue.fingerprint} className="notice notice--warning">{issue.detail}</p>)}
-        <p>
-      <label><input type="checkbox" checked={data.settings.enabled} disabled={busy} onChange={(e) => post({ action: "settings", enabled: e.target.checked }, e.target.checked ? "Enable hourly renewal checks?" : "Disable hourly renewal checks?")} /> Hourly renewal checks enabled</label>
-        </p>
-        {latest ? <>
-          <div className="competence-metrics">
-            <Metric label="Groups due" value={latest.due} /><Metric label="In queue" value={latest.queued} /><Metric label="Processed" value={latest.processed} />
-            <Metric label="Confirmed submissions" value={latest.confirmedSubmissions} /><Metric label="Accepted" value={latest.accepted} />
-            <Metric label="Pending approvals" value={latest.awaitingApproval} /><Metric label="Failures" value={latest.failures} /><Metric label="Groups requiring attention" value={latest.needsAttention} />
-          </div>
-          {(latest.previousPending || latest.previousDeclined || latest.previousConfirmed) ? <p>
-            Previous submissions reviewed � {latest.previousConfirmed} confirmed � {latest.previousPending} pending � {latest.previousDeclined} rejected
-          </p> : null}
-          {latest.stopped ? <div className="notice notice--warning">Stopped {fmt(latest.stopped.at)}: {latest.stopped.reason}</div> : null}
-          <details><summary>Queue for {latest.date} ({latest.queued})</summary><div className="competence-report-list">{latest.groups.map((g) => (
-            <div key={g.groupKey}><strong><a href={g.url} target="_blank" rel="noreferrer">{g.name}</a></strong> � {RENEWAL_STATUS[g.status] || g.status}{g.reason ? ` (${g.reason})` : ""}
-              {g.status === "queued" && g.issues.length ? <p>Check first: {g.issues.join(" � ")}</p> : null}
-              {isToday && g.status === "queued" && !latest.stopped ? <p>
-                <button type="button" className="button button--small" disabled={busy} onClick={() => post({ action: "outcome", groupUrl: g.url, status: "skipped", reason: window.prompt("Reason for skipping (e.g. group unavailable, membership required)?") || "" })}>Skip</button>{" "}
-                <button type="button" className="button button--small" disabled={busy} onClick={() => post({ action: "outcome", groupUrl: g.url, status: "needs_attention", reason: window.prompt("What needs attention (e.g. publication not confirmed)?") || "" })}>Needs attention</button>
-              </p> : null}
-            </div>))}</div></details>
-          {isToday && !latest.stopped ? <p><button type="button" className="button button--small" disabled={busy} onClick={() => post({ action: "stop", reason: window.prompt("Account restriction or security challenge details?") || "Account problem" }, "Stop all remaining renewals today?")}>Stop today (account problem)</button></p> : null}
-          <details><summary>Daily renewal history</summary>{data.history.map((h) => <p key={h.date}>{h.date}: {h.confirmedSubmissions} confirmed / {h.queued} queued � {h.accepted} accepted � {h.awaitingApproval} awaiting � {h.skippedOrFailed} skipped/failed � {h.needsAttention} attention{h.stopped ? " � stopped" : ""}</p>)}</details>
-        </> : <p>No daily run recorded yet.</p>}
-        <RenewalAdvertHistory entries={data.advertHistory} />
-      </>}
-    </section>
-  );
-}
-
 export default function ConversationsAIPage() {
   const [accessStatus, setAccessStatus] = useState(() => (getStoredMarketingAccessKey() ? "checking" : "locked"));
   const [accessKey, setAccessKey] = useState("");
@@ -134,8 +34,6 @@ export default function ConversationsAIPage() {
   const [activityPage, setActivityPage] = useState(null);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState("");
-  const [renewalData, setRenewalData] = useState(null);
-  const [renewalError, setRenewalError] = useState("");
 
   async function refresh(range = days) {
     setError("");
@@ -144,11 +42,6 @@ export default function ConversationsAIPage() {
       if (response.status === 401) { clearMarketingAccessKey(); setAccessStatus("locked"); return; }
       if (!response.ok) throw new Error("Dashboard data could not be loaded.");
       setData(await response.json());
-      try {
-        const renewal = await fetch("/api/rent2buy-group-renewals", { headers: { [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey() } });
-        if (!renewal.ok) throw new Error("Renewal reporting not available");
-        setRenewalData(await renewal.json()); setRenewalError("");
-      } catch (caught) { setRenewalError(caught.message); }
     } catch (caught) { setError(caught.message); }
   }
 
@@ -240,7 +133,6 @@ export default function ConversationsAIPage() {
       {fb.byProduct ? ["finance","rent2buy","unknown"].map(product => { const c=fb.byProduct[product]; return <div key={product}><h4>{product === "finance" ? "Van Finance Company" : product === "rent2buy" ? "Rent2Buy" : "Unclassified"}</h4><div className="competence-metrics"><Metric label="Received" value={num(c.received)} /><Metric label="AI replies confirmed" value={num(c.answered)} /><Metric label="Manual replies observed" value={num(c.manual_answered)} /><Metric label="Hand-offs" value={num(c.needs_human)} /><Metric label="Outstanding · all retained history" value={fb.outstanding === null ? "Not available" : num(c.outstanding)} /></div></div>; }) : <p>Product counts unavailable.</p>}
       {fb.outstanding === null ? <p className="notice notice--warning">Outstanding data unavailable; do not assume the inbox is clear.</p> : <details open={Boolean(fb.outstanding?.length)}><summary>Outstanding conversations ({fb.outstanding?.length || 0})</summary>{(fb.outstanding || []).map((e,i) => <p key={i}><strong>{e.product === "finance" ? "Finance" : e.product === "rent2buy" ? "Rent2Buy" : "Unclassified"} · {fmt(e.at)}</strong> · {KIND_TEXT[e.kind] || e.kind} · Ref {e.reference || "—"}{e.reason ? " · "+e.reason : ""}</p>)}</details>}
       </section>
-      <RenewalsPanel data={renewalData} error={renewalError} onChanged={() => refresh(days)} />
       <section className="panel">
         <div className="panel__header">
           <div><div className="eyebrow">Recent activity</div><h3>Questions and AI replies</h3></div>

@@ -1,9 +1,8 @@
 import {createClient} from "@supabase/supabase-js";
 import {timingSafeEqual} from "node:crypto";
 import coreHealth from "./system-health.js";
-import {readRenewalMonitoring} from "./rent2buy-group-renewals.js";
 import {buildMonitorIssues,isMonitorTestEvent,withoutFacebookSessions} from "../lib/conversationsMonitor.js";
-import {WORKERS,workerHealth,normaliseExisting,healthCounts,approvalMonitorHealth,isCurrentServiceRow} from "../lib/crmHealthRegistry.js";
+import {WORKERS,workerHealth,normaliseExisting,healthCounts,isCurrentServiceRow} from "../lib/crmHealthRegistry.js";
 
 const AUTH="x-marketing-customer-database-key";
 function authorised(req,env){
@@ -47,12 +46,6 @@ export async function collectAgentHealth(db,{now=new Date(),environment=process.
    const issues=await data(db.from("stock_watch_monitor_issues").select("title,severity").eq("status","open").limit(10));
    return [item("stock-monitor","DealerKit stock monitor","Agents",state,(age>45*60000?"Monitor run overdue. ":"")+String(run.issue_count||0)+" issues. "+(issues||[]).map(x=>x.title).join(" · "),{lastAt:run.completed_at||run.started_at,href:"/vansco-stock-watch",source:"Stock monitor run log"})];
   }),
-  probe("renewals","Rent2Buy Group Renewal Agent","Agents",async()=>{
-   const r=await readRenewalMonitoring(db,now,environment);
-   const state=({disabled:"disabled",paused:"disabled",healthy:"healthy",idle:"idle",processing:"running",waiting:"unverified",outcomes_need_attention:"warning",restricted:"critical",missed_run:"critical",disconnected:"critical",stalled:"critical",publication_failures:"critical"})[r.health]||"unverified";
-   const detail=(r.issues||[]).map(issue=>issue.detail).join(" · ")||({disabled:"Daily queue is intentionally disabled.",paused:"Automatic renewals were paused in Edge.",idle:"The daily queue ran and found no adverts due.",waiting:"Waiting for a confirmed Facebook outcome or the first run."}[r.health] || `${r.confirmed} confirmed submissions across ${r.due} queued groups.`);
-   return [item("renewals","Rent2Buy Group Renewal Agent","Agents",state,detail,{lastAt:r.checkedAt||r.lastHeartbeatAt,href:"/conversations-ai",source:"Queue outcomes and browser evidence"}),approvalMonitorHealth(r.approvalMonitor,now)];
-  }),
   probe("conversation-source","Marketplace and Ask Me","Agents",async()=>{
    const [fb,events,sessions]=await Promise.all([
     data(db.from("conversation_channel_status").select("last_heartbeat_at,status").eq("channel","facebook_marketplace").maybeSingle()),
@@ -75,7 +68,7 @@ export async function collectAgentHealth(db,{now=new Date(),environment=process.
   }),
   probe("incidents","Recorded agent incidents","Current incidents",async()=>{
    const rows=await data(db.from("conversation_monitor_alerts").select("fingerprint,channel,severity,title,first_seen_at,last_seen_at").eq("status","open").limit(100));
-   return (rows||[]).filter(x=>x.severity!=="info").map(x=>item("incident:"+x.fingerprint,x.title,"Current incidents",x.severity==="critical"?"critical":"warning","Open monitor incident.",{lastAt:x.last_seen_at,href:"/conversations-ai"}));
+   return (rows||[]).filter(x=>x.severity!=="info"&&x.channel!=="rent2buy_group_renewal"&&!x.fingerprint?.startsWith("rent2buy-renewal:")).map(x=>item("incident:"+x.fingerprint,x.title,"Current incidents",x.severity==="critical"?"critical":"warning","Open monitor incident.",{lastAt:x.last_seen_at,href:"/conversations-ai"}));
   })
  ]);
  const rows=sources.flat();
