@@ -1,5 +1,5 @@
 import {withCronHealth} from "../lib/cronHealthTelemetry.js";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 // Rent2Buy Facebook group renewals: daily queue, reporting and controls.
 // GET ?run=1 (Vercel cron, CRON_SECRET): append newly due groups to today's queue.
 // GET (CRM key): reporting and queue. POST (CRM key): settings, browser status, and advert outcomes.
@@ -11,6 +11,13 @@ import {
 } from "../lib/rent2buyGroupRenewals.js";
 import { describeRenewalAgent, renewalHeartbeatChannel } from "../lib/rent2buyGroupRenewalMonitor.js";
 import { markGroupPosted, markGroupPostStatus } from "../services/facebookGroupsAgent.js";
+import { loadWorkerAdvert } from "../lib/rent2buyGroupWorkerStock.js";
+
+const SOUTHAMPTON_TEST_GROUP = "https://www.facebook.com/groups/830909275134315/";
+const WORKER_TOKEN = /^r2b-worker-[a-f0-9]{64}$/;
+const WORKER_ACTIONS = new Set(["worker-next", "worker-reserve", "worker-result", "worker-approval", "worker-heartbeat", "worker-stop", "worker-enable-check"]);
+const WORKER_MANAGEMENT_ACTIONS = new Set(["worker-enroll", "worker-revoke", "worker-test-status", "worker-test-arm", "worker-test-close"]);
+const JOB_ID = /^[a-zA-Z0-9-]{10,80}$/;
 
 const PAGE = 500;
 const clean = (v, n = 300) => String(v ?? "").trim().slice(0, n);
@@ -25,8 +32,29 @@ export function authoriseRenewalRequest(req, body, environment = process.env) {
   const key = environment.MARKETING_CUSTOMER_DATABASE_API_KEY;
   if (!key) return "";
   if (req.headers?.["x-marketing-customer-database-key"] === key || bearer === key) return "crm";
+  if (req.method === "POST" && WORKER_ACTIONS.has(body?.action) && WORKER_TOKEN.test(bearer)) return "background";
   if (req.method !== "POST" || body?.action !== "heartbeat" || !/^[a-f0-9]{64}$/.test(bearer)) return "";
   return timingSafeEqual(Buffer.from(bearer), Buffer.from(heartbeatToken(key, environment.VERCEL_ENV))) ? "worker" : "";
+}
+
+function canRetryComposerForTest(outcome) {
+  return outcome?.status === "needs_attention" && outcome.mode === "automatic" && !outcome.attemptedAt &&
+    !outcome.submissionReservedAt && !outcome.duplicateRisk && !outcome.failureStage &&
+    outcome.reason === "Posting permission or group composer could not be verified";
+}
+
+async function readBackgroundSettings(db) {
+  const { data, error } = await db.from(SETTINGS_TABLE).select("background_token_hash,background_test_date").eq("id", 1).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function verifyBackgroundCredential(db, bearer) {
+  if (!WORKER_TOKEN.test(bearer)) return null;
+  const settings = await readBackgroundSettings(db);
+  const hash = settings.background_token_hash;
+  return /^[a-f0-9]{64}$/.test(hash || "") && timingSafeEqual(Buffer.from(hash, "hex"), createHash("sha256").update(bearer).digest())
+    ? settings : null;
 }
 const recentRuns = (db) => db.from(RUN_TABLE).select("run_date,checked_at,plan,outcomes,stopped")
   .order("run_date", { ascending: false }).limit(14);
@@ -246,6 +274,295 @@ async function reconcilePreviousSubmission(db, body, now) {
     reason: status === "unknown" ? "Facebook did not show this exact advert; duplicate hold retained." : "" } } } }));
 }
 
+async function checkRenewalClaim(db, groupKey, automatic, now) {
+  const { data: current, error } = await db.from("facebook_group_state")
+    .select("group_key,group_url,group_name,rent2buy,state").eq("rent2buy", true)
+    .eq("group_key", groupKey).maybeSingle();
+  if (error) throw error;
+  const stillDue = buildRenewalPlan(current ? [current] : [], now, 1).groups.length > 0;
+  const group = current?.state || {};
+  let unresolved = null;
+  let postedToday = false;
+  if (stillDue) {
+    const activity = db.from("marketing_daily_activity_events").select("id").eq("activity_date", londonDay(now))
+      .eq("activity_type", RENT2BUY_GROUP_ACTIVITY_TYPE).eq("source", GROUP_ACTIVITY_SOURCE)
+      .contains("metadata", { group_url: groupKey }).limit(1);
+    const priorQueries = [{ status: "preparing" }, { duplicateRisk: true }].map(outcome =>
+      db.from(RUN_TABLE).select("run_date,checked_at,outcomes").lt("run_date", londonDay(now))
+        .contains("outcomes", { [groupKey]: outcome }).order("run_date", { ascending: false }).limit(92));
+    const [receipt, ...prior] = await Promise.all([activity, ...priorQueries]);
+    if (receipt.error) throw receipt.error;
+    for (const result of prior) if (result.error) throw result.error;
+    postedToday = Boolean(receipt.data?.length);
+    unresolved = recentRenewalAttempt(groupKey, group, prior.flatMap(result => result.data || []), now);
+  }
+  const blocked = automatic && (group.status === "Red" || group.linksAllowed === false);
+  const prepare = stillDue && !unresolved && !postedToday && !blocked;
+  const reason = unresolved ? "A recent posting attempt is still unconfirmed; allow the configured interval before trying again." :
+    postedToday ? "The CRM already recorded a submission for this group today." :
+    blocked ? "The group's rules do not allow this advert or its link." : "The group is no longer due or eligible";
+  return { prepare, reason, unresolved };
+}
+
+export async function manageBackgroundWorker(db, body, now) {
+  if (body.action === "worker-enroll" || body.action === "worker-revoke") {
+    if (body.action === "worker-revoke") {
+      const { error } = await db.from(SETTINGS_TABLE).update({ background_token_hash: null }).eq("id", 1);
+      if (error) throw error;
+      return { ok: true };
+    }
+    if (!/^[a-f0-9]{64}$/.test(body.hash || "")) return { ok: false, error: "Invalid background worker pairing" };
+    const settings = await readBackgroundSettings(db);
+    if (settings.background_token_hash === body.hash) return { ok: true };
+    const { data, error } = await db.from(SETTINGS_TABLE).update({ background_token_hash: body.hash })
+      .eq("id", 1).is("background_token_hash", null).select("id").maybeSingle();
+    if (error) throw error;
+    return data ? { ok: true } : { ok: false, error: "A background helper is already paired. Revoke it before pairing another." };
+  }
+  const settings = await readBackgroundSettings(db);
+  const date = londonDay(now);
+  const { data: run, error } = await db.from(RUN_TABLE).select("plan,outcomes,stopped").eq("run_date", date).maybeSingle();
+  if (error) throw error;
+  const test = run?.plan?.controlledTest;
+  const outcome = run?.outcomes?.[SOUTHAMPTON_TEST_GROUP];
+  if (body.action === "worker-test-status") return { ok: true,
+    test: test ? { ...test, outcome: test.jobId && test.jobId === outcome?.jobId ? outcome.status : null } : null,
+    used: Boolean(settings.background_test_date), paired: Boolean(settings.background_token_hash),
+  };
+  if (body.action === "worker-test-close") return updateToday(db, now, current => {
+    const existing = current.plan?.controlledTest;
+    const currentOutcome = current.outcomes?.[SOUTHAMPTON_TEST_GROUP];
+    if (!existing || (existing.jobId && currentOutcome?.jobId === existing.jobId && currentOutcome.status === "preparing")) {
+      return { error: "Wait until the controlled job finishes before resuming normal processing" };
+    }
+    return { plan: { ...current.plan, controlledTest: { ...existing, closedAt: now.toISOString() } } };
+  });
+  if (!settings.background_token_hash || settings.background_test_date || !run || test || run.stopped || !(await readSettings(db)).enabled) {
+    return { ok: false, error: "A paired worker and an active queue with unused test authorisation are required" };
+  }
+  const eligibility = await checkRenewalClaim(db, SOUTHAMPTON_TEST_GROUP, true, now);
+  if (!eligibility.prepare) return { ok: false, error: eligibility.reason };
+  // Record the one-use authorisation before making it visible to the worker.
+  const { data: armed, error: armError } = await db.from(SETTINGS_TABLE).update({ background_test_date: date })
+    .eq("id", 1).is("background_test_date", null).select("id").maybeSingle();
+  if (armError) throw armError;
+  if (!armed) return { ok: false, error: "The Southampton authorisation has already been used" };
+  const result = await updateToday(db, now, current => {
+    const existing = current.outcomes?.[SOUTHAMPTON_TEST_GROUP];
+    if (current.stopped || current.plan.controlledTest || !current.plan.groups?.some(group => group.groupKey === SOUTHAMPTON_TEST_GROUP) ||
+        Object.values(current.outcomes || {}).some(item => item.status === "preparing") ||
+        (existing && !canRetryComposerForTest(existing))) return { error: "Southampton is held or outside today's queue, or another advert is preparing" };
+    return { plan: { ...current.plan, controlledTest: { armedAt: now.toISOString() } } };
+  });
+  if (!result.ok) {
+    const { error: releaseError } = await db.from(SETTINGS_TABLE).update({ background_test_date: null }).eq("id", 1).eq("background_test_date", date);
+    if (releaseError) throw releaseError;
+  }
+  return result;
+}
+
+async function readWorkerRun(db, date) {
+  const { data, error } = await db.from(RUN_TABLE).select("run_date,checked_at,plan,outcomes,stopped")
+    .eq("run_date", date).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function nextWorkerJob(db, body, now) {
+  const date = londonDay(now);
+  if (!JOB_ID.test(body.jobId || "")) return { ok: false, error: "Invalid worker request ID" };
+  if (!(await readSettings(db)).enabled) return { ok: true, paused: true };
+  const run = await readWorkerRun(db, date);
+  if (!run || run.stopped) return { ok: true, stopped: run?.stopped?.reason || "" };
+  const unfinished = Object.entries(run.outcomes || {}).filter(([, entry]) => entry.mode === "automatic" && entry.status === "preparing");
+  const expired = unfinished.filter(([, entry]) => now.getTime() - Date.parse(entry.at) >= 5 * 60_000);
+  if (expired.length) {
+    const changed = await updateToday(db, now, current => {
+      const outcomes = { ...current.outcomes };
+      for (const [groupUrl, entry] of expired) {
+        const active = outcomes[groupUrl];
+        if (active?.jobId !== entry.jobId || active.status !== "preparing") continue;
+        const duplicateRisk = Boolean(active.submissionReservedAt || !active.workerJob);
+        outcomes[groupUrl] = { ...active, status: "needs_attention", duplicateRisk, at: now.toISOString(),
+          ...(duplicateRisk ? { attemptedAt: active.submissionReservedAt || active.at, failureStage: "publication" } : {}),
+          reason: duplicateRisk ? "The interrupted worker did not report a submission outcome. Check Facebook before retrying." :
+            "The worker stopped before reserving the Facebook submission" };
+      }
+      return { outcomes };
+    });
+    return changed.ok ? { ok: true, checkedGroup: true } : changed;
+  }
+  const existing = Object.values(run.outcomes || {}).find(entry => entry.jobId === body.jobId);
+  if (existing) return { ok: true, job: existing.status === "preparing" && !existing.submissionReservedAt ? existing.workerJob : null,
+    resetRotation: existing.resetRotation === true };
+  if (unfinished.length) return { ok: true, busy: true };
+  const controlled = run.plan.controlledTest && !run.plan.controlledTest.closedAt;
+  if (controlled && run.plan.controlledTest.jobId) return { ok: true, controlledTest: true };
+  const { latest, nextRunAt } = await readRenewals(db, now, { queueOnly: true });
+  if (latest?.date !== date || latest.stopped) return { ok: true, wakeAt: nextRunAt };
+  const ready = latest.groups.filter(item => item.status === "queued" && !item.review);
+  const group = controlled ? latest.groups.find(item => item.groupKey === SOUTHAMPTON_TEST_GROUP && !item.review &&
+    (item.status === "queued" || canRetryComposerForTest(run.outcomes?.[item.groupKey]))) :
+    ready.find(item => !item.issues?.length) || ready[0];
+  if (!group) {
+    const held = !controlled && latest.groups.find(item => item.review?.kind === "attempt" && ["needs_attention", "failed"].includes(item.status));
+    const target = held?.review;
+    return { ok: true, wakeAt: nextRunAt, controlledTest: Boolean(controlled), ...(target ? { review: {
+      url: held.url, name: held.name, registration: target.registration, postedAt: target.postedAt,
+      reviewKind: target.kind, permalink: target.permalink, identity: renewalReviewIdentity(target),
+    } } : {}) };
+  }
+  const eligibility = await checkRenewalClaim(db, group.groupKey, true, now);
+  const vehicleIds = Array.isArray(body.usedVehicleIds) ? body.usedVehicleIds.filter(id => typeof id === "string" && id.length < 100).slice(-500) : [];
+  const { job, resetRotation } = eligibility.prepare
+    ? await loadWorkerAdvert(db, group, { date, jobId: body.jobId, automatic: true }, vehicleIds)
+    : { job: null, resetRotation: false };
+  if (eligibility.prepare && !job) return { ok: true, wakeAt: nextRunAt, noStock: true };
+  const claim = await updateToday(db, now, current => {
+    const previous = current.outcomes?.[group.groupKey];
+    const test = current.plan.controlledTest;
+    const testActive = Boolean(test && !test.closedAt);
+    if (current.stopped || testActive !== Boolean(controlled) || (testActive && (test.jobId || group.groupKey !== SOUTHAMPTON_TEST_GROUP)) ||
+        !current.plan.groups?.some(item => item.groupKey === group.groupKey) ||
+        Object.values(current.outcomes || {}).some(entry => entry.mode === "automatic" && entry.status === "preparing") ||
+        (previous && !isHistoricalSubmissionHold(previous) && !isExpiredAttemptHold(previous, now) &&
+          !(testActive && canRetryComposerForTest(previous)))) return { error: "The queue changed before the worker could claim this group" };
+    const entry = job ? { status: "preparing", registration: job.registration, mode: "automatic", jobId: job.id,
+      workerJob: job, resetRotation, at: now.toISOString() } :
+      { status: "needs_attention", mode: "automatic", reason: eligibility.reason, at: now.toISOString(),
+        ...(eligibility.unresolved ? { retryAt: eligibility.unresolved.retryAt } : {}) };
+    return { outcomes: { ...current.outcomes, [group.groupKey]: entry },
+      ...(controlled && job ? { plan: { ...current.plan, controlledTest: { ...test, jobId: job.id } } } : {}) };
+  });
+  return claim.ok ? { ok: true, job, resetRotation, checkedGroup: true } : claim;
+}
+
+function workerJobIdentity(body) {
+  const groupUrl = canonicalGroup(body.groupUrl);
+  return groupUrl && JOB_ID.test(body.jobId || "") && /^\d{4}-\d{2}-\d{2}$/.test(body.runDate || "") ? groupUrl : "";
+}
+
+async function reserveWorkerPost(db, body, now) {
+  const groupUrl = workerJobIdentity(body);
+  if (!groupUrl || body.runDate !== londonDay(now) || !(await readSettings(db)).enabled) {
+    return { ok: false, error: "The automatic claim is invalid, expired or paused" };
+  }
+  const eligibility = await checkRenewalClaim(db, groupUrl, true, now);
+  if (!eligibility.prepare) return { ok: false, error: eligibility.reason };
+  const reserved = await updateToday(db, now, run => {
+    const entry = run.outcomes?.[groupUrl];
+    const test = run.plan.controlledTest;
+    if (run.stopped || (test && !test.closedAt && test.jobId !== body.jobId) ||
+        !entry?.workerJob || entry.jobId !== body.jobId || entry.status !== "preparing" || entry.submissionReservedAt ||
+        now.getTime() - Date.parse(entry.at) >= 120_000) {
+      return { error: "The automatic claim cannot be authorised to post" };
+    }
+    if (Object.values(run.outcomes || {}).some(item => now.getTime() - Date.parse(item.submissionReservedAt) < 60_000)) {
+      return { error: "The automatic posting interval has not elapsed" };
+    }
+    return { outcomes: { ...run.outcomes, [groupUrl]: { ...entry, submissionReservedAt: now.toISOString() } } };
+  });
+  return reserved.ok ? { ...reserved, reservedAt: now.toISOString() } : reserved;
+}
+
+async function saveWorkerSubmission(db, run, entry, groupUrl, body, now) {
+  const postedAt = entry.submissionReservedAt || body.postedAt;
+  const timestamp = Date.parse(postedAt);
+  if ((entry.workerJob && !entry.submissionReservedAt) || !Number.isFinite(timestamp) ||
+      timestamp < Date.parse(run.checked_at) || timestamp > now.getTime() + 60_000 ||
+      !["accepted", "pending", "submitted"].includes(body.approvalState)) return { ok: false, error: "The claim has no valid submission evidence" };
+  const group = await db.from("facebook_group_state").select("state,group_name").eq("group_key", groupUrl).eq("rent2buy", true).maybeSingle();
+  if (group.error) throw group.error;
+  const current = group.data?.state;
+  if (!current) return { ok: false, error: "The Rent2Buy group is missing" };
+  const registration = entry.registration;
+  const eventDate = londonDay(new Date(postedAt));
+  const permalink = renewalPostPermalink(body.permalink, groupUrl);
+  const metadata = { destination: "Rent2Buy Facebook Groups", group_url: groupUrl, group_name: group.data.group_name,
+    registration, submitted_at: postedAt, posting_mode: "automatic", renewal_run_date: run.run_date,
+    renewal_job_id: entry.jobId, approval_outcome: body.approvalState, ...(permalink ? { post_permalink: permalink } : {}) };
+  const inserted = await db.from("marketing_daily_activity_events").insert({ activity_date: eventDate, activity_type: RENT2BUY_GROUP_ACTIVITY_TYPE,
+    source: GROUP_ACTIVITY_SOURCE, source_id: groupActivitySourceId("rent2buy", groupUrl, registration, eventDate),
+    quantity: 1, occurred_at: postedAt, metadata });
+  if (inserted.error && inserted.error.code !== "23505") throw inserted.error;
+  if (inserted.error) {
+    const prior = (await readGroupActivity(db, groupUrl, registration, postedAt))?.metadata;
+    if (prior?.renewal_job_id !== entry.jobId && !(prior?.posting_mode === "manual" && !prior.renewal_job_id)) {
+      return { ok: false, error: "An existing receipt needs manual identity review" };
+    }
+    if (prior?.posting_mode === "manual") {
+      return handlePost(db, { action: "submission", groupUrl, registration, postedAt, runDate: run.run_date, jobId: entry.jobId }, now);
+    }
+  }
+  if (!(Date.parse(current.lastPostedAt) >= timestamp)) {
+    const [updated] = markGroupPosted([{ ...current, url: groupUrl }], groupUrl, {
+      postedAt, registration, renewalPost: true, approvalState: body.approvalState, permalink,
+    });
+    const saved = await db.from("facebook_group_state").update({ state: updated, updated_at: now.toISOString() })
+      .eq("group_key", groupUrl).eq("state", JSON.stringify(current)).select("group_key").maybeSingle();
+    if (saved.error) throw saved.error;
+    if (!saved.data) return { ok: false, conflict: true, error: "The group changed while saving its receipt" };
+  }
+  return handlePost(db, { action: "submission", groupUrl, registration, postedAt, runDate: run.run_date, jobId: entry.jobId }, now);
+}
+
+async function recordWorkerResult(db, body, now) {
+  const groupUrl = workerJobIdentity(body);
+  if (!groupUrl || body.runDate > londonDay(now)) return { ok: false, error: "Invalid worker outcome identity" };
+  const run = await readWorkerRun(db, body.runDate);
+  const entry = run?.outcomes?.[groupUrl];
+  if (entry?.jobId !== body.jobId || entry.mode !== "automatic") return { ok: false, error: "No matching automatic claim" };
+  if (entry.status !== "preparing") {
+    if (body.status === "submitted" && entry.status !== "submitted" && entry.status !== "skipped") {
+      return { ok: false, error: "An interrupted claim has late Facebook evidence that requires review" };
+    }
+    return { ok: true, status: entry.status };
+  }
+  if (body.status === "submitted") return saveWorkerSubmission(db, run, entry, groupUrl, body, now);
+  const attemptedAt = entry.submissionReservedAt || body.attemptedAt;
+  return handlePost(db, { action: body.status === "stop" ? "stop" : "outcome", status: body.status, groupUrl,
+    jobId: entry.jobId, runDate: run.run_date, reason: body.reason, attemptedAt, failureStage: body.failureStage,
+    duplicateRisk: Boolean(entry.submissionReservedAt || body.duplicateRisk) }, now);
+}
+
+async function recordWorkerApproval(db, body, now) {
+  if (body.target) return reconcilePreviousSubmission(db, { ...body, action: "review" }, now);
+  const groupUrl = canonicalGroup(body.groupUrl);
+  const receipt = await readGroupActivity(db, groupUrl, clean(body.registration, 24), body.postedAt);
+  if (receipt?.metadata?.posting_mode !== "automatic" || receipt.metadata.submitted_at !== body.postedAt) {
+    return { ok: false, error: "No matching automatic approval receipt" };
+  }
+  const result = await saveApproval(db, body, now);
+  if (!result.ok) return result;
+  const group = await db.from("facebook_group_state").select("state").eq("group_key", groupUrl).eq("rent2buy", true).maybeSingle();
+  if (group.error) throw group.error;
+  const current = group.data?.state;
+  if (!current || current.lastPostedAt !== body.postedAt || Date.parse(current.lastPostCheckAt) >= Date.parse(body.checkedAt)) return { ok: true };
+  const [updated] = markGroupPostStatus([{ ...current, url: groupUrl }], { groupUrl, registration: body.registration,
+    checkedAt: body.checkedAt, matchedUrl: renewalPostPermalink(body.permalink, groupUrl),
+    accepted: body.approval === "accepted", declined: body.approval === "declined", pending: body.approval === "pending" });
+  const saved = await db.from("facebook_group_state").update({ state: updated, updated_at: now.toISOString() })
+    .eq("group_key", groupUrl).eq("state", JSON.stringify(current)).select("group_key").maybeSingle();
+  if (saved.error) throw saved.error;
+  return saved.data ? { ok: true } : { ok: false, conflict: true, error: "The group changed while saving approval" };
+}
+
+export async function handleBackgroundWorker(db, body, now, environment) {
+  switch (body.action) {
+    case "worker-next": return nextWorkerJob(db, body, now);
+    case "worker-reserve": return reserveWorkerPost(db, body, now);
+    case "worker-result": return recordWorkerResult(db, body, now);
+    case "worker-approval": return recordWorkerApproval(db, body, now);
+    case "worker-heartbeat": return handlePost(db, { ...body, action: "heartbeat" }, now, environment, "worker");
+    case "worker-stop": return handlePost(db, { action: "stop", reason: body.reason }, now);
+    case "worker-enable-check": {
+      const run = await readWorkerRun(db, londonDay(now));
+      return run?.stopped ? { ok: false, error: "Today's queue is stopped for an account restriction" } : { ok: true };
+    }
+    default: return { ok: false, error: "Unknown background worker action" };
+  }
+}
+
 export async function handlePost(db, body, now = new Date(), environment = process.env, auth = "crm") {
   const action = clean(body?.action, 20);
   if (action === "heartbeat") {
@@ -296,34 +613,7 @@ export async function handlePost(db, body, now = new Date(), environment = proce
     const jobId = clean(body.jobId, 80);
     if (!groupKey || !/^[a-zA-Z0-9-]{10,80}$/.test(jobId)) return { ok: false, error: "A queued group and preparation ID are required" };
     if (!(await readSettings(db)).enabled) return { ok: false, error: "The daily renewal queue is disabled" };
-    const { data: current, error } = await db.from("facebook_group_state")
-      .select("group_key,group_url,group_name,rent2buy,state").eq("rent2buy", true)
-      .eq("group_key", groupKey).maybeSingle();
-    if (error) throw error;
-    const stillDue = buildRenewalPlan(current ? [current] : [], now, 1).groups.length > 0;
-    const group = current?.state || {};
-    let unresolved = null;
-    let postedToday = false;
-    if (stillDue) {
-      const activity = db.from("marketing_daily_activity_events").select("id").eq("activity_date", londonDay(now))
-        .eq("activity_type", RENT2BUY_GROUP_ACTIVITY_TYPE).eq("source", GROUP_ACTIVITY_SOURCE)
-        .contains("metadata", { group_url: groupKey }).limit(1);
-      const priorQueries = [{ status: "preparing" }, { duplicateRisk: true }].map((outcome) =>
-        db.from(RUN_TABLE).select("run_date,checked_at,outcomes").lt("run_date", londonDay(now))
-          .contains("outcomes", { [groupKey]: outcome }).order("run_date", { ascending: false }).limit(92));
-      const [receipt, ...prior] = await Promise.all([activity, ...priorQueries]);
-      if (receipt.error) throw receipt.error;
-      for (const result of prior) if (result.error) throw result.error;
-      postedToday = Boolean(receipt.data?.length);
-      unresolved = recentRenewalAttempt(groupKey, group, prior.flatMap(result => result.data || []), now);
-    }
-    const rulesBlockAdvert = group.status === "Red" || group.linksAllowed === false;
-    const autoBlocked = body.automatic === true && rulesBlockAdvert;
-    const prepare = stillDue && !unresolved && !postedToday && !autoBlocked;
-    const reason = unresolved ? "A recent posting attempt is still unconfirmed; allow the configured interval before trying again." :
-      postedToday ? "The CRM already recorded a submission for this group today." :
-      autoBlocked ? "The group's rules do not allow this advert or its link." :
-        "The group is no longer due or eligible";
+    const { prepare, reason, unresolved } = await checkRenewalClaim(db, groupKey, body.automatic === true, now);
     const claimed = await updateToday(db, now, (run) => {
       if (run.stopped) return { error: "Renewals have been stopped for today" };
       if (!(run.plan?.groups || []).some((group) => group.groupKey === groupKey)) return { error: "Group is not in today's queue" };
@@ -390,6 +680,22 @@ export async function handler(req, res) {
     }
     const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
     if (req.method === "POST") {
+      if (auth === "background") {
+        const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+        if (process.env.VERCEL_ENV !== "production" || !await verifyBackgroundCredential(db, bearer)) {
+          return res.status(401).json({ error: "Background helper is unauthorised or revoked" });
+        }
+        const result = await handleBackgroundWorker(db, body, new Date(), process.env);
+        return res.status(result.ok ? 200 : result.conflict ? 409 : 400).json(result);
+      }
+      if (auth === "crm" && WORKER_MANAGEMENT_ACTIONS.has(body?.action)) {
+        if (process.env.VERCEL_ENV !== "production") return res.status(403).json({ error: "Background helper management is production only" });
+        const result = await manageBackgroundWorker(db, body, new Date());
+        return res.status(result.ok ? 200 : result.conflict ? 409 : 400).json(result);
+      }
+      if (body?.action === "claim" && body.automatic === true) {
+        return res.status(409).json({ error: "Automatic posting requires the background Groups Helper" });
+      }
       const result = await handlePost(db, body, new Date(), process.env, auth);
       return res.status(result.ok ? 200 : 400).json(result);
     }

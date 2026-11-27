@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { requestGroupRenewalHelper } from "../services/facebookGroupsAgent.js";
 import {
   ACTIVE_TAB_CHANNEL_NAME,
   ACTIVE_TAB_HEARTBEAT_MS,
@@ -35,7 +34,6 @@ export default function SingleActiveTabGate({ children }) {
     const tabId = tabIdRef.current;
     let stopped = false;
     let heartbeatTimer = null;
-    let recoveringRenewal = false;
 
     if (typeof BroadcastChannel !== "undefined") {
       channelRef.current = new BroadcastChannel(ACTIVE_TAB_CHANNEL_NAME);
@@ -47,27 +45,6 @@ export default function SingleActiveTabGate({ children }) {
     }
 
     claim(false);
-
-    const recoverRenewalOwner = async () => {
-      if (recoveringRenewal || window.location.pathname.replace(/\/$/, "") !== "/rent2buy-groups" ||
-          readActiveTabLock()?.tabId === tabId) return;
-      recoveringRenewal = true;
-      try {
-        const helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
-        // The extension grants this only to the tab it already owns and only when it has work to service.
-        if (!stopped && helper.driver && helper.recoverOwnership && window.location.pathname.replace(/\/$/, "") === "/rent2buy-groups") claim(true);
-      } catch {
-        // The extension can retry on its next alarm once the bridge is available.
-      } finally {
-        recoveringRenewal = false;
-      }
-    };
-    const onRenewalWake = (event) => {
-      if (event.source === window && event.origin === window.location.origin && event.data?.source === "vfc-facebook-helper" &&
-          event.data?.type === "VFC_GROUP_RENEWAL_WAKE" && event.data?.recoverOwnership) void recoverRenewalOwner();
-    };
-    window.addEventListener("message", onRenewalWake);
-    void recoverRenewalOwner();
 
     const heartbeat = () => {
       if (stopped) return;
@@ -103,7 +80,6 @@ export default function SingleActiveTabGate({ children }) {
       stopped = true;
       if (heartbeatTimer) window.clearTimeout(heartbeatTimer);
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener("message", onRenewalWake);
       window.removeEventListener("pagehide", release);
       window.removeEventListener("beforeunload", release);
       release();

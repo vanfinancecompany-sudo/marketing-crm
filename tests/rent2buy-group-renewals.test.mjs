@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac, webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
 import { groupDueState, groupPipeline } from "../services/facebookGroupsAgent.js";
-import { runDailyRenewalCheck, handlePost, readRenewals, authoriseRenewalRequest } from "../api/rent2buy-group-renewals.js";
+import {
+  runDailyRenewalCheck, handlePost, readRenewals, authoriseRenewalRequest, verifyBackgroundCredential,
+  handleBackgroundWorker, manageBackgroundWorker,
+} from "../api/rent2buy-group-renewals.js";
 
 const now = new Date("2026-11-25T07:00:00Z");
 const url = (id) => "https://www.facebook.com/groups/" + id + "/";
@@ -78,7 +81,8 @@ function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
       contains(k, value) { extraFilters.push(r => Object.entries(value).every(([key, expected]) => typeof expected === "object"
         ? Object.entries(expected).every(([field, inner]) => r[k]?.[key]?.[field] === inner) : r[k]?.[key] === expected)); return b; }, order(k, o = {}) { order = [k, o.ascending !== false]; return b; }, limit(n) { count = n; return b; }, range() { return b; },
       upsert(p, o) { op = "upsert"; payload = p; opts = o || {}; return b; }, update(p) { op = "update"; payload = p; return b; }, insert(p) { op = "insert"; payload = p; return b; },
-      maybeSingle() { const r = run(); return Promise.resolve({ data: r.data?.[0] || null, error: null }); }, then(res, rej) { return Promise.resolve(run()).then(res, rej); } };
+      maybeSingle() { const r = run(); return Promise.resolve({ data: r.data?.[0] || null, error: r.error }); },
+      single() { return b.maybeSingle(); }, then(res, rej) { return Promise.resolve(run()).then(res, rej); } };
     return b;
   } };
 }
@@ -121,22 +125,120 @@ test("a worker token can report a heartbeat only, in the environment where it wa
   assert.equal(authoriseRenewalRequest(request, { action: "heartbeat" }, { ...environment, VERCEL_ENV: "preview" }), "");
 });
 
-test("background alarms report while idle, survive a worker restart, and recover the elected tab when due", async () => {
+test("background credentials are hashed, revocable and scoped to the worker allowlist", async () => {
+  const environment = { MARKETING_CUSTOMER_DATABASE_API_KEY: "test-only-key", VERCEL_ENV: "production" };
+  const token = "r2b-worker-" + "b".repeat(64);
+  const hash = createHash("sha256").update(token).digest("hex");
+  const request = { method: "POST", headers: { authorization: "Bearer " + token } };
+  const db = fakeDb();
+  assert.equal(await verifyBackgroundCredential(db, token), null);
+  assert.equal((await manageBackgroundWorker(db, { action: "worker-enroll", hash }, now)).ok, true);
+  assert.ok(await verifyBackgroundCredential(db, token));
+  assert.equal((await manageBackgroundWorker(db, { action: "worker-enroll", hash: "c".repeat(64) }, now)).ok, false);
+  assert.equal(authoriseRenewalRequest(request, { action: "worker-next" }, environment), "background");
+  for (const action of ["settings", "claim", "heartbeat-token", "worker-enroll", "worker-revoke", "worker-test-arm"]) {
+    assert.equal(authoriseRenewalRequest(request, { action }, environment), "");
+  }
+  assert.equal(authoriseRenewalRequest({ ...request, method: "GET" }, null, environment), "");
+  assert.equal(await verifyBackgroundCredential(db, "r2b-worker-" + "a".repeat(64)), null);
+  await manageBackgroundWorker(db, { action: "worker-revoke" }, now);
+  assert.equal(await verifyBackgroundCredential(db, token), null);
+});
+
+function workerTestDb(...ids) {
+  const groups = ids.map(id => {
+    const group = fixture(id);
+    return { ...group, group_key: group.group_url, state: { ...group.state, url: group.group_url } };
+  });
+  const db = fakeDb({ groups });
+  db.t.rent2buy_group_renewal_settings[0].background_token_hash = "a".repeat(64);
+  db.t.facebook_adverts = [{ id: "stock-1", title: "AB12CDE", is_active: true }, { id: "stock-2", title: "CD34EFG", is_active: true }];
+  db.t.rent_vehicles = ["AB12CDE", "CD34EFG"].map(registration => ({
+    registration, vanDescription: "Ford Transit", monthly: "£499",
+    picture: "https://static.wixstatic.com/media/vehicle.jpg", is_active: true,
+  }));
+  return db;
+}
+
+test("the Southampton worker consumes one attempt, records one activity and tracks approval separately", async () => {
+  const southampton = url("830909275134315");
+  const db = workerTestDb("aaa", "830909275134315");
+  await runDailyRenewalCheck(db, now);
+  const run = db.t.rent2buy_group_renewal_runs[0];
+  run.outcomes[southampton] = { status: "needs_attention", jobId: "old-composer-job", mode: "automatic",
+    reason: "Posting permission or group composer could not be verified" };
+  const arm = () => manageBackgroundWorker(db, { action: "worker-test-arm" }, now);
+  run.outcomes[southampton].duplicateRisk = true;
+  assert.equal((await arm()).ok, false);
+  assert.equal(run.outcomes[southampton].duplicateRisk, true);
+  delete run.outcomes[southampton].duplicateRisk;
+  assert.equal((await arm()).ok, true, "a recorded pre-click composer failure can use the single authorisation");
+  assert.equal((await arm()).ok, false);
+  const request = (action, details = {}, at = now) => handleBackgroundWorker(db, { action, ...details }, at, { VERCEL_ENV: "production" });
+  const jobId = "southampton-test-job";
+  const first = await request("worker-next", { jobId, usedVehicleIds: ["stock-1"] });
+  assert.equal(first.job.groupUrl, southampton);
+  assert.equal(first.job.registration, "CD34EFG");
+  assert.match(first.job.caption, /REGISTRATION: CD34EFG/);
+  assert.deepEqual((await request("worker-next", { jobId })).job, first.job, "lost claim response replays the same stock and job");
+  assert.equal((await request("worker-next", { jobId: "different-job-id" })).job, undefined);
+  const identity = { groupUrl: southampton, jobId, runDate: londonDay(now) };
+  const evidence = { ...identity, status: "submitted", approvalState: "pending" };
+  assert.equal((await request("worker-result", evidence)).ok, false);
+  const grants = await Promise.all([request("worker-reserve", identity), request("worker-reserve", identity)]);
+  assert.equal(grants.filter(item => item.ok).length, 1);
+  assert.equal((await request("worker-result", evidence)).ok, true);
+  assert.equal((await request("worker-result", evidence)).ok, true);
+  assert.equal(db.t.marketing_daily_activity_events.length, 1);
+  const [receipt] = db.t.marketing_daily_activity_events;
+  assert.equal(receipt.metadata.renewal_job_id, jobId);
+  assert.equal(receipt.metadata.posting_mode, "automatic");
+  const group = db.t.facebook_group_state.find(row => row.group_key === southampton);
+  assert.equal(group.state.lastPostedAt, now.toISOString());
+  assert.equal(groupDueState(group.state, now).daysUntilDue, 7);
+  assert.equal(group.state.postCount, 1);
+  assert.equal(receipt.metadata.approval_outcome, "pending");
+  const later = new Date(now.getTime() + 3_600_000);
+  assert.equal((await request("worker-approval", { ...identity, registration: first.job.registration, postedAt: now.toISOString(),
+    approval: "accepted", checkedAt: later.toISOString() }, later)).ok, true);
+  assert.equal(group.state.postStatus, "accepted");
+  assert.equal(receipt.metadata.approval_outcome, "accepted");
+  assert.equal(receipt.metadata.submitted_at, now.toISOString());
+  assert.equal(db.t.marketing_daily_activity_events.length, 1);
+  assert.equal((await request("worker-next", { jobId: "after-controlled-1" }, later)).controlledTest, true);
+  assert.equal((await manageBackgroundWorker(db, { action: "worker-test-close" }, later)).ok, true);
+  assert.equal((await request("worker-next", { jobId: "after-controlled-2" }, later)).job.groupUrl, url("aaa"));
+});
+
+test("an interrupted reserved job retains duplicate protection and allows the next group", async () => {
+  const db = workerTestDb("first", "second");
+  await runDailyRenewalCheck(db, now);
+  const identity = { jobId: "interrupted-job", groupUrl: url("first"), runDate: londonDay(now) };
+  const call = (action, details, at = now) => handleBackgroundWorker(db, { action, ...details }, at, {});
+  assert.equal((await call("worker-next", identity)).job.groupUrl, identity.groupUrl);
+  assert.equal((await call("worker-reserve", identity)).ok, true);
+  const later = new Date(now.getTime() + 6 * 60_000);
+  assert.equal((await call("worker-next", { jobId: "other-request-1" }, later)).checkedGroup, true);
+  const run = db.t.rent2buy_group_renewal_runs[0];
+  assert.equal(run.outcomes[identity.groupUrl].duplicateRisk, true);
+  assert.equal((await call("worker-next", { jobId: "other-request-2" }, later)).job.groupUrl, url("second"));
+  assert.equal(db.t.marketing_daily_activity_events.length, 0);
+});
+
+test("background alarms survive a worker restart and run without any CRM tab", async () => {
   const origin = "https://marketing-crm-six.vercel.app";
   const stateKey = "vfcRent2BuyGroupRenewal";
   const renewalAlarm = "vfcRent2BuyGroupRenewalAlarm";
   const approvalAlarm = "vfcFacebookGroupApprovalMonitorAlarm";
   const storage = {
-    [stateKey]: { origin, automation: { enabled: true, url: `${origin}/rent2buy-groups`, tabId: 5, scheduleVersion: 2, wakeAt: now.getTime() + 3_600_000 } },
-    vfcRent2BuyRenewalHeartbeat: { origin, token: "f".repeat(64) },
+    [stateKey]: { origin, automation: { enabled: true } },
+    vfcRent2BuyBackgroundCredential: { paired: true, token: "r2b-worker-" + "f".repeat(64) },
   };
   const alarms = new Map();
   const heartbeats = [];
   const reloaded = [];
   const wakes = [];
   let clock = now.getTime();
-  let discarded = false;
-  let acknowledge = true;
   const source = readFileSync(new URL("../browser-extension/marketplace-helper/background.js", import.meta.url), "utf8");
   function startWorker() {
     const listeners = {};
@@ -146,15 +248,19 @@ test("background alarms report while idle, survive a worker restart, and recover
         constructor(...args) { super(...(args.length ? args : [clock])); }
         static now() { return clock; }
       },
-      URL, AbortSignal, setTimeout, clearTimeout,
-      fetch: async (url, init) => { heartbeats.push({ url, ...JSON.parse(init.body) }); return { status: 200 }; },
+      URL, AbortSignal, setTimeout, clearTimeout, crypto: webcrypto,
+      fetch: async (url, init) => {
+        const body = JSON.parse(init.body);
+        if (body.action === "worker-heartbeat") heartbeats.push({ url, ...body });
+        return { status: 200, json: async () => ({ ok: true }) };
+      },
       chrome: {
         storage: { local: { get: async () => ({ ...storage }), set: async (patch) => Object.assign(storage, patch) } },
         alarms: { get: async (key) => alarms.get(key), create: async (key, value) => alarms.set(key, value),
           onAlarm: { addListener: (listener) => { listeners.alarm = listener; } } },
-        tabs: { get: async (id) => ({ id, url: `${origin}/rent2buy-groups`, discarded }), onUpdated: ignoredEvent,
+        tabs: { onUpdated: ignoredEvent,
           reload: async (id) => { reloaded.push(id); },
-          sendMessage: async (id, message) => { wakes.push(id); return { ok: acknowledge && message.recoverOwnership }; } },
+          sendMessage: async (id) => { wakes.push(id); } },
         runtime: { getManifest: () => ({ version: "1.2.33" }), onInstalled: ignoredEvent, onStartup: ignoredEvent, onMessage: ignoredEvent },
       },
     });
@@ -173,16 +279,12 @@ test("background alarms report while idle, survive a worker restart, and recover
   await alarm(renewalAlarm);
   assert.equal(heartbeats.length, 2);
   assert.equal(alarms.get(renewalAlarm), firstSchedule, "a worker restart doesn't postpone the alarm");
-  clock = storage[stateKey].automation.wakeAt;
+  clock += 300_000;
   await alarm(approvalAlarm);
-  discarded = true;
   await alarm(renewalAlarm);
   assert.equal(heartbeats[2].approvalMonitor.lastAlarmAt, new Date(clock).toISOString());
-  assert.deepEqual(reloaded, [5]);
-  discarded = false;
-  acknowledge = false;
-  await alarm(renewalAlarm);
-  assert.deepEqual(reloaded, [5, 5], "a missed wake also reloads the elected driver");
+  assert.deepEqual(reloaded, []);
+  assert.deepEqual(wakes, []);
 });
 
 test("outcomes, stop and settings controls", async () => {

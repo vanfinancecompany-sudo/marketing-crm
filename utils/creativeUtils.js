@@ -1,7 +1,8 @@
-import rent2buyLogo from "../assets/rent2buy-vans.png";
-import financeLogo from "../assets/van-finance-company.png";
 import { withVanFinancePoorCreditOpening } from "../lib/vanFinanceStaticAdHooks.js";
-import defaultReelAudio from "../assets/default-reel-audio.mp3";
+
+const rent2buyLogo = new URL("../assets/rent2buy-vans.png", import.meta.url).href;
+const financeLogo = new URL("../assets/van-finance-company.png", import.meta.url).href;
+const defaultReelAudio = new URL("../assets/default-reel-audio.mp3", import.meta.url).href;
 
 export function createCreativePreview(creative) {
   return {

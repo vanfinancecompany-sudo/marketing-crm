@@ -912,7 +912,7 @@
     if (!post) return renewalOutcome(job, "needs_attention", { reason: "Could not verify the caption, attached photo and Post button in Facebook" });
 
     const reserved = await chrome.runtime.sendMessage({ type: "BEGIN_GROUP_RENEWAL_SUBMISSION", jobId: job.id });
-    if (!reserved?.ok) return renewalOutcome(job, "needs_attention", { reason: "Automatic submission was stopped before posting" });
+    if (!reserved?.ok) return renewalOutcome(job, "needs_attention", { reason: reserved?.error || "Automatic submission was stopped before posting" });
     if (renewalRestriction()) return renewalOutcome(job, "stop", { reason: "Facebook requires account or security review" });
     if (!dialog.contains(post) || !dialog.contains(editor) || !actionableRenewalPost(post) ||
         !attachedPhoto(dialog) || compact(content()) !== compact(job.caption)) {
@@ -924,6 +924,41 @@
   }
 
 
+  // Automatic jobs may start in an inactive tab. Wait for the actual group
+  // composer instead of assuming the first document_idle scan is definitive.
+  // Never click Post here, and do not toggle an already-open dialog closed.
+  async function waitForRenewalComposer(timeoutMs = 30000) {
+    const deadline = Date.now() + timeoutMs;
+    let opened = false;
+    let openerSeen = false;
+    while (Date.now() < deadline) {
+      if (renewalRestriction() || membershipPendingVisible()) break;
+      const remaining = deadline - Date.now();
+      const found = await waitForComposerEditor(Math.min(1000, remaining));
+      if (found.editor && found.verified && found.scope && isVerifiedCreatePostDialog(found.scope)) {
+        return { ...found, openerSeen };
+      }
+      if (renewalRestriction() || membershipPendingVisible() || Date.now() >= deadline) break;
+      if (!opened && !verifiedComposerDialog()) {
+        const opener = findComposerOpener();
+        if (opener) {
+          openerSeen = true;
+          try { opener.click(); opened = true; } catch {}
+        }
+      }
+      await sleep(250);
+    }
+    return { editor: null, scope: null, verified: false, openerSeen };
+  }
+
+  // A Join group button is not a posting restriction in a public group.
+  // The verified composer is the positive signal; explicit blocks still win.
+  function renewalComposerBlock() {
+    if (renewalRestriction()) return "Facebook reported an account restriction";
+    if (membershipPendingVisible()) return "Membership is pending";
+    return "";
+  }
+
   async function prepareGroupPost(job) {
     if (!location.pathname.startsWith("/groups/")) return;
     await sleep(1200);
@@ -933,12 +968,17 @@
       return;
     }
 
-    let { editor, scope, verified } = await waitForComposerEditor(1200);
-    if (!editor || !verified) {
-      const opener = findComposerOpener();
-      if (opener) {
-        try { opener.click(); } catch {}
-        ({ editor, scope, verified } = await waitForComposerEditor(6500));
+    let editor, scope, verified, openerSeen;
+    if (job.renewal?.automatic) {
+      ({ editor, scope, verified, openerSeen } = await waitForRenewalComposer());
+    } else {
+      ({ editor, scope, verified } = await waitForComposerEditor(1200));
+      if (!editor || !verified) {
+        const opener = findComposerOpener();
+        if (opener) {
+          try { opener.click(); } catch {}
+          ({ editor, scope, verified } = await waitForComposerEditor(6500));
+        }
       }
     }
 
@@ -948,7 +988,9 @@
         const restricted = renewalRestriction();
         await renewalOutcome(job, restricted ? "stop" : "needs_attention", {
           reason: restricted ? "Facebook requires account or security review" :
-            membershipPending ? "Membership is pending" : "Posting permission or group composer could not be verified",
+            membershipPending ? "Membership is pending" :
+              job.renewal.automatic ? (openerSeen ? "Create Post opener found, but composer could not be verified before timeout" : "Create Post composer or opener not found before timeout") :
+                "Posting permission or group composer could not be verified",
         });
         return;
       }
@@ -974,12 +1016,10 @@
 
     results.push({ label: "Composer", ok: true, detail: "Verified Create Post dialog" });
     if (job.renewal) {
-      const join = buttonWithText(/^join(?: group)?$/i);
-      if (renewalRestriction() || join || membershipPendingVisible()) {
+      const block = renewalComposerBlock();
+      if (block) {
         const restricted = renewalRestriction();
-        await renewalOutcome(job, restricted ? "stop" : "needs_attention", {
-          reason: restricted ? "Facebook reported an account restriction" : "Group membership could not be confirmed",
-        });
+        await renewalOutcome(job, restricted ? "stop" : "needs_attention", { reason: block });
         return;
       }
       const ruleEvidence = job.renewal.automatic ? extractRuleEvidence(pageLines().slice(0, 60)) : "";
