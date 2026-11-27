@@ -37,10 +37,20 @@ export function authoriseRenewalRequest(req, body, environment = process.env) {
   return timingSafeEqual(Buffer.from(bearer), Buffer.from(heartbeatToken(key, environment.VERCEL_ENV))) ? "worker" : "";
 }
 
+// Stable code for a pre-submission composer failure. The helper's wording has changed
+// between versions, so every known composer wording maps to this one code; records
+// saved before the code existed are still recognised by their wording.
+const COMPOSER_UNVERIFIED = "composer_unverified";
+const COMPOSER_FAILURE_PATTERN = /^(?:Posting permission or group composer could not be verified|Create Post opener found, but composer could not be verified before timeout|Create Post composer or opener not found before timeout|Create Post opener found; composer timeout\b|Create Post composer\/opener timeout\b)/;
+
+function composerFailureCode(status, reason) {
+  return status === "needs_attention" && COMPOSER_FAILURE_PATTERN.test(String(reason || "")) ? COMPOSER_UNVERIFIED : "";
+}
+
 function canRetryComposerForTest(outcome) {
   return outcome?.status === "needs_attention" && outcome.mode === "automatic" && !outcome.attemptedAt &&
     !outcome.submissionReservedAt && !outcome.duplicateRisk && !outcome.failureStage &&
-    outcome.reason === "Posting permission or group composer could not be verified";
+    (outcome.failureCode === COMPOSER_UNVERIFIED || composerFailureCode(outcome.status, outcome.reason) === COMPOSER_UNVERIFIED);
 }
 
 async function readBackgroundSettings(db) {
@@ -646,7 +656,10 @@ export async function handlePost(db, body, now = new Date(), environment = proce
       if (previous?.status === "preparing" && previous.jobId !== body.jobId) return { error: "Review the active browser draft before changing this group" };
       if (body.jobId && previous.status === status) return { outcomes: run.outcomes };
       const attemptedAt = Date.parse(body.attemptedAt);
-      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...previous, status, reason: clean(body.reason, 200) || "The browser did not supply an explanation; review this group before retrying.", at: now.toISOString(),
+      const { failureCode: _previousCode, ...earlier } = previous || {};
+      const failureCode = body.jobId ? composerFailureCode(status, clean(body.reason, 200)) : "";
+      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...earlier, status, reason: clean(body.reason, 200) || "The browser did not supply an explanation; review this group before retrying.", at: now.toISOString(),
+        ...(failureCode ? { failureCode } : {}),
         ...(body.jobId && Number.isFinite(attemptedAt) && attemptedAt <= now.getTime() + 60_000 ? { attemptedAt: new Date(attemptedAt).toISOString() } : {}),
         ...(body.jobId && body.failureStage === "publication" ? { failureStage: "publication" } : {}),
         ...(body.duplicateRisk === true ? { duplicateRisk: true } : {}) } } };

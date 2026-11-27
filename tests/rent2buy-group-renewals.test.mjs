@@ -160,6 +160,44 @@ function workerTestDb(...ids) {
   return db;
 }
 
+test("Southampton test retry recognises every pre-submission composer failure wording, never a submission risk", async () => {
+  const southampton = url("830909275134315");
+  const armWith = async (outcome) => {
+    const db = workerTestDb("aaa", "830909275134315");
+    await runDailyRenewalCheck(db, now);
+    db.t.rent2buy_group_renewal_runs[0].outcomes[southampton] = { status: "needs_attention", jobId: "old-job", mode: "automatic", ...outcome };
+    return (await manageBackgroundWorker(db, { action: "worker-test-arm" }, now)).ok;
+  };
+  for (const reason of ["Posting permission or group composer could not be verified",
+    "Create Post opener found, but composer could not be verified before timeout",
+    "Create Post composer or opener not found before timeout",
+    "Create Post opener found; composer timeout; visible dialogs=1, Create Post=1, local Post=0, valid editors=0, tab=hidden"]) {
+    assert.equal(await armWith({ reason }), true, reason);
+  }
+  assert.equal(await armWith({ reason: "anything", failureCode: "composer_unverified" }), true, "stable code");
+  const composer = { reason: "Create Post opener found, but composer could not be verified before timeout", failureCode: "composer_unverified" };
+  assert.equal(await armWith({ ...composer, duplicateRisk: true }), false);
+  assert.equal(await armWith({ ...composer, attemptedAt: now.toISOString() }), false);
+  assert.equal(await armWith({ ...composer, submissionReservedAt: now.toISOString() }), false);
+  assert.equal(await armWith({ ...composer, failureStage: "publication" }), false);
+  assert.equal(await armWith({ reason: "Facebook did not confirm submission. Check before retrying." }), false);
+  assert.equal(await armWith({ ...composer, mode: "manual" }), false);
+});
+
+test("worker composer failures are stored with the stable failure code", async () => {
+  const southampton = url("830909275134315");
+  const db = workerTestDb("aaa", "830909275134315");
+  await runDailyRenewalCheck(db, now);
+  const run = db.t.rent2buy_group_renewal_runs[0];
+  run.outcomes[southampton] = { status: "preparing", jobId: "composer-code-job", mode: "automatic", at: now.toISOString() };
+  const request = (body) => handleBackgroundWorker(db, body, now, { VERCEL_ENV: "production" });
+  const result = await request({ action: "worker-result", groupUrl: southampton, jobId: "composer-code-job", runDate: londonDay(now),
+    status: "needs_attention", reason: "Create Post opener found; composer timeout; visible dialogs=0, Create Post=0, local Post=0, valid editors=0, tab=visible" });
+  assert.equal(result.ok, true);
+  assert.equal(run.outcomes[southampton].failureCode, "composer_unverified");
+  assert.equal(run.outcomes[southampton].attemptedAt, undefined);
+});
+
 test("the Southampton worker consumes one attempt, records one activity and tracks approval separately", async () => {
   const southampton = url("830909275134315");
   const db = workerTestDb("aaa", "830909275134315");
