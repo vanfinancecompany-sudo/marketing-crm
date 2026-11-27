@@ -1118,7 +1118,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await saveGroupStatusEvent(event);
         if (event.accepted || event.declined) {
           try {
-            await chrome.action.setBadgeText({ text: event.accepted ? "V" : "�" });
+            await chrome.action.setBadgeText({ text: event.accepted ? "✓" : "×" });
             await chrome.action.setTitle({
               title: event.accepted
                 ? `${event.groupName || "Facebook group"} accepted ${event.registration || "your advert"}`

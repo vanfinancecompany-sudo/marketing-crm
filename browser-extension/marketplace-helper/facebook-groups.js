@@ -924,31 +924,103 @@
   }
 
 
-  // Automatic jobs may start in an inactive tab. Wait for the actual group
-  // composer instead of assuming the first document_idle scan is definitive.
-  // Never click Post here, and do not toggle an already-open dialog closed.
+  // Automatic preparation: observe the actual composer as Facebook renders it.
+  // Background tabs can delay timers; DOM changes also trigger a strict check.
+  // This does not relax any composer, membership or publication safeguard.
+  function renewalComposerSnapshot() {
+    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
+    const identified = dialogs.filter(dialogHasCreatePostIdentity);
+    const withPost = identified.filter(dialogHasLocalPostButton);
+    const editors = withPost.reduce((count, dialog) => count + composerEditorCandidates(dialog).length, 0);
+    return { dialogs: dialogs.length, headings: identified.length, postButtons: withPost.length,
+      editors, visibility: document.visibilityState || "unknown" };
+  }
+
   async function waitForRenewalComposer(timeoutMs = 30000) {
     const deadline = Date.now() + timeoutMs;
-    let opened = false;
     let openerSeen = false;
-    while (Date.now() < deadline) {
-      if (renewalRestriction() || membershipPendingVisible()) break;
-      const remaining = deadline - Date.now();
-      const found = await waitForComposerEditor(Math.min(1000, remaining));
-      if (found.editor && found.verified && found.scope && isVerifiedCreatePostDialog(found.scope)) {
-        return { ...found, openerSeen };
+    let opened = false;
+    let placeholderClicked = false;
+    return new Promise((resolve) => {
+      let settled = false;
+      let observer = null;
+      let interval = null;
+      let timer = null;
+      let scanning = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        observer?.disconnect();
+        if (interval !== null) clearInterval(interval);
+        if (timer !== null) clearTimeout(timer);
+        document.removeEventListener("visibilitychange", scan);
+        resolve({ openerSeen, ...result });
+      };
+      const failure = () => {
+        if (settled) return;
+        let diagnostic;
+        try { diagnostic = renewalComposerSnapshot(); }
+        catch { diagnostic = { error: "DOM snapshot unavailable" }; }
+        finish({ editor: null, scope: null, verified: false, diagnostic });
+      };
+      function scan() {
+        if (settled || scanning) return;
+        scanning = true;
+        try {
+          if (renewalRestriction() || membershipPendingVisible() || Date.now() >= deadline) {
+            failure();
+            return;
+          }
+          const dialog = verifiedComposerDialog();
+          if (dialog) {
+            let editor = composerEditorCandidates(dialog)[0] || editorFromPlaceholder(dialog);
+            const active = document.activeElement;
+            if (!editor && placeholderClicked && active && active !== document.body &&
+                dialog.contains(active) && !isRejectedComposerEditor(active) &&
+                (active.getAttribute?.("role") === "textbox" ||
+                 ["true", "plaintext-only"].includes(active.getAttribute?.("contenteditable")) ||
+                 active.getAttribute?.("data-lexical-editor") === "true")) editor = active;
+            if (editor && dialog.contains(editor) && !isRejectedComposerEditor(editor)) {
+              finish({ editor, scope: dialog, verified: true });
+              return;
+            }
+            // Same placeholder fallback as manual preparation, but only once.
+            const placeholder = [...dialog.querySelectorAll("div, span, p")].filter(visible)
+              .find(element => COMPOSER_EDITOR_PATTERN.test(elementEvidence(element)));
+            if (placeholder && !placeholderClicked) {
+              placeholderClicked = true;
+              try { placeholder.click(); } catch {}
+            }
+            return;
+          }
+          // A partially rendered Create Post dialog is not another opener.
+          if (!opened && ![...document.querySelectorAll('[role="dialog"]')].some(dialogHasCreatePostIdentity)) {
+            const opener = findComposerOpener();
+            if (opener) {
+              openerSeen = true;
+              try { opener.click(); opened = true; } catch {}
+            }
+          }
+        } catch (error) {
+          console.warn("VFC composer observation failed", error);
+          finish({ editor: null, scope: null, verified: false, diagnostic: { error: "DOM observation failed" } });
+        } finally { scanning = false; }
       }
-      if (renewalRestriction() || membershipPendingVisible() || Date.now() >= deadline) break;
-      if (!opened && !verifiedComposerDialog()) {
-        const opener = findComposerOpener();
-        if (opener) {
-          openerSeen = true;
-          try { opener.click(); opened = true; } catch {}
-        }
-      }
-      await sleep(250);
-    }
-    return { editor: null, scope: null, verified: false, openerSeen };
+      observer = new MutationObserver(scan);
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true,
+        attributes: true, attributeFilter: ["role", "aria-label", "aria-hidden", "aria-disabled", "contenteditable", "data-lexical-editor", "style", "class"] });
+      document.addEventListener("visibilitychange", scan);
+      interval = setInterval(scan, 500);
+      timer = setTimeout(failure, timeoutMs);
+      scan();
+    });
+  }
+
+  function renewalComposerTimeoutReason(openerSeen, diagnostic) {
+    const prefix = openerSeen ? "Create Post opener found; composer timeout" : "Create Post composer/opener timeout";
+    if (!diagnostic) return prefix;
+    if (diagnostic.error) return `${prefix}; ${diagnostic.error}`;
+    return `${prefix}; visible dialogs=${diagnostic.dialogs}, Create Post=${diagnostic.headings}, local Post=${diagnostic.postButtons}, valid editors=${diagnostic.editors}, tab=${diagnostic.visibility}`;
   }
 
   // A Join group button is not a posting restriction in a public group.
@@ -968,9 +1040,9 @@
       return;
     }
 
-    let editor, scope, verified, openerSeen;
+    let editor, scope, verified, openerSeen, diagnostic;
     if (job.renewal?.automatic) {
-      ({ editor, scope, verified, openerSeen } = await waitForRenewalComposer());
+      ({ editor, scope, verified, openerSeen, diagnostic } = await waitForRenewalComposer());
     } else {
       ({ editor, scope, verified } = await waitForComposerEditor(1200));
       if (!editor || !verified) {
@@ -989,7 +1061,7 @@
         await renewalOutcome(job, restricted ? "stop" : "needs_attention", {
           reason: restricted ? "Facebook requires account or security review" :
             membershipPending ? "Membership is pending" :
-              job.renewal.automatic ? (openerSeen ? "Create Post opener found, but composer could not be verified before timeout" : "Create Post composer or opener not found before timeout") :
+              job.renewal.automatic ? renewalComposerTimeoutReason(openerSeen, diagnostic) :
                 "Posting permission or group composer could not be verified",
         });
         return;
@@ -1079,6 +1151,9 @@
       isRejectedComposerEditor,
       composerEditorCandidates,
       waitForComposerEditor,
+      waitForRenewalComposer,
+      renewalComposerSnapshot,
+      renewalComposerTimeoutReason,
       attachImage,
       registrationEvidenceLines,
       visibleAdvertCardForExactSearch,
