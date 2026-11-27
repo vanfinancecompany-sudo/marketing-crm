@@ -10,7 +10,6 @@
     running: false,
     productFilter: "all",
     renewSeen: new Set(),
-    autoProcessed: new Set(),
     stopRequested: false,
   };
 
@@ -30,6 +29,28 @@
     const style = getComputedStyle(element);
     return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
   }
+
+  // Facebook's Selling page may scroll an inner container rather than the
+  // window. Find the element that actually scrolls the listing cards.
+  function scrollRoot(listingControl) {
+    const seed = listingControl || document.querySelector('a[href*="/marketplace/item/"]') ||
+      [...document.querySelectorAll('button,[role="button"]')].find(isListingAction);
+    let scrollable = null;
+    for (let node = seed?.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      const overflow = getComputedStyle(node).overflowY;
+      if (overflow !== "auto" && overflow !== "scroll") continue;
+      if (node.scrollHeight > node.clientHeight + 40) return node;
+      scrollable ||= node;
+    }
+    const page = document.scrollingElement || document.documentElement;
+    return scrollable && page.scrollHeight <= page.clientHeight + 40 ? scrollable : page;
+  }
+  const scrollTopNow = () => scrollRoot().scrollTop;
+  function scrollToY(y) { scrollRoot().scrollTo({ top: y, behavior: "auto" }); }
+  const scrollToTop = () => scrollToY(0);
+  function scrollToBottom() { const root = scrollRoot(); root.scrollTo({ top: root.scrollHeight, behavior: "auto" }); }
+  function scrollStep(dy) { const root = scrollRoot(); root.scrollBy({ top: dy ?? Math.max(560, Math.round(root.clientHeight * 0.82)), behavior: "auto" }); }
+  function atScrollBottom() { const root = scrollRoot(); return root.scrollTop + root.clientHeight >= root.scrollHeight - 180; }
 
   function itemIdentity(href) {
     try {
@@ -105,6 +126,8 @@
     if (explicit.includes("finance")) return "finance";
     const value = fold(text);
     if (value.includes("rent2buyvans.co.uk") || value.includes("rent2buy")) return "rent2buy";
+    // Rent2Buy advert titles: "... - NO CREDIT CHECK" and "RENT IT! - DRIVE IT! - OWN IT!".
+    if (/\bno credit checks?\b|\brent it\W+drive it\W+own it\b|\brent (?:to|2) own\b/.test(value)) return "rent2buy";
     if (value.includes("vanfinancecompany.co.uk") || value.includes("deposit from £99")) return "finance";
     return "unknown";
   }
@@ -182,7 +205,7 @@
       product,
       registryEntry: entry,
       stockStatus: stockStatus(product, entry),
-      renewable: fold(text).includes("renew your listing"),
+      renewable: card.querySelectorAll(moreOptionsSelector).length === 1 && hasRenewalTip(card),
     };
   }
 
@@ -250,10 +273,9 @@
     while (Date.now() < deadline) {
       if (facebookLoaderVisible()) sawLoader = true;
 
-      window.scrollTo({
-        top: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
-        behavior: "auto",
-      });
+      scrollToBottom();
+      const cards = candidateListingCards();
+      cards[cards.length - 1]?.scrollIntoView?.({ block: "end", behavior: "auto" });
 
       await sleep(sawLoader ? 550 : 350);
 
@@ -277,24 +299,20 @@
     state.rows = [];
     state.renewSeen.clear();
 
-    const startY = window.scrollY;
+    const startY = scrollTopNow();
     let pageWaitsWithoutProgress = 0;
 
-    window.scrollTo({ top: 0, behavior: "auto" });
+    scrollToTop();
     await sleep(600);
 
     for (let pass = 0; pass < 260; pass += 1) {
       scanVisibleListings();
       render(`Scanning Facebook… ${state.rows.length} listing${state.rows.length === 1 ? "" : "s"} found so far.`);
 
-      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
-      const atBottom = window.scrollY + window.innerHeight >= height - 180;
+      const atBottom = atScrollBottom();
 
       if (!atBottom) {
-        window.scrollBy({
-          top: Math.max(560, Math.round(window.innerHeight * 0.82)),
-          behavior: "auto",
-        });
+        scrollStep();
         await sleep(420);
         continue;
       }
@@ -316,19 +334,17 @@
       }
 
       pageWaitsWithoutProgress += 1;
-      if (pageWaitsWithoutProgress >= 2) break;
+      if (pageWaitsWithoutProgress >= 3) break;
 
-      window.scrollBy({ top: -220, behavior: "auto" });
+      scrollStep(-220);
       await sleep(250);
-      window.scrollTo({
-        top: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
-        behavior: "auto",
-      });
+      scrollToBottom();
       await sleep(500);
     }
 
-    window.scrollTo({ top: startY, behavior: "auto" });
+    scrollToY(startY);
     await sleep(180);
+    state.lastCompletedScan = new Date().toISOString();
     state.running = false;
 
     const rows = filteredRows();
@@ -388,15 +404,6 @@
     return null;
   }
 
-  function renewalConfirmed() {
-    return [...document.querySelectorAll('[role="alert"],[role="status"],[aria-live="polite"],[aria-live="assertive"]')]
-      .filter(visible)
-      .some((element) => {
-        const text = fold(element.innerText || element.textContent);
-        return text.includes("listing has been renewed") || text.includes("listing renewed");
-      });
-  }
-
   function closeOpenMenu() {
     try {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
@@ -405,8 +412,11 @@
   }
 
   function facebookBlockingMessage() {
+    if (/^\/(?:checkpoint|login|recover|two_step_verification)(?:\/|$)/i.test(window.location.pathname)) {
+      return "Facebook is asking for a login or security check";
+    }
     const candidates = [
-      ...document.querySelectorAll('[role="alert"],[role="dialog"],[aria-live="assertive"],[aria-live="polite"]'),
+      ...document.querySelectorAll('[role="alert"],[role="dialog"],[role="alertdialog"],[aria-live="assertive"],[aria-live="polite"]'),
     ].filter(visible);
     for (const element of candidates) {
       const text = fold(element.innerText || element.textContent);
@@ -415,57 +425,12 @@
         text.includes("try again later") ||
         text.includes("we limit how often") ||
         text.includes("youre going too fast") ||
-        text.includes("you're going too fast")
+        /\b(?:security check|confirm your identity|verify your identity|temporarily restricted|account (?:is |has been )?(?:restricted|suspended|disabled)|(?:you|your account) (?:can ?not|cant) use marketplace|unusual (?:activity|login))\b/.test(text)
       ) {
         return String(element.innerText || element.textContent || "").trim();
       }
     }
     return "";
-  }
-
-  async function clickRenewForRow(row) {
-    if (!row?.card || !document.contains(row.card)) return { renewed: false, reason: "card unavailable" };
-
-    row.card.scrollIntoView({ block: "center", behavior: "auto" });
-    await sleep(180);
-
-    const menu = findMenuButton(row.card);
-    if (!menu) return { renewed: false, reason: "menu unavailable" };
-
-    menu.click();
-
-    const renew = await waitForRenewOption(3000);
-    if (!renew) {
-      closeOpenMenu();
-      await sleep(120);
-      return { renewed: false, reason: "not renewable" };
-    }
-
-    renew.scrollIntoView?.({ block: "center", behavior: "auto" });
-    renew.click();
-
-    let clickedThrough = false;
-    const clickDeadline = Date.now() + 3000;
-    while (Date.now() < clickDeadline) {
-      await sleep(180);
-      if (renewalConfirmed() || !visibleRenewOption()) {
-        clickedThrough = true;
-        break;
-      }
-    }
-
-    if (!clickedThrough && visibleRenewOption()) {
-      const clickable = visibleRenewOption();
-      clickable?.click?.();
-      await sleep(650);
-    }
-
-    const blocked = facebookBlockingMessage();
-    if (blocked) {
-      return { renewed: false, blocked: true, reason: blocked };
-    }
-
-    return { renewed: true, reason: "renewed" };
   }
 
   async function tryOpenRenew(row) {
@@ -497,7 +462,7 @@
     closeOpenMenu();
     state.running = true;
 
-    const startY = window.scrollY;
+    const startY = scrollTopNow();
     let wrapped = false;
     let noProgress = 0;
     let lastY = -1;
@@ -517,8 +482,7 @@
         }
       }
 
-      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
-      const atBottom = window.scrollY + window.innerHeight >= height - 180;
+      const atBottom = atScrollBottom();
 
       if (atBottom) {
         const previousSignature = visibleBatchSignature();
@@ -537,19 +501,19 @@
 
         if (!wrapped && startY > 200) {
           wrapped = true;
-          window.scrollTo({ top: 0, behavior: "auto" });
+          scrollToTop();
           await sleep(500);
           continue;
         }
         break;
       }
 
-      const nextY = Math.min(height, window.scrollY + Math.max(560, Math.round(window.innerHeight * 0.82)));
+      const nextY = scrollTopNow() + Math.max(560, Math.round(scrollRoot().clientHeight * 0.82));
       if (Math.abs(nextY - lastY) < 10) noProgress += 1;
       else noProgress = 0;
       if (noProgress >= 4) break;
       lastY = nextY;
-      window.scrollTo({ top: nextY, behavior: "auto" });
+      scrollToY(nextY);
       await sleep(380);
     }
 
@@ -557,116 +521,254 @@
     render("No further Facebook Renew listing option was found. If Facebook has just loaded more adverts, run Scan all listings again.");
   }
 
+  const moreOptionsSelector = '[aria-label^="More options for " i]';
+  const listingLinkSelector = 'a[href*="/marketplace/item/"],a[href*="/ad_center/create/listingad/"]';
+  const noticesSelector = '[role="alert"],[role="status"],[role="dialog"],[role="alertdialog"],[aria-live="polite"],[aria-live="assertive"]';
+  const dialogSelector = '[role="dialog"],[role="alertdialog"]';
+  const renewControlSelector = '[role="menuitem"],[role="button"],button,a,div[tabindex="0"]';
+  const maxRenewalScrollSteps = 260;
+
+  function listingIdFromLink(link) {
+    const identity = itemIdentity(link.href);
+    if (identity) return identity.itemId;
+    const target = new URL(link.href).searchParams.get("target_id");
+    return /^\d+$/.test(target || "") ? target : "";
+  }
+
+  function autoListing(menu) {
+    // The Facebook card has its own More options trigger and listing detail.
+    // Stop before crossing into a wrapper that contains another advert.
+    for (let card = menu.parentElement; card && card !== document.body; card = card.parentElement) {
+      if (card.querySelectorAll(moreOptionsSelector).length !== 1) return null;
+      const text = card.innerText || "";
+      if (!/\blisted on\b/i.test(text)) continue;
+      const links = [...card.querySelectorAll(listingLinkSelector)];
+      const ids = [...new Set(links.map(listingIdFromLink).filter(Boolean))];
+      if (ids.length !== 1) return null;
+      const [key] = ids;
+      return { key, card, menu, text, title: menu.getAttribute("aria-label").replace(/^more options for /i, "") };
+    }
+    return null;
+  }
+
+  function hasRenewalTip(card) {
+    return (card.innerText || "").split("\n").some((line) =>
+      /^(?:tip:\s*)?renew your listing(?:[\s.?!:…]|$)/i.test(line.trim())
+    );
+  }
+
+  function menuInViewport(menu, root) {
+    if (!visible(menu)) return false;
+    const rect = menu.getBoundingClientRect();
+    const bounds = root === document.scrollingElement || root === document.documentElement
+      ? { top: 0, bottom: window.innerHeight }
+      : root.getBoundingClientRect();
+    return rect.bottom > Math.max(0, bounds.top) && rect.top < Math.min(window.innerHeight, bounds.bottom);
+  }
+
+  function visibleRenewControls(scope = document) {
+    return [...scope.querySelectorAll(renewControlSelector)].filter((element) =>
+      visible(element) && !element.closest("#vfc-marketplace-manager") &&
+      !element.disabled && element.getAttribute("aria-disabled") !== "true" &&
+      [element.innerText, element.getAttribute("aria-label")].some((label) => fold(label) === "renew listing")
+    );
+  }
+
+  function facebookNotices() {
+    return new Map([...document.querySelectorAll(noticesSelector)]
+      .filter(visible)
+      .map((node) => [node, fold(node.innerText || node.textContent)]));
+  }
+
+  function renewalDate(card) {
+    return (card.innerText || "").split("\n").map((line) => fold(line))
+      .find((line) => /^renewed on\s+\S/.test(line)) || "";
+  }
+
+  async function renewVisibleListing(row) {
+    if (!row.card.isConnected || !row.menu.isConnected || !hasRenewalTip(row.card)) {
+      return { status: "not_eligible", reason: "Listing or renewal message changed before the click" };
+    }
+
+    const existingControls = new Set(visibleRenewControls());
+    row.menu.click();
+    try {
+      let renew;
+      const menuDeadline = Date.now() + 3000;
+      while (Date.now() < menuDeadline && !state.stopRequested) {
+        const blocked = facebookBlockingMessage();
+        if (blocked) return { status: "blocked", reason: blocked };
+        renew = visibleRenewControls().find((control) =>
+          !existingControls.has(control) &&
+          (row.card.contains(control) || control.closest('[role="menu"],[role="menuitem"]'))
+        );
+        if (renew) break;
+        await sleep(120);
+      }
+      if (state.stopRequested) return { status: "stopped", reason: "Stopped before the renewal click" };
+      if (!renew) return { status: "failed", reason: "Facebook offered no Renew listing action for this card" };
+
+      const previousNotices = facebookNotices();
+      const previousDate = renewalDate(row.card);
+      let confirmClicked = false;
+      renew.click();
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const blocked = facebookBlockingMessage();
+        if (blocked) return { status: "blocked", reason: blocked };
+        for (const [node, text] of facebookNotices()) {
+          if (previousNotices.get(node) === text) continue;
+          if (/\b(?:could(?: not|nt) renew|unable to renew|renewal failed|something went wrong|listing (?:was not|wasnt|has not been) renewed)\b/.test(text)) {
+            return { status: "failed", reason: "Facebook reported a renewal error" };
+          }
+          if (/^(?:(?:your |the )?(?:listing|item) (?:(?:has been|was) )?(?:successfully )?renewed|(?:successfully renewed|you(?: have|ve)? (?:successfully )?renewed) (?:your|the) (?:listing|item))(?:[.!\s]|$)/.test(text)) {
+            return { status: "renewed", reason: "" };
+          }
+          if (state.stopRequested || confirmClicked || !node.matches(dialogSelector) ||
+              previousNotices.has(node) || !/^(?:are you sure you want to )?renew (?:your |this )?listing\b/.test(text)) continue;
+          const actions = visibleRenewControls(node);
+          if (actions.length === 1) {
+            confirmClicked = true;
+            actions[0].click();
+          }
+        }
+        const currentDate = row.menu.isConnected && autoListing(row.menu)?.key === row.key && renewalDate(row.card);
+        if (currentDate && currentDate !== previousDate) return { status: "renewed", reason: "" };
+        await sleep(200);
+      }
+      return { status: "unconfirmed", reason: "Facebook did not show a new renewal confirmation" };
+    } finally {
+      closeOpenMenu();
+    }
+  }
+
   async function autoRenewAll() {
     if (state.running) return;
-
-    const scopeLabel =
-      state.productFilter === "finance"
-        ? "Van Finance"
-        : state.productFilter === "rent2buy"
-          ? "Rent2Buy"
-          : "Van Finance + Rent2Buy";
-
-    const confirmed = window.confirm(
-      `Automatically renew every Facebook Marketplace listing Facebook offers as renewable in the current filter (${scopeLabel})?\n\nThe helper will click Renew listing for each eligible advert, wait between actions, continue through Facebook's loading batches, and stop if Facebook reports a limit or block.\n\nIt will not delete, edit, boost, mark sold or create adverts.`,
-    );
-    if (!confirmed) return;
+    const filter = state.productFilter;
+    const scope = filter === "finance" ? "Van Finance" : filter === "rent2buy" ? "Rent2Buy" : "Van Finance + Rent2Buy";
+    if (!window.confirm(
+      "Renew eligible Facebook Marketplace listings for " + scope +
+      " as they appear while scrolling from here? The helper pauses between renewals and stops if Facebook reports an account limit or security warning.",
+    )) return;
 
     state.running = true;
     state.stopRequested = false;
-    state.autoProcessed.clear();
+    const report = state.report = { discovered: 0, eligible: 0, renewed: 0, notEligible: 0, failed: 0, outstanding: [] };
+    const seen = new Set();
+    const attempted = new Set();
+    const registry = registryByItemId();
+    let scrollSteps = 0;
+    let bottomSince = null;
+    let stopReason = "";
+    render("Looking for Facebook renewal messages…");
 
-    let renewed = 0;
-    let notRenewable = 0;
-    let failed = 0;
-    let pageWaitsWithoutProgress = 0;
+    try {
+      while (!state.stopRequested) {
+        stopReason = facebookBlockingMessage();
+        if (stopReason) break;
 
-    window.scrollTo({ top: 0, behavior: "auto" });
-    await sleep(650);
+        const menus = [...document.querySelectorAll(moreOptionsSelector)];
+        const root = scrollRoot(menus[0]);
+        let processedListing = false;
+        for (const menu of menus) {
+          if (state.stopRequested) break;
+          stopReason = facebookBlockingMessage();
+          if (stopReason) break;
+          if (!menuInViewport(menu, root)) continue;
+          const row = autoListing(menu);
+          if (!row || attempted.has(row.key)) continue;
+          const entry = registry.get(row.key);
+          const product = classifyProduct(row.title + " " + row.text, entry);
+          if (filter === "all" ? product === "unknown" : product !== filter) continue;
+          seen.add(row.key);
+          report.discovered = seen.size;
+          if (!hasRenewalTip(row.card)) continue;
 
-    for (let pass = 0; pass < 320 && !state.stopRequested; pass += 1) {
-      scanVisibleListings();
-
-      const rows = filteredRows(visibleRows())
-        .filter((row) => !state.autoProcessed.has(row.key))
-        .sort((a, b) => a.card.getBoundingClientRect().top - b.card.getBoundingClientRect().top);
-
-      for (const row of rows) {
-        if (state.stopRequested) break;
-
-        state.autoProcessed.add(row.key);
-        render(
-          `Auto renewing… ${renewed} renewed · ${notRenewable} not renewable · ${failed} failed. Checking: ${row.title.slice(0, 55)}…`,
-        );
-
-        try {
-          const result = await clickRenewForRow(row);
-          if (result.blocked) {
-            state.stopRequested = true;
-            state.running = false;
-            render(`Stopped because Facebook reported a limit/block: ${result.reason}`);
-            return;
+          attempted.add(row.key);
+          if (stockStatus(product, entry) === "stale") {
+            report.notEligible += 1;
+            report.outstanding.push({ title: row.title, reason: "Known stale stock" });
+            continue;
           }
-          if (result.renewed) renewed += 1;
-          else notRenewable += 1;
-        } catch {
-          failed += 1;
-          closeOpenMenu();
+
+          report.eligible += 1;
+          render("Renewing " + escapeHtml(row.title.slice(0, 65)) + "…");
+          let result;
+          try {
+            result = await renewVisibleListing(row);
+          } catch {
+            result = { status: "failed", reason: "Could not complete the Facebook renewal action" };
+          }
+
+          if (result.status === "renewed") report.renewed += 1;
+          else {
+            if (result.status === "not_eligible") report.notEligible += 1;
+            else if (result.status !== "stopped") report.failed += 1;
+            report.outstanding.push({ title: row.title, reason: result.reason });
+          }
+          if (result.status === "blocked") {
+            stopReason = result.reason;
+            break;
+          }
+          if (!state.stopRequested) {
+            render("Continuing through Facebook Marketplace…");
+            await sleep(850);
+          }
+          // Renewal can replace the visible cards without any scrolling.
+          processedListing = true;
+          break;
         }
 
-        await sleep(850);
-      }
+        if (state.stopRequested || stopReason) break;
+        if (processedListing) continue;
+        if (scrollSteps >= maxRenewalScrollSteps) {
+          stopReason = "Reached the 260-scroll-step limit";
+          break;
+        }
+        if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+          if (bottomSince === null) {
+            bottomSince = Date.now();
+            render("Waiting for Facebook to load more listings…");
+          }
+          if (Date.now() - bottomSince >= 12000) break;
+          await sleep(350);
+          continue;
+        }
 
-      if (state.stopRequested) break;
-
-      const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0);
-      const atBottom = window.scrollY + window.innerHeight >= height - 180;
-
-      if (!atBottom) {
-        window.scrollBy({
-          top: Math.max(560, Math.round(window.innerHeight * 0.82)),
-          behavior: "auto",
-        });
+        bottomSince = null;
+        root.scrollBy({ top: Math.max(1, Math.round(root.clientHeight * 0.75)), behavior: "auto" });
+        scrollSteps += 1;
         await sleep(420);
-        continue;
       }
-
-      const previousSignature = visibleBatchSignature();
-      const previousTotal = state.rows.length;
-      render(
-        `Waiting for Facebook's next batch… ${renewed} renewed · ${notRenewable} not renewable · ${failed} failed.`,
-      );
-
-      const loadedNextBatch = await waitForNextFacebookBatch(
-        previousSignature,
-        previousTotal,
-        12000,
-      );
-
-      if (loadedNextBatch) {
-        pageWaitsWithoutProgress = 0;
-        await sleep(280);
-        continue;
-      }
-
-      pageWaitsWithoutProgress += 1;
-      if (pageWaitsWithoutProgress >= 2) break;
-
-      window.scrollBy({ top: -220, behavior: "auto" });
-      await sleep(260);
-      window.scrollTo({
-        top: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
-        behavior: "auto",
-      });
-      await sleep(550);
+    } catch (error) {
+      stopReason = "Helper error: " + String(error?.message || error).slice(0, 120);
     }
-
+    const manualStop = state.stopRequested;
     state.running = false;
-    const stopped = state.stopRequested;
     state.stopRequested = false;
-    render(
-      `${stopped ? "Auto renewal stopped" : "Auto renewal complete"}: ${renewed} renewed · ${notRenewable} not renewable · ${failed} failed.`,
+    const counts = report.renewed + " confirmed · " + report.notEligible + " not eligible · " + report.failed + " failed/unconfirmed";
+    const outcome = stopReason ? "Auto renewal stopped. " + escapeHtml(stopReason) :
+      manualStop ? "Auto renewal stopped by you" : "Auto renewal finished";
+    render(outcome + " · " + counts + ".");
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"]/g, (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]
     );
+  }
+
+  function reportHtml() {
+    const r = state.report;
+    const when = state.lastCompletedScan ? new Date(state.lastCompletedScan).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "never";
+    if (!r) return `<div style="font-size:11px;color:#b9bbc1;margin-bottom:10px">Last completed scan: ${escapeHtml(when)}</div>`;
+    const cell = (label, value, colour = "#fff") => `<div style="background:#1c1e23;border-radius:8px;padding:6px"><b style="font-size:15px;color:${colour}">${value}</b><br><span style="color:#aeb1b8;font-size:10px">${label}</span></div>`;
+    return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:6px">
+      ${cell("discovered", r.discovered)}${cell("eligible", r.eligible)}${cell("renewed", r.renewed, "#bfffc8")}
+      ${cell("not eligible", r.notEligible)}${cell("failed / unconfirmed", r.failed, r.failed ? "#ffb4b4" : "#fff")}${cell("outstanding", r.outstanding.length, r.outstanding.length ? "#ffb4b4" : "#fff")}
+    </div>
+    <div style="font-size:11px;color:#b9bbc1;margin-bottom:8px">Last completed scan: ${escapeHtml(when)}</div>
+    ${r.outstanding.length ? `<div style="font-size:11px;color:#ffd0d0;margin-bottom:8px;max-height:90px;overflow:auto">${r.outstanding.map((o) => `• ${escapeHtml(o.title.slice(0, 50))}: ${escapeHtml(o.reason)}`).join("<br>")}</div>` : ""}`;
   }
 
   function stats() {
@@ -678,6 +780,7 @@
       active: rows.filter((row) => row.stockStatus === "active").length,
       stale: rows.filter((row) => row.stockStatus === "stale").length,
       stockUnknown: rows.filter((row) => row.stockStatus === "unknown").length,
+      renewable: rows.filter((row) => row.renewable).length,
     };
   }
 
@@ -730,10 +833,12 @@
           </select>
         </div>
         <div style="font-size:11px;color:#b9bbc1;margin-bottom:10px">
+          <b style="color:#9fd2ff">${summary.renewable} showing "Renew your listing"</b> in this filter<br>
           Stock match: <b style="color:#bfffc8">${summary.active} active</b> ·
           <b style="color:#ffb4b4">${summary.stale} stale</b> ·
           ${summary.stockUnknown} unknown
         </div>
+        ${reportHtml()}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
           <button id="vfc-mgr-scan" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#343740;color:#fff;font-weight:700;cursor:pointer">Scan all listings</button>
           <button id="vfc-mgr-next" ${state.running ? "disabled" : ""} style="min-height:38px;border:0;border-radius:9px;background:#343740;color:#fff;font-weight:700;cursor:pointer">Find next renewable</button>
