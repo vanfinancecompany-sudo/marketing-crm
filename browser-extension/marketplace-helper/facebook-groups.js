@@ -824,10 +824,20 @@
   }
 
   function classifyRenewalFeedback(feedback) {
-    if (feedback.some(text => /\b(?:your )?post (?:was |has been |is )?(?:submitted|sent) for (?:admin )?approval\b|\byour post is (?:now )?(?:pending|awaiting) approval\b/i.test(text))) return "pending";
+    if (feedback.some(text => /\b(?:your )?post (?:was |has been |is )?(?:submitted|sent) for (?:admin )?approval\b|\byour post is (?:now )?(?:pending|awaiting) (?:admin )?approval\b/i.test(text))) return "pending";
     if (feedback.some(text => /^(?:your )?post (?:was |has been )?(?:published|posted|shared)(?: successfully)?(?:[.!]|\s+(?:in|to) (?:the|this) group|\s+View post|$)/i.test(text))) return "submitted";
     if (feedback.some(text => /couldn[’']t (?:publish|create|share) your post|post couldn[’']t be (?:published|shared)|failed to post/i.test(text))) return "failed";
     return "";
+  }
+
+  // Only extends the wait for evidence; it never counts as a confirmation.
+  function facebookStillPosting(dialog) {
+    try {
+      if (!dialog?.isConnected || !visible(dialog)) return false;
+      return [...dialog.querySelectorAll('[role="progressbar"], span, div')].filter(visible)
+        .some(element => element.getAttribute?.("role") === "progressbar" ||
+          /^posting(?:\.\.\.|…)?$/i.test(clean(element.innerText || element.textContent || "")));
+    } catch { return false; }
   }
 
   async function verifyRenewalSubmission(job, dialog, captionHasRegistration) {
@@ -841,8 +851,12 @@
     const observer = new MutationObserver(collect);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
     try {
-      for (let attempt = 0; attempt < 25; attempt += 1) {
+      // Facebook keeps the composer open showing "Posting" while it uploads the photo. Keep
+      // watching for up to ~3 minutes while it does, then allow the usual confirmation window.
+      let quietChecks = 0;
+      for (let attempt = 0; attempt < 300 && quietChecks < 25; attempt += 1) {
         await sleep(600);
+        quietChecks = facebookStillPosting(dialog) ? 0 : quietChecks + 1;
         if (renewalRestriction()) return renewalOutcome(job, "stop", { reason: "Facebook reported an account restriction or security check" });
         collect();
         const feedback = classifyRenewalFeedback([...seen]);
@@ -1176,6 +1190,7 @@
       waitForComposerEditor,
       waitForRenewalComposer,
       waitForVisiblePage,
+      facebookStillPosting,
       renewalComposerSnapshot,
       renewalComposerTimeoutReason,
       attachImage,

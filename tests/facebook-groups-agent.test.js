@@ -249,7 +249,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.40");
+  assert.equal(manifest.version, "1.2.41");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -803,7 +803,7 @@ test("renewal receipts require a trusted Post click and fresh, matching Facebook
 test("automatic renewal verifies the prepared advert before one native Post action", async () => {
   const job = { id: "auto-renewal", registration: "AB12CDE", caption: "REGISTRATION: AB12CDE", renewal: { automatic: true } };
   const rectangle = () => ({ width: 150, height: 24 });
-  async function run({ visiblePhoto = true, authorised = true, response = "Your post was published.", hidden = false } = {}) {
+  async function run({ visiblePhoto = true, authorised = true, response = "Your post was published.", hidden = false, postingChecks = 0 } = {}) {
     const fixture = createVerifiedComposerFixture();
     const feedback = [];
     const outcome = [];
@@ -814,8 +814,19 @@ test("automatic renewal verifies the prepared advert before one native Post acti
     } });
     if (hidden) harness.document.visibilityState = "hidden";
     const query = fixture.dialog.querySelectorAll.bind(fixture.dialog);
-    fixture.dialog.querySelectorAll = (selector) => selector.startsWith("img[src") ?
-      (visiblePhoto ? [{ getBoundingClientRect: rectangle }] : []) : query(selector);
+    let clicked = false;
+    let postingLeft = postingChecks;
+    fixture.dialog.isConnected = true;
+    fixture.dialog.querySelectorAll = (selector) => {
+      if (selector.startsWith("img[src")) return visiblePhoto ? [{ getBoundingClientRect: rectangle }] : [];
+      if (selector.startsWith('[role="progressbar"]')) {
+        if (!clicked || postingLeft <= 0) return [];
+        postingLeft -= 1;
+        if (postingLeft === 0 && response) feedback.push({ innerText: response, getBoundingClientRect: rectangle });
+        return [{ innerText: "Posting", getBoundingClientRect: rectangle, getAttribute: () => null }];
+      }
+      return query(selector);
+    };
     fixture.editor.innerText = "";
     fixture.editor.textContent = "";
     fixture.editor.dispatchEvent = (event) => {
@@ -826,7 +837,8 @@ test("automatic renewal verifies the prepared advert before one native Post acti
     post.click = () => {
       assert.ok(harness.calls.includes("BEGIN_GROUP_RENEWAL_SUBMISSION"));
       clicks += 1;
-      if (response) feedback.push({ innerText: response, getBoundingClientRect: rectangle });
+      clicked = true;
+      if (response && !postingChecks) feedback.push({ innerText: response, getBoundingClientRect: rectangle });
     };
     await harness.hooks.submitAutomaticRenewal(job, fixture.dialog, fixture.editor);
     assert.equal(outcome.length, 1);
@@ -843,6 +855,15 @@ test("automatic renewal verifies the prepared advert before one native Post acti
   assert.equal(unclear.clicks, 1);
   assert.equal(unclear.result.duplicateRisk, true);
   assert.equal((await run({ response: "Your account is restricted" })).result.status, "stop");
+  // Facebook shows "Posting" for longer than the old 25-check window, then confirms.
+  const slowUpload = await run({ postingChecks: 60, response: "Your post is pending admin approval" });
+  assert.equal(slowUpload.clicks, 1);
+  assert.equal(slowUpload.result.status, "submitted");
+  assert.equal(slowUpload.result.approvalState, "pending");
+  // Still no confirmation after Facebook stops posting: uncertain, never retried.
+  const slowUnclear = await run({ postingChecks: 40, response: "" });
+  assert.equal(slowUnclear.clicks, 1);
+  assert.equal(slowUnclear.result.duplicateRisk, true);
   // A hidden page never reaches the Post grant or click.
   const hiddenRun = await run({ hidden: true });
   assert.equal(hiddenRun.clicks, 0);
