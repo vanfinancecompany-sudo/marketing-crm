@@ -37,10 +37,20 @@ export function authoriseRenewalRequest(req, body, environment = process.env) {
   return timingSafeEqual(Buffer.from(bearer), Buffer.from(heartbeatToken(key, environment.VERCEL_ENV))) ? "worker" : "";
 }
 
+// Stable code for a pre-submission composer failure. The helper's wording has changed
+// between versions, so every known composer wording maps to this one code; records
+// saved before the code existed are still recognised by their wording.
+const COMPOSER_UNVERIFIED = "composer_unverified";
+const COMPOSER_FAILURE_PATTERN = /^(?:Posting permission or group composer could not be verified|Create Post opener found, but composer could not be verified before timeout|Create Post composer or opener not found before timeout|Create Post opener found; composer timeout\b|Create Post composer\/opener timeout\b)/;
+
+function composerFailureCode(status, reason) {
+  return status === "needs_attention" && COMPOSER_FAILURE_PATTERN.test(String(reason || "")) ? COMPOSER_UNVERIFIED : "";
+}
+
 function canRetryComposerForTest(outcome) {
   return outcome?.status === "needs_attention" && outcome.mode === "automatic" && !outcome.attemptedAt &&
     !outcome.submissionReservedAt && !outcome.duplicateRisk && !outcome.failureStage &&
-    outcome.reason === "Posting permission or group composer could not be verified";
+    (outcome.failureCode === COMPOSER_UNVERIFIED || composerFailureCode(outcome.status, outcome.reason) === COMPOSER_UNVERIFIED);
 }
 
 async function readBackgroundSettings(db) {
@@ -337,7 +347,9 @@ export async function manageBackgroundWorker(db, body, now) {
     }
     return { plan: { ...current.plan, controlledTest: { ...existing, closedAt: now.toISOString() } } };
   });
-  if (!settings.background_token_hash || settings.background_test_date || !run || test || run.stopped || !(await readSettings(db)).enabled) {
+  // Arming is allowed while hourly checks are paused: the worker receives no job until they are enabled,
+  // and then only this Southampton job. A closed earlier test is kept in history and does not block a new one.
+  if (!settings.background_token_hash || settings.background_test_date || !run || (test && !test.closedAt) || run.stopped) {
     return { ok: false, error: "A paired worker and an active queue with unused test authorisation are required" };
   }
   const eligibility = await checkRenewalClaim(db, SOUTHAMPTON_TEST_GROUP, true, now);
@@ -349,10 +361,12 @@ export async function manageBackgroundWorker(db, body, now) {
   if (!armed) return { ok: false, error: "The Southampton authorisation has already been used" };
   const result = await updateToday(db, now, current => {
     const existing = current.outcomes?.[SOUTHAMPTON_TEST_GROUP];
-    if (current.stopped || current.plan.controlledTest || !current.plan.groups?.some(group => group.groupKey === SOUTHAMPTON_TEST_GROUP) ||
+    const earlier = current.plan.controlledTest;
+    if (current.stopped || (earlier && !earlier.closedAt) || !current.plan.groups?.some(group => group.groupKey === SOUTHAMPTON_TEST_GROUP) ||
         Object.values(current.outcomes || {}).some(item => item.status === "preparing") ||
         (existing && !canRetryComposerForTest(existing))) return { error: "Southampton is held or outside today's queue, or another advert is preparing" };
-    return { plan: { ...current.plan, controlledTest: { armedAt: now.toISOString() } } };
+    return { plan: { ...current.plan, controlledTest: { armedAt: now.toISOString() },
+      ...(earlier ? { controlledTestHistory: [...(current.plan.controlledTestHistory || []), earlier].slice(-20) } : {}) } };
   });
   if (!result.ok) {
     const { error: releaseError } = await db.from(SETTINGS_TABLE).update({ background_test_date: null }).eq("id", 1).eq("background_test_date", date);
@@ -646,7 +660,10 @@ export async function handlePost(db, body, now = new Date(), environment = proce
       if (previous?.status === "preparing" && previous.jobId !== body.jobId) return { error: "Review the active browser draft before changing this group" };
       if (body.jobId && previous.status === status) return { outcomes: run.outcomes };
       const attemptedAt = Date.parse(body.attemptedAt);
-      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...previous, status, reason: clean(body.reason, 200) || "The browser did not supply an explanation; review this group before retrying.", at: now.toISOString(),
+      const { failureCode: _previousCode, ...earlier } = previous || {};
+      const failureCode = body.jobId ? composerFailureCode(status, clean(body.reason, 200)) : "";
+      return { outcomes: { ...(run.outcomes || {}), [groupKey]: { ...earlier, status, reason: clean(body.reason, 200) || "The browser did not supply an explanation; review this group before retrying.", at: now.toISOString(),
+        ...(failureCode ? { failureCode } : {}),
         ...(body.jobId && Number.isFinite(attemptedAt) && attemptedAt <= now.getTime() + 60_000 ? { attemptedAt: new Date(attemptedAt).toISOString() } : {}),
         ...(body.jobId && body.failureStage === "publication" ? { failureStage: "publication" } : {}),
         ...(body.duplicateRisk === true ? { duplicateRisk: true } : {}) } } };
