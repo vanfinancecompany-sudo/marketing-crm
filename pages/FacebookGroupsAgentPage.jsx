@@ -1049,7 +1049,7 @@ export default function FacebookGroupsAgentPage({
           </button> : null}
           {workerTest?.paired ? <button className="button button--small button--ghost" type="button" disabled={workerActionPending || renewalAutomatic === true}
             onClick={() => void configureBackgroundWorker("worker-revoke")}>Revoke background helper</button> : null}
-          {workerPaired && workerTest && !workerTest.used && !workerTest.test ?
+          {workerPaired && workerTest && !workerTest.used && (!workerTest.test || workerTest.test.closedAt) ?
             <button className="button button--small button--ghost" type="button" disabled={workerActionPending}
               onClick={() => void configureBackgroundWorker("worker-test-arm")}>Authorise one Southampton test advert</button> : null}
           {workerTest?.test && !workerTest.test.closedAt ? <>

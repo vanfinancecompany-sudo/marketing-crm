@@ -8,6 +8,7 @@ import {
   OUTCOMES, RUN_TABLE, SETTINGS_TABLE, DEFAULT_DAILY_LIMIT, GROUP_ACTIVITY_SOURCE, RENT2BUY_GROUP_ACTIVITY_TYPE,
   buildRenewalAdvertHistory, buildRenewalPlan, canonicalGroup, clampLimit, groupActivitySourceId, londonDay, nextRunAt, summarizeRenewalRun,
   renewalPostPermalink, renewalReviewIdentity, renewalReviewTarget, isHistoricalSubmissionHold, isExpiredAttemptHold, recentRenewalAttempt,
+  UNRESOLVED_POST,
 } from "../lib/rent2buyGroupRenewals.js";
 import { describeRenewalAgent, renewalHeartbeatChannel } from "../lib/rent2buyGroupRenewalMonitor.js";
 import { markGroupPosted, markGroupPostStatus } from "../services/facebookGroupsAgent.js";
@@ -51,6 +52,19 @@ function canRetryComposerForTest(outcome) {
   return outcome?.status === "needs_attention" && outcome.mode === "automatic" && !outcome.attemptedAt &&
     !outcome.submissionReservedAt && !outcome.duplicateRisk && !outcome.failureStage &&
     (outcome.failureCode === COMPOSER_UNVERIFIED || composerFailureCode(outcome.status, outcome.reason) === COMPOSER_UNVERIFIED);
+}
+
+// The previous Southampton advert must have a verified approval status before a
+// controlled advert is authorised: resolved, or checked since it was posted.
+async function previousSouthamptonAdvert(db) {
+  const { data, error } = await db.from("facebook_group_state").select("state").eq("group_key", SOUTHAMPTON_TEST_GROUP)
+    .eq("rent2buy", true).maybeSingle();
+  if (error) throw error;
+  const state = data?.state || {};
+  const unresolved = UNRESOLVED_POST.has(state.postStatus);
+  const checkedSincePost = Date.parse(state.lastPostCheckAt) > Date.parse(state.lastPostedAt);
+  return { postStatus: state.postStatus || null, lastPostedAt: state.lastPostedAt || null, lastPostCheckAt: state.lastPostCheckAt || null,
+    verified: Boolean(data) && (!unresolved || checkedSincePost) };
 }
 
 async function readBackgroundSettings(db) {
@@ -338,6 +352,7 @@ export async function manageBackgroundWorker(db, body, now) {
   if (body.action === "worker-test-status") return { ok: true,
     test: test ? { ...test, outcome: test.jobId && test.jobId === outcome?.jobId ? outcome.status : null } : null,
     used: Boolean(settings.background_test_date), paired: Boolean(settings.background_token_hash),
+    previousAdvert: await previousSouthamptonAdvert(db),
   };
   if (body.action === "worker-test-close") return updateToday(db, now, current => {
     const existing = current.plan?.controlledTest;
@@ -347,8 +362,14 @@ export async function manageBackgroundWorker(db, body, now) {
     }
     return { plan: { ...current.plan, controlledTest: { ...existing, closedAt: now.toISOString() } } };
   });
-  if (!settings.background_token_hash || settings.background_test_date || !run || test || run.stopped || !(await readSettings(db)).enabled) {
+  // Arming is allowed while hourly checks are paused: the worker receives no job until they are enabled,
+  // and then only this Southampton job. A closed earlier test is kept in history and does not block a new one.
+  if (!settings.background_token_hash || settings.background_test_date || !run || (test && !test.closedAt) || run.stopped) {
     return { ok: false, error: "A paired worker and an active queue with unused test authorisation are required" };
+  }
+  const previous = await previousSouthamptonAdvert(db);
+  if (!previous.verified) {
+    return { ok: false, error: "Verify the previous Southampton advert's approval status before authorising a new advert" };
   }
   const eligibility = await checkRenewalClaim(db, SOUTHAMPTON_TEST_GROUP, true, now);
   if (!eligibility.prepare) return { ok: false, error: eligibility.reason };
@@ -359,10 +380,12 @@ export async function manageBackgroundWorker(db, body, now) {
   if (!armed) return { ok: false, error: "The Southampton authorisation has already been used" };
   const result = await updateToday(db, now, current => {
     const existing = current.outcomes?.[SOUTHAMPTON_TEST_GROUP];
-    if (current.stopped || current.plan.controlledTest || !current.plan.groups?.some(group => group.groupKey === SOUTHAMPTON_TEST_GROUP) ||
+    const earlier = current.plan.controlledTest;
+    if (current.stopped || (earlier && !earlier.closedAt) || !current.plan.groups?.some(group => group.groupKey === SOUTHAMPTON_TEST_GROUP) ||
         Object.values(current.outcomes || {}).some(item => item.status === "preparing") ||
         (existing && !canRetryComposerForTest(existing))) return { error: "Southampton is held or outside today's queue, or another advert is preparing" };
-    return { plan: { ...current.plan, controlledTest: { armedAt: now.toISOString() } } };
+    return { plan: { ...current.plan, controlledTest: { armedAt: now.toISOString() },
+      ...(earlier ? { controlledTestHistory: [...(current.plan.controlledTestHistory || []), earlier].slice(-20) } : {}) } };
   });
   if (!result.ok) {
     const { error: releaseError } = await db.from(SETTINGS_TABLE).update({ background_test_date: null }).eq("id", 1).eq("background_test_date", date);
