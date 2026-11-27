@@ -249,7 +249,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.31");
+  assert.equal(manifest.version, "1.2.35");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -741,6 +741,7 @@ function loadGroupHelperTestHooks({
     InputEvent: FakeEvent,
     File: FakeFile,
     DataTransfer: FakeDataTransfer,
+    MutationObserver: class { observe() {} disconnect() {} },
     URL,
     atob: (value) => Buffer.from(value, "base64").toString("binary"),
     setTimeout(callback) { callback(); return 1; },
@@ -771,7 +772,7 @@ test("renewal receipts require a trusted Post click and fresh, matching Facebook
     } });
     const post = { ...alert("Post"), getAttribute: () => null };
     harness.hooks.watchRenewalPost({ id: "job-one", registration: "AB12CDE" },
-      { contains: (element) => element === post }, { innerText: caption });
+      { ...alert("Create post"), isConnected: true, contains: (element) => element === post }, { innerText: caption });
     const click = { target: { closest: () => post } };
     harness.dispatch("click", { ...click, isTrusted: false });
     assert.equal(receipts.length, 0);
@@ -786,6 +787,8 @@ test("renewal receipts require a trusted Post click and fresh, matching Facebook
   assert.equal(posted.approvalState, "submitted");
   const pending = await observe({ newFeedback: "Your post is pending approval" });
   assert.equal(pending.approvalState, "pending");
+  assert.equal((await observe({ newFeedback: "Post sent for admin approval. View post" })).approvalState, "pending");
+  assert.equal((await observe({ newFeedback: "Your post was shared to the group. View post" })).approvalState, "submitted");
   const stale = await observe({ preexisting: "Your post was published." });
   assert.equal(stale.status, "needs_attention");
   assert.equal(stale.duplicateRisk, true);
@@ -843,18 +846,19 @@ test("automatic renewal verifies the prepared advert before one native Post acti
 test("renewal acceptance ignores old adverts and honours current moderation status", async () => {
   const url = "https://www.facebook.com/groups/test/";
   const postedAt = "2026-11-25T09:00:00.000Z";
-  const resultFor = async (notice, date = postedAt) => {
+  const resultFor = async (notice, date = postedAt, ids = [42]) => {
     const results = [];
     const harness = loadGroupHelperTestHooks({ runtimeSendMessage(message) {
       results.push(message.result);
       return { ok: true };
     } });
     const original = harness.document.querySelectorAll.bind(harness.document);
-    harness.document.querySelectorAll = (selector) => selector === '[role="article"], article' ? [{
-      innerText: "Rent2Buy van\nREGISTRATION: AB12CDE\n" + notice,
+    harness.document.querySelectorAll = (selector) => selector === '[role="article"], article' ? ids.map(id => ({
+      innerText: "Rent2Buy van\nREGISTRATION: AB12CDE\nhttps://rent2buyvans.co.uk/\n" + notice,
       getBoundingClientRect: () => ({ width: 200, height: 150 }),
-      querySelector: (selector) => selector.startsWith("a[") ? { href: url + "posts/42/" } : { getAttribute: () => date },
-    }] : original(selector);
+      querySelectorAll: () => [{ href: url + `posts/${id}/`, getAttribute: () => null }],
+      querySelector: (sel) => sel.startsWith("time") ? { getAttribute: () => date } : null,
+    })) : original(selector);
     await harness.hooks.checkPostedStatus({ groupIndex: 0, job: { id: "check-42",
       groups: [{ url, postedAt, registration: "AB12CDE", renewalPost: true }] } });
     return results[0];
@@ -865,6 +869,8 @@ test("renewal acceptance ignores old adverts and honours current moderation stat
   assert.equal(pending.pending, true);
   assert.equal((await resultFor("Your post was declined")).declined, true);
   assert.equal((await resultFor("", "2026-11-18T09:00:00.000Z")).accepted, false);
+  assert.equal((await resultFor("", "2026-11-25T09:10:00.000Z")).accepted, false);
+  assert.equal((await resultFor("", postedAt, [42, 43])).accepted, false);
 });
 
 test("Facebook group comment and reply editors are rejected", () => {

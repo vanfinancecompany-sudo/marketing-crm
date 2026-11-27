@@ -509,6 +509,7 @@ export function getFacebookHelperStatus(timeoutMs = 2500) {
       connected: true,
       version: clean(message.version || ""),
       capabilities: Array.isArray(message.capabilities) ? message.capabilities : [],
+      approvalMonitor: message.approvalMonitor || null,
       hostname: clean(message.hostname || ""),
     }))
     .catch(() => ({
@@ -749,9 +750,10 @@ export function markGroupPosted(groups, groupUrl, details = {}) {
     return {
       ...group,
       lastPostedAt: postedAt,
+      lastPostPermalink: details.permalink || "",
       ...(details.renewalPost ? { lastRenewalPostedAt: postedAt } : {}),
       lastPostCheckAt: "",
-      postStatus: details.approvalState === "accepted" ? "accepted" : "awaiting",
+      postStatus: details.approvalState === "accepted" ? "accepted" : details.renewalPost && details.approvalState === "pending" ? "pending" : "awaiting",
       lastPostDetectedState: "",
       lastPostMatchMethod: "",
       pendingRegistration: clean(details.registration || group.pendingRegistration || ""),
@@ -885,7 +887,7 @@ export function startFacebookPostStatusCheck(groups, productKey, limit = 12) {
         url: group.url,
         registration: group.pendingRegistration,
         postedAt: group.lastPostedAt,
-        ...(productKey === "rent2buy" && group.lastRenewalPostedAt === group.lastPostedAt ? { renewalPost: true } : {}),
+        ...(productKey === "rent2buy" && group.lastRenewalPostedAt === group.lastPostedAt ? { renewalPost: true, permalink: group.lastPostPermalink || "" } : {}),
       })),
       startedAt: new Date().toISOString(),
     },

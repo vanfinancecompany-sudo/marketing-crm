@@ -43,6 +43,7 @@ export default async function handler(request, response) {
       ...(payload.applicationType === "rent2buy" ? { fromName: "Rent2Buy Vans" } : {}),
       subject: email.subject,
       html: email.html,
+      text: email.text,
       categories: ["transactional", "application-received"],
       customArgs: {
         transactional_template: email.templateName,
