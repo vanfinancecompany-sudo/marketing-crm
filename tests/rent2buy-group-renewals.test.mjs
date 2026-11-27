@@ -184,7 +184,7 @@ test("Southampton test retry recognises every pre-submission composer failure wo
   assert.equal(await armWith({ ...composer, mode: "manual" }), false);
 });
 
-test("Southampton test arms while hourly checks are paused and after a closed test, once the previous advert is verified", async () => {
+test("Southampton test arms while hourly checks are paused and after a closed test; historical approval is not a prerequisite", async () => {
   const southampton = url("830909275134315");
   const db = workerTestDb("aaa", "830909275134315");
   await runDailyRenewalCheck(db, now);
@@ -198,14 +198,9 @@ test("Southampton test arms while hourly checks are paused and after a closed te
   const arm = () => manageBackgroundWorker(db, { action: "worker-test-arm" }, now);
   assert.equal((await arm()).ok, false, "an open test still blocks");
   run().plan.controlledTest.closedAt = now.toISOString();
-  const postedAt = group.state.lastPostedAt;
+  // An older advert still awaiting approval, never re-checked, does not obstruct a new advert.
   group.state = { ...group.state, acceptedPostCount: 1, postStatus: "awaiting", lastPostCheckAt: undefined };
-  const unverified = await arm();
-  assert.equal(unverified.ok, false);
-  assert.match(unverified.error, /previous Southampton advert/);
-  assert.ok(!settings.background_test_date, "a refusal does not consume the one-use authorisation");
-  group.state = { ...group.state, postStatus: "pending", lastPostCheckAt: new Date(Date.parse(postedAt) + 3_600_000).toISOString() };
-  assert.equal((await arm()).ok, true, "paused hourly checks and a closed earlier test no longer block");
+  assert.equal((await arm()).ok, true, "paused hourly checks, a closed earlier test and historical approval do not block");
   assert.equal(run().plan.controlledTest.closedAt, undefined);
   assert.deepEqual(run().plan.controlledTestHistory.map(item => item.jobId), ["old-composer-job"], "earlier test kept in history");
   assert.ok(settings.background_test_date);
