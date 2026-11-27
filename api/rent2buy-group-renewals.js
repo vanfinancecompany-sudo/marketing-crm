@@ -8,6 +8,7 @@ import {
   OUTCOMES, RUN_TABLE, SETTINGS_TABLE, DEFAULT_DAILY_LIMIT, GROUP_ACTIVITY_SOURCE, RENT2BUY_GROUP_ACTIVITY_TYPE,
   buildRenewalAdvertHistory, buildRenewalPlan, canonicalGroup, clampLimit, groupActivitySourceId, londonDay, nextRunAt, summarizeRenewalRun,
   renewalPostPermalink, renewalReviewIdentity, renewalReviewTarget, isHistoricalSubmissionHold, isExpiredAttemptHold, recentRenewalAttempt,
+  renewalHoldKind,
 } from "../lib/rent2buyGroupRenewals.js";
 import { describeRenewalAgent, renewalHeartbeatChannel } from "../lib/rent2buyGroupRenewalMonitor.js";
 import { markGroupPosted, markGroupPostStatus } from "../services/facebookGroupsAgent.js";
@@ -51,6 +52,22 @@ function canRetryComposerForTest(outcome) {
   return outcome?.status === "needs_attention" && outcome.mode === "automatic" && !outcome.attemptedAt &&
     !outcome.submissionReservedAt && !outcome.duplicateRisk && !outcome.failureStage &&
     (outcome.failureCode === COMPOSER_UNVERIFIED || composerFailureCode(outcome.status, outcome.reason) === COMPOSER_UNVERIFIED);
+}
+
+// Persist or clear a group's renewal hold in its existing state record (no schema change).
+async function updateGroupHold(db, groupUrl, change, at) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data, error } = await db.from("facebook_group_state").select("state").eq("group_key", groupUrl).eq("rent2buy", true).maybeSingle();
+    if (error) throw error;
+    if (!data?.state) return null;
+    const next = change(data.state);
+    if (!next) return data.state;
+    const saved = await db.from("facebook_group_state").update({ state: next, updated_at: at })
+      .eq("group_key", groupUrl).eq("state", JSON.stringify(data.state)).select("group_key").maybeSingle();
+    if (saved.error) throw saved.error;
+    if (saved.data) return next;
+  }
+  throw new Error("The group changed while saving its renewal hold. Retry shortly.");
 }
 
 async function readBackgroundSettings(db) {
@@ -534,9 +551,18 @@ async function recordWorkerResult(db, body, now) {
   }
   if (body.status === "submitted") return saveWorkerSubmission(db, run, entry, groupUrl, body, now);
   const attemptedAt = entry.submissionReservedAt || body.attemptedAt;
-  return handlePost(db, { action: body.status === "stop" ? "stop" : "outcome", status: body.status, groupUrl,
+  const duplicateRisk = Boolean(entry.submissionReservedAt || body.duplicateRisk);
+  const saved = await handlePost(db, { action: body.status === "stop" ? "stop" : "outcome", status: body.status, groupUrl,
     jobId: entry.jobId, runDate: run.run_date, reason: body.reason, attemptedAt, failureStage: body.failureStage,
-    duplicateRisk: Boolean(entry.submissionReservedAt || body.duplicateRisk) }, now);
+    duplicateRisk }, now);
+  const reason = clean(body.reason, 200);
+  const kind = saved.ok ? renewalHoldKind(body.status, reason, duplicateRisk) : "";
+  if (kind) {
+    await updateGroupHold(db, groupUrl, state => ({ ...state,
+      renewalHold: { kind, reason, at: now.toISOString(), runDate: run.run_date, jobId: entry.jobId },
+      ...(kind === "membership" ? { membershipPending: true } : {}) }), now.toISOString());
+  }
+  return saved;
 }
 
 async function recordWorkerApproval(db, body, now) {
@@ -613,6 +639,17 @@ export async function handlePost(db, body, now = new Date(), environment = proce
       }
       return { outcomes: { ...run.outcomes, [groupKey]: { ...existing, status: "submitted", at: now.toISOString() } } };
     }, body.runDate);
+  }
+  if (action === "reinstate") {
+    const groupKey = canonicalGroup(body.groupUrl);
+    if (!groupKey) return { ok: false, error: "Valid groupUrl required" };
+    const state = await updateGroupHold(db, groupKey, current => {
+      if (!current.renewalHold) return null;
+      const { renewalHold, ...rest } = current;
+      return { ...rest, renewalHoldHistory: [...(current.renewalHoldHistory || []), { ...renewalHold, reinstatedAt: now.toISOString() }].slice(-20),
+        ...(renewalHold.kind === "membership" ? { membershipPending: false } : {}) };
+    }, now.toISOString());
+    return state ? { ok: true, state } : { ok: false, error: "Group not found" };
   }
   if (action === "settings") {
     const row = { id: 1, updated_at: now.toISOString() };

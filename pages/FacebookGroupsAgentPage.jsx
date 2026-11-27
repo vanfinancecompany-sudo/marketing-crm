@@ -36,7 +36,7 @@ import {
   startFacebookPostStatusCheck,
 } from "../services/facebookGroupsAgent.js";
 import { londonDateKey } from "../lib/marketingDailyOperations.js";
-import { groupActivitySourceId } from "../lib/rent2buyGroupRenewals.js";
+import { activeRenewalHold, groupActivitySourceId } from "../lib/rent2buyGroupRenewals.js";
 import { recordDailyMarketingActivity } from "../services/marketingDailyOperations.js";
 import { getStoredMarketingAccessKey, MARKETING_ACCESS_HEADER } from "../services/marketingAccess.js";
 
@@ -240,9 +240,27 @@ export default function FacebookGroupsAgentPage({
   );
 
   const dueGroups = useMemo(
-    () => provenGroups.filter((group) => groupDueState(group).due),
+    () => provenGroups.filter((group) => groupDueState(group).due && !activeRenewalHold(group)),
     [provenGroups],
   );
+  const heldGroups = useMemo(
+    () => isRent2Buy ? provenGroups.filter((group) => activeRenewalHold(group)) : [],
+    [provenGroups, isRent2Buy],
+  );
+
+  async function reinstateGroup(group) {
+    if (busy || !window.confirm(`Return ${group.name || "this group"} to automatic adverts?`)) return;
+    try {
+      const result = await renewalRequest({ action: "reinstate", groupUrl: group.url });
+      if (!result.ok) throw new Error(result.error || "Could not reinstate the group.");
+      const key = (value) => String(value || "").toLowerCase().replace(/\/?$/, "/");
+      setGroups((current) => current.map((item) => key(item.url) === key(group.url)
+        ? { ...item, ...(result.state || {}), renewalHold: undefined } : item));
+      setMessage(`${group.name || "Group"} returned to the advertising rotation.`);
+    } catch (error) {
+      setMessage(error.message || "Could not reinstate the group.");
+    }
+  }
 
   const awaitingGroups = useMemo(
     () => activeGroups.filter((group) =>
@@ -1078,6 +1096,29 @@ export default function FacebookGroupsAgentPage({
           </div>
         ) : null}
       </section>
+
+      {heldGroups.length ? (
+        <section className="panel">
+          <div className="panel__header">
+            <div>
+              <h3>Held from automatic adverts</h3>
+              <p>These proven groups blocked a recent automatic advert. They stay out of the rotation until reinstated; a membership hold ends once membership is confirmed.</p>
+            </div>
+          </div>
+          <div className="competence-report-list">
+            {heldGroups.map((group) => {
+              const hold = activeRenewalHold(group);
+              return (
+                <div key={group.url}>
+                  <strong>{group.name || group.url}</strong>
+                  <p>{hold.kind === "rules" ? "Group rules" : hold.kind === "membership" ? "Membership pending" : "Technical issue"}: {hold.reason} ({new Date(hold.at).toLocaleString("en-GB")})</p>
+                  <button className="button button--small button--ghost" type="button" disabled={Boolean(busy)} onClick={() => void reinstateGroup(group)}>Reinstate</button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {dueGroups.length ? (
         <section className="panel">

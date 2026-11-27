@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, createHmac, webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
+import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt, renewalReviewIdentity, renewalHoldKind, activeRenewalHold } from "../lib/rent2buyGroupRenewals.js";
 import { groupDueState, groupPipeline } from "../services/facebookGroupsAgent.js";
 import {
   runDailyRenewalCheck, handlePost, readRenewals, authoriseRenewalRequest, verifyBackgroundCredential,
@@ -210,6 +210,58 @@ test("Southampton test arms while hourly checks are paused and after a closed te
   const next = await request("worker-next", { jobId: "southampton-armed-job" });
   assert.equal(next.job.groupUrl, southampton, "only the Southampton job is released");
   assert.equal((await arm()).ok, false, "single use");
+});
+
+test("group blockers are classified; admin review and duplicate-risk attempts are never group holds", () => {
+  assert.equal(renewalHoldKind("needs_attention", "Facebook shows a group rule that prohibits commercial adverts"), "rules");
+  assert.equal(renewalHoldKind("needs_attention", "The group's rules do not allow this advert or its link."), "rules");
+  assert.equal(renewalHoldKind("needs_attention", "Membership is pending"), "membership");
+  assert.equal(renewalHoldKind("needs_attention", "Create Post opener found, but composer could not be verified before timeout"), "technical");
+  assert.equal(renewalHoldKind("failed", "Facebook reported a failed post and left the composer open."), "technical");
+  assert.equal(renewalHoldKind("needs_attention", "Facebook did not confirm this exact advert.", true), "", "duplicate risk keeps its own hold");
+  assert.equal(renewalHoldKind("submitted", "pending admin approval"), "", "admin review is a submission");
+  assert.equal(renewalHoldKind("stop", "Facebook requires account or security review"), "", "account-wide stop is separate");
+  assert.equal(renewalHoldKind("needs_attention", "Facebook posting tab stayed hidden (window minimised or tab in background). Nothing was inserted or posted."), "");
+  assert.equal(activeRenewalHold({ renewalHold: { kind: "membership" }, membershipPending: false }), null, "membership confirmed ends the hold");
+  assert.equal(activeRenewalHold({ renewalHold: { kind: "rules" }, membershipPending: false }).kind, "rules");
+});
+
+test("a group-level blocker holds the group out of later queues until reinstated, keeping history", async () => {
+  const southampton = url("830909275134315");
+  const db = workerTestDb("aaa", "830909275134315");
+  await runDailyRenewalCheck(db, now);
+  const run = db.t.rent2buy_group_renewal_runs[0];
+  run.outcomes[southampton] = { status: "preparing", jobId: "rules-block-job", mode: "automatic", at: now.toISOString() };
+  const result = await handleBackgroundWorker(db, { action: "worker-result", groupUrl: southampton, jobId: "rules-block-job",
+    runDate: londonDay(now), status: "needs_attention", reason: "Facebook shows a group rule that prohibits commercial adverts" }, now, { VERCEL_ENV: "production" });
+  assert.equal(result.ok, true);
+  const row = () => db.t.facebook_group_state.find(item => item.group_key === southampton);
+  assert.equal(row().state.renewalHold.kind, "rules");
+  assert.equal(run.outcomes[southampton].reason, "Facebook shows a group rule that prohibits commercial adverts", "run history keeps the reason");
+  const tomorrow = new Date(now.getTime() + 86_400_000);
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), false, "held group is not re-queued");
+  const reinstated = await handlePost(db, { action: "reinstate", groupUrl: southampton }, tomorrow);
+  assert.equal(reinstated.ok, true);
+  assert.equal(row().state.renewalHold, undefined);
+  assert.equal(row().state.renewalHoldHistory.at(-1).kind, "rules");
+  assert.ok(row().state.renewalHoldHistory.at(-1).reinstatedAt);
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), true, "reinstated group returns");
+});
+
+test("membership blockers hold the group until membership is confirmed", async () => {
+  const southampton = url("830909275134315");
+  const db = workerTestDb("aaa", "830909275134315");
+  await runDailyRenewalCheck(db, now);
+  db.t.rent2buy_group_renewal_runs[0].outcomes[southampton] = { status: "preparing", jobId: "membership-job-1", mode: "automatic", at: now.toISOString() };
+  await handleBackgroundWorker(db, { action: "worker-result", groupUrl: southampton, jobId: "membership-job-1",
+    runDate: londonDay(now), status: "needs_attention", reason: "Membership is pending" }, now, { VERCEL_ENV: "production" });
+  const row = db.t.facebook_group_state.find(item => item.group_key === southampton);
+  assert.equal(row.state.renewalHold.kind, "membership");
+  assert.equal(row.state.membershipPending, true);
+  const tomorrow = new Date(now.getTime() + 86_400_000);
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), false);
+  row.state = { ...row.state, membershipPending: false };
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), true);
 });
 
 test("worker composer failures are stored with the stable failure code", async () => {
