@@ -59,7 +59,6 @@ function RenewalAdvertHistory({ entries }) {
 }
 function RenewalsPanel({ data, error, onChanged }) {
   const [busy, setBusy] = useState(false);
-  const [maxDaily, setMaxDaily] = useState("");
   async function post(body, confirmText) {
     if (busy || (confirmText && !window.confirm(confirmText))) return;
     setBusy(true);
@@ -93,8 +92,6 @@ function RenewalsPanel({ data, error, onChanged }) {
           <p key={issue.fingerprint} className="notice notice--warning">{issue.detail}</p>)}
         <p>
       <label><input type="checkbox" checked={data.settings.enabled} disabled={busy} onChange={(e) => post({ action: "settings", enabled: e.target.checked }, e.target.checked ? "Enable hourly renewal checks?" : "Disable hourly renewal checks?")} /> Hourly renewal checks enabled</label>
-          {" � "}Max per day{" "}
-          <input type="number" min="1" max="30" style={{ width: 60 }} value={maxDaily || data.settings.maxDaily} disabled={busy} onChange={(e) => setMaxDaily(e.target.value)} onBlur={() => maxDaily && Number(maxDaily) !== data.settings.maxDaily && post({ action: "settings", maxDaily: Number(maxDaily) }).then(() => setMaxDaily(""))} />
         </p>
         {latest ? <>
           <div className="competence-metrics">

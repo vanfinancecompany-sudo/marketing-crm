@@ -1067,14 +1067,6 @@ export default function FacebookGroupsAgentPage({
           </button> : null}
           {workerTest?.paired ? <button className="button button--small button--ghost" type="button" disabled={workerActionPending || renewalAutomatic === true}
             onClick={() => void configureBackgroundWorker("worker-revoke")}>Revoke background helper</button> : null}
-          {workerPaired && workerTest && !workerTest.used && (!workerTest.test || workerTest.test.closedAt) ?
-            <button className="button button--small button--ghost" type="button" disabled={workerActionPending}
-              onClick={() => void configureBackgroundWorker("worker-test-arm")}>Authorise one Southampton test advert</button> : null}
-          {workerTest?.test && !workerTest.test.closedAt ? <>
-            <p>Southampton test {workerTest.test.outcome?.replaceAll("_", " ") || "authorised and waiting for the background worker"}.</p>
-            <button className="button button--small button--ghost" type="button" disabled={workerActionPending || workerTest.test.outcome === "preparing"}
-              onClick={() => void configureBackgroundWorker("worker-test-close")}>{workerTest.test.outcome ? "Resume normal queue" : "Cancel Southampton test"}</button>
-          </> : null}
           {renewalAutomatic === false ? <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
             onClick={() => setRenewalRun(!renewalRunning)}>
             {renewalRunning ? "Pause after this group" : "Prepare today's renewal queue"}
