@@ -28,6 +28,7 @@ function makeRuntime(origin = "https://marketing-crm-six.vercel.app") {
   const listeners = new Set();
   const crmMessages = [];
   const tabs = [];
+  const windows = [];
   let workerHandler;
   let bridgeHandler;
   let alarmHandler;
@@ -74,12 +75,17 @@ function makeRuntime(origin = "https://marketing-crm-six.vercel.app") {
     },
     tabs: {
       async get(id) { return { ...tabs.findLast((tab) => tab.id === id), status: "complete" }; },
-      async create(options) { tabs.push({ id: 2, url: options.url, created: true, active: options.active }); return { id: 2 }; },
-      async update(id, options) { tabs.push({ id, url: options.url }); return { id }; },
+      async create(options) { tabs.push({ id: 2, url: options.url, created: true, active: options.active, windowId: options.windowId }); return { id: 2 }; },
+      async update(id, options) { tabs.push({ id, url: options.url, active: options.active }); return { id }; },
       async query() { return [{ id: 1 }]; },
       async sendMessage(id, message) { deliveries.push({ id, type: message.type }); if (id === 1 && bridgeHandler) bridgeHandler(message); },
       async remove() {},
       onUpdated: { addListener() {} },
+    },
+    windows: {
+      async create(options) { windows.push({ ...options, id: 7, created: true }); tabs.push({ id: 2, url: options.url, created: true, active: true, windowId: 7 }); return { id: 7, tabs: [{ id: 2 }] }; },
+      async get(id) { const found = windows.findLast(item => item.id === id); if (!found) throw new Error("No window"); return { id, type: "normal", state: found.state, tabs: [{ id: 2 }] }; },
+      async update(id, options) { windows.push({ id, ...options }); return { id }; },
     },
     alarms: { create() {}, async get() { return { scheduledTime: Date.now() + 60000 }; }, onAlarm: { addListener(listener) { alarmHandler = listener; } } },
     action: { async setBadgeText() {}, async setTitle() {} },
@@ -145,7 +151,7 @@ function makeRuntime(origin = "https://marketing-crm-six.vercel.app") {
     assert.fail("Expected extension message was not delivered");
   }
 
-  return { crmWindow, crmMessages, stored, tabs, deliveries, sendToWorker, runFacebookPage, waitFor, requests, responses,
+  return { crmWindow, crmMessages, stored, tabs, windows, deliveries, sendToWorker, runFacebookPage, waitFor, requests, responses,
     wakeRenewals: async () => {
       alarmHandler({ name: "vfcRent2BuyGroupRenewalAlarm" });
       await worker.wait();
@@ -235,8 +241,13 @@ test("background renewal owns the Post grant and records restrictions without a 
   assert.equal(direct.ok, false, "a CRM page cannot start an automatic job");
   runtime.responses.set("worker-next", [{ ok: true, job }]);
   await runtime.wakeRenewals();
-  assert.equal(runtime.tabs.find(tab => tab.created).active, false);
+  // Automatic jobs use a dedicated, unfocused window whose tab is active (rendered), never a hidden background tab.
+  assert.equal(runtime.windows.length, 1);
+  assert.equal(runtime.windows[0].focused, false);
+  assert.equal(runtime.windows[0].state, "normal");
+  assert.equal(runtime.tabs.find(tab => tab.created).windowId, 7);
   assert.equal(runtime.tabs.at(-1).url, job.groupUrl);
+  assert.equal(runtime.stored.get("vfcRent2BuyGroupRenewal").postingWindowId, 7);
   assert.equal(runtime.deliveries.some(item => item.type === "GROUP_RENEWAL_WAKE"), false);
   assert.deepEqual(runtime.requests.find(item => item.body.action === "worker-next").body.usedVehicleIds, ["earlier-stock"]);
   assert.equal((await send("GROUP_RENEWAL_READY")).ok, true);

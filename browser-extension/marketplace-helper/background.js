@@ -220,6 +220,25 @@ async function stopRenewalForRestriction(state, reason) {
   await saveRenewal({ ...state, automation, restricted: true, restrictionReason: reason, restrictionReportPending: Boolean(automation) });
 }
 
+// Automatic adverts run in one dedicated, unfocused Facebook window. A background
+// tab is hidden: Chromium pauses animation frames and throttles timers there, so
+// Facebook never finished rendering the Create Post composer or its confirmation.
+// The posting tab is active only inside its own window, so the owner's focus is not
+// taken. With Edge window occlusion disabled, a covered (not minimised) window stays visible.
+async function renewalPostingTab(state) {
+  let win = state.postingWindowId ? await chrome.windows.get(state.postingWindowId, { populate: true }).catch(() => null) : null;
+  if (win && win.type !== "normal") win = null;
+  if (!win) {
+    win = await chrome.windows.create({ url: "about:blank", focused: false, type: "normal", state: "normal", width: 1280, height: 960 });
+    return { tab: win.tabs[0], windowId: win.id };
+  }
+  if (win.state === "minimized") await chrome.windows.update(win.id, { state: "normal" });
+  const owned = (win.tabs || []).find(item => item.id === state.tabId);
+  const tab = owned ? await chrome.tabs.update(owned.id, { active: true })
+    : await chrome.tabs.create({ windowId: win.id, url: "about:blank", active: true });
+  return { tab, windowId: win.id };
+}
+
 async function startRenewalJob(job, sender, worker = null) {
   const target = canonicalGroupUrl(job.groupUrl);
   if (job.productKey !== "rent2buy" || !/^\d{4}-\d{2}-\d{2}$/.test(job.renewal?.date || "") ||
@@ -234,12 +253,19 @@ async function startRenewalJob(job, sender, worker = null) {
   if (!worker && state.pending?.job.renewal.automatic) return { ok: false, error: "The background worker is preparing an advert" };
   if (state.pending?.job.id === job.id && state.origin === origin) return { ok: true, jobId: job.id };
   if (state.pending || state.result) return { ok: false, error: "Finish the previous renewal preparation first." };
-  const existing = state.origin === origin && state.tabId ? await chrome.tabs.get(state.tabId).catch(() => null) : null;
-  const previousGroup = existing?.url && canonicalGroupUrl(existing.url);
-  const reusable = previousGroup && previousGroup === state.lastGroupUrl ? existing : null;
-  const tab = reusable || await chrome.tabs.create({ url: "about:blank", active: false });
+  let tab;
+  let postingWindowId = state.postingWindowId || null;
+  if (job.renewal.automatic) {
+    try { ({ tab, windowId: postingWindowId } = await renewalPostingTab(state)); }
+    catch { return { ok: false, error: "Could not open the Facebook posting window" }; }
+  } else {
+    const existing = state.origin === origin && state.tabId ? await chrome.tabs.get(state.tabId).catch(() => null) : null;
+    const previousGroup = existing?.url && canonicalGroupUrl(existing.url);
+    const reusable = previousGroup && previousGroup === state.lastGroupUrl ? existing : null;
+    tab = reusable || await chrome.tabs.create({ url: "about:blank", active: false });
+  }
   const pending = { job: { ...job, groupUrl: target }, tabId: tab.id, storedAt: Date.now() };
-  await saveRenewal({ ...state, origin, tabId: tab.id, pending, restricted: state.restricted === true,
+  await saveRenewal({ ...state, origin, tabId: tab.id, postingWindowId, pending, restricted: state.restricted === true,
     ...(worker ? { nextWorkerRequest: null, usedWorkerVehicles: worker.resetRotation ? [] : state.usedWorkerVehicles || [] } : {}) });
   try {
     await chrome.tabs.update(tab.id, { url: target });

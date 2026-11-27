@@ -911,6 +911,9 @@
     }
     if (!post) return renewalOutcome(job, "needs_attention", { reason: "Could not verify the caption, attached photo and Post button in Facebook" });
 
+    if (document.visibilityState !== "visible") {
+      return renewalOutcome(job, "needs_attention", { reason: "Facebook posting tab became hidden before submission. Nothing was posted." });
+    }
     const reserved = await chrome.runtime.sendMessage({ type: "BEGIN_GROUP_RENEWAL_SUBMISSION", jobId: job.id });
     if (!reserved?.ok) return renewalOutcome(job, "needs_attention", { reason: reserved?.error || "Automatic submission was stopped before posting" });
     if (renewalRestriction()) return renewalOutcome(job, "stop", { reason: "Facebook requires account or security review" });
@@ -927,6 +930,22 @@
   // Automatic preparation: observe the actual composer as Facebook renders it.
   // Background tabs can delay timers; DOM changes also trigger a strict check.
   // This does not relax any composer, membership or publication safeguard.
+  // Facebook only finishes rendering the composer and its toasts in a visible page.
+  function waitForVisiblePage(timeoutMs) {
+    if (document.visibilityState === "visible") return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let timer = null;
+      const done = (value) => {
+        clearTimeout(timer);
+        document.removeEventListener("visibilitychange", check);
+        resolve(value);
+      };
+      function check() { if (document.visibilityState === "visible") done(true); }
+      timer = setTimeout(() => done(document.visibilityState === "visible"), timeoutMs);
+      document.addEventListener("visibilitychange", check);
+    });
+  }
+
   function renewalComposerSnapshot() {
     const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
     const identified = dialogs.filter(dialogHasCreatePostIdentity);
@@ -1042,6 +1061,10 @@
 
     let editor, scope, verified, openerSeen, diagnostic;
     if (job.renewal?.automatic) {
+      if (!await waitForVisiblePage(20000)) {
+        await renewalOutcome(job, "needs_attention", { reason: "Facebook posting tab stayed hidden (window minimised or tab in background). Nothing was inserted or posted." });
+        return;
+      }
       ({ editor, scope, verified, openerSeen, diagnostic } = await waitForRenewalComposer());
     } else {
       ({ editor, scope, verified } = await waitForComposerEditor(1200));
@@ -1152,6 +1175,7 @@
       composerEditorCandidates,
       waitForComposerEditor,
       waitForRenewalComposer,
+      waitForVisiblePage,
       renewalComposerSnapshot,
       renewalComposerTimeoutReason,
       attachImage,

@@ -689,6 +689,7 @@ function loadGroupHelperTestHooks({
   }
 
   const document = {
+    visibilityState: "visible",
     body: {
       innerText: "",
       appendChild(node) { appended.push(node); },
@@ -802,7 +803,7 @@ test("renewal receipts require a trusted Post click and fresh, matching Facebook
 test("automatic renewal verifies the prepared advert before one native Post action", async () => {
   const job = { id: "auto-renewal", registration: "AB12CDE", caption: "REGISTRATION: AB12CDE", renewal: { automatic: true } };
   const rectangle = () => ({ width: 150, height: 24 });
-  async function run({ visiblePhoto = true, authorised = true, response = "Your post was published." } = {}) {
+  async function run({ visiblePhoto = true, authorised = true, response = "Your post was published.", hidden = false } = {}) {
     const fixture = createVerifiedComposerFixture();
     const feedback = [];
     const outcome = [];
@@ -811,6 +812,7 @@ test("automatic renewal verifies the prepared advert before one native Post acti
       if (message.type === "GROUP_RENEWAL_OUTCOME") outcome.push(message.result);
       return { ok: true };
     } });
+    if (hidden) harness.document.visibilityState = "hidden";
     const query = fixture.dialog.querySelectorAll.bind(fixture.dialog);
     fixture.dialog.querySelectorAll = (selector) => selector.startsWith("img[src") ?
       (visiblePhoto ? [{ getBoundingClientRect: rectangle }] : []) : query(selector);
@@ -841,6 +843,11 @@ test("automatic renewal verifies the prepared advert before one native Post acti
   assert.equal(unclear.clicks, 1);
   assert.equal(unclear.result.duplicateRisk, true);
   assert.equal((await run({ response: "Your account is restricted" })).result.status, "stop");
+  // A hidden page never reaches the Post grant or click.
+  const hiddenRun = await run({ hidden: true });
+  assert.equal(hiddenRun.clicks, 0);
+  assert.equal(hiddenRun.result.status, "needs_attention");
+  assert.match(hiddenRun.result.reason, /hidden/);
 });
 
 test("renewal acceptance ignores old adverts and honours current moderation status", async () => {
