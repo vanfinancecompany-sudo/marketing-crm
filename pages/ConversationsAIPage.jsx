@@ -8,8 +8,8 @@ const STATUS_TEXT = {
   never_reported: ["Not reporting yet", "notice--warning"], not_configured: ["Monitoring not configured", "notice--warning"],
   not_connected: ["Not connected", ""], unavailable: ["Data unavailable", "notice--warning"],
 };
-const KIND_TEXT = { received: "Received", answered: "Answered", needs_human: "Needs a person", send_failed: "Send failed", ai_failed: "AI failed" };
-const fmt = (value) => (value ? new Date(value).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "-");
+const KIND_TEXT = { received: "Received", answered: "Answered", manual_answered: "Manual reply observed", needs_human: "Needs a person", send_failed: "Send failed", ai_failed: "AI failed" };
+const fmt = (value) => (value ? new Date(value).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "—");
 const num = (value) => (value === null || value === undefined ? "Not available" : Number(value).toLocaleString());
 
 function StatusBadge({ status }) {
@@ -129,6 +129,7 @@ export default function ConversationsAIPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
+  const [productFilter, setProductFilter] = useState("all");
   const [days, setDays] = useState(7);
   const [viewAll, setViewAll] = useState(false);
   const [search, setSearch] = useState("");
@@ -176,8 +177,8 @@ export default function ConversationsAIPage() {
     if (!data) return [];
     const facebook = (data.activity || []).map((e) => ({ ...e, channel: e.channel }));
     const askMe = (data.channels.ask_me.recent || []).map((r) => ({ channel: "ask_me", kind: "answered", occurred_at: r.at, product: r.product, question_excerpt: r.question, reply_excerpt: r.reply }));
-    return [...facebook, ...askMe].filter((e) => filter === "all" || e.channel === filter).sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at))).slice(0, 80);
-  }, [data, filter]);
+    return [...facebook, ...askMe].filter((e) => (filter === "all" || e.channel === filter) && (productFilter === "all" || e.product === productFilter)).sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at))).slice(0, 80);
+  }, [data, filter, productFilter]);
 
   // Detailed history is loaded only when requested. Search and paging run on
   // the server across retained Ask Me turns and Facebook events, not the
@@ -189,7 +190,7 @@ export default function ConversationsAIPage() {
       setActivityLoading(true);
       setActivityError("");
       try {
-        const params = new URLSearchParams({ days: String(days), page: String(page), channel: filter, search });
+        const params = new URLSearchParams({ days: String(days), page: String(page), channel: filter, product:productFilter, search });
         const response = await fetch(`/api/conversations-activity?${params}`, {
           headers: { [MARKETING_ACCESS_HEADER]: getStoredMarketingAccessKey() },
           signal: controller.signal,
@@ -204,7 +205,7 @@ export default function ConversationsAIPage() {
       }
     }, search ? 300 : 0);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [viewAll, accessStatus, filter, days, page, search, data?.generatedAt]);
+  }, [viewAll, accessStatus, filter, productFilter, days, page, search, data?.generatedAt]);
 
   function collapseActivity() {
     setViewAll(false);
@@ -238,6 +239,10 @@ export default function ConversationsAIPage() {
       <section className="panel"><div className="panel__header"><div><div className="eyebrow">Facebook � Marketplace assistant</div><h3>Automatic replies</h3></div></div>
         <div className="competence-metrics"><Metric label="Received" value={num(fb.counts.received)} /><Metric label="Answered (delivery confirmed)" value={num(fb.counts.answered)} /><Metric label="Needing a person" value={num(fb.counts.needs_human)} /><Metric label="Send / confirmation failures" value={num(fb.counts.send_failed)} /><Metric label="Ask Me failures" value={num(fb.counts.ai_failed)} /><Metric label="Auto replies today (assistant)" value={num(fb.detail?.autoRepliesToday)} /></div>
       </section>
+      <section className="panel"><div className="panel__header"><div><div className="eyebrow">Marketplace · reply tracking</div><h3>Finance and Rent2Buy</h3><p>Received and confirmed replies in the selected period; outstanding conversations across retained reporting history, including hand-offs. A reply outside the assistant may not yet be reported.</p></div></div>
+      {fb.byProduct ? ["finance","rent2buy","unknown"].map(product => { const c=fb.byProduct[product]; return <div key={product}><h4>{product === "finance" ? "Van Finance Company" : product === "rent2buy" ? "Rent2Buy" : "Unclassified"}</h4><div className="competence-metrics"><Metric label="Received" value={num(c.received)} /><Metric label="AI replies confirmed" value={num(c.answered)} /><Metric label="Manual replies observed" value={num(c.manual_answered)} /><Metric label="Hand-offs" value={num(c.needs_human)} /><Metric label="Outstanding · all retained history" value={fb.outstanding === null ? "Not available" : num(c.outstanding)} /></div></div>; }) : <p>Product counts unavailable.</p>}
+      {fb.outstanding === null ? <p className="notice notice--warning">Outstanding data unavailable; do not assume the inbox is clear.</p> : <details open={Boolean(fb.outstanding?.length)}><summary>Outstanding conversations ({fb.outstanding?.length || 0})</summary>{(fb.outstanding || []).map((e,i) => <p key={i}><strong>{e.product === "finance" ? "Finance" : e.product === "rent2buy" ? "Rent2Buy" : "Unclassified"} · {fmt(e.at)}</strong> · {KIND_TEXT[e.kind] || e.kind} · Ref {e.reference || "—"}{e.reason ? " · "+e.reason : ""}</p>)}</details>}
+      </section>
       <RenewalsPanel data={renewalData} error={renewalError} onChanged={() => refresh(days)} />
       <section className="panel">
         <div className="panel__header">
@@ -252,18 +257,19 @@ export default function ConversationsAIPage() {
               <option value="ask_me">Ask Me</option>
               <option value="facebook_marketplace">Facebook Marketplace</option>
             </select>
+            <select className="field__input" aria-label="Product" style={{maxWidth:220}} value={productFilter} onChange={e=>{setProductFilter(e.target.value);setPage(1);setViewAll(true);}}><option value="all">All products</option><option value="finance">Van Finance</option><option value="rent2buy">Rent2Buy</option></select>
           </div>
         </div>
         {viewAll && activityError ? <div className="notice notice--error">{activityError}</div> : null}
         {viewAll && activityLoading && !activityPage ? <div className="notice">Loading conversation history.</div> : null}
         {(() => {
-          const visible = viewAll ? (activityPage?.entries || []) : activity.slice(0, 5);
+          const visible = viewAll ? (activityPage?.entries || []) : activity.filter(e => e.kind !== 'received').slice(0, 5);
           return visible.length ?
             <div className="competence-report-list">{visible.map((e, i) =>
               <div key={`${e.channel}-${e.occurred_at}-${e.sequence || 0}-${i}`}>
                 <strong>{fmt(e.occurred_at)} � {CHANNEL_LABELS[e.channel] || e.channel} � {KIND_TEXT[e.kind] || e.kind}{e.product ? ` � ${e.product === "rent2buy" ? "Rent2Buy" : "Finance"}` : ""}</strong>
                 {e.question_excerpt ? <p><b>Customer:</b> {e.question_excerpt}</p> : null}
-                {e.reply_excerpt ? <p><b>AI reply:</b> {e.reply_excerpt}</p> : null}
+                {e.reply_excerpt ? <p><b>{e.kind === "manual_answered" ? "Manual reply:" : "AI reply:"}</b> {e.reply_excerpt}</p> : null}
                 {e.reason ? <p><b>Note:</b> {e.reason}</p> : null}
               </div>
             )}</div> :

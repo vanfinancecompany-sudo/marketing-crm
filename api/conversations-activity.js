@@ -2,7 +2,7 @@
 // Unlike the dashboard's quick preview, this scans the retained history in
 // date range; the React page only renders 20 matches at a time.
 import { createClient } from "@supabase/supabase-js";
-import { isMonitorTestEvent, redactExcerpt, withoutFacebookSessions } from "../lib/conversationsMonitor.js";
+import { isMonitorTestEvent, redactExcerpt, withoutFacebookSessions, marketplaceDisplayKind } from "../lib/conversationsMonitor.js";
 
 const API_KEY_HEADER = "x-marketing-customer-database-key";
 const PAGE_SIZE = 20;
@@ -33,7 +33,7 @@ async function getRetained(db, table, columns, after, dateField) {
 export function buildActivityEntries(sessions, rawEvents) {
   const events = rawEvents.filter((e) => !isMonitorTestEvent(e));
   const entries = events.map((e) => ({
-    channel: e.channel, kind: e.kind, occurred_at: e.occurred_at,
+    channel: e.channel, kind: marketplaceDisplayKind(e), occurred_at: e.occurred_at,
     product: e.product, question_excerpt: redactExcerpt(e.question_excerpt),
     reply_excerpt: redactExcerpt(e.reply_excerpt, 600),
     reason: redactExcerpt(e.reason), sequence: 0,
@@ -62,7 +62,7 @@ export function buildActivityEntries(sessions, rawEvents) {
   return entries;
 }
 
-export async function getConversationsActivity(db, { days = 7, page = 1, search = "", channel = "all", now = new Date() } = {}) {
+export async function getConversationsActivity(db, { days = 7, page = 1, search = "", channel = "all", product = "all", now = new Date() } = {}) {
   const since = new Date(now.getTime() - Math.min(30, Math.max(1, days)) * 86400000).toISOString();
   const [facebook, askMe] = await Promise.all([
     getRetained(db, "conversation_events", "source_id,channel,kind,occurred_at,product,question_excerpt,reply_excerpt,reason", since, "occurred_at"),
@@ -70,7 +70,7 @@ export async function getConversationsActivity(db, { days = 7, page = 1, search 
   ]);
   const all = buildActivityEntries(askMe.rows, facebook.rows);
   const term = search.toLocaleLowerCase().trim().slice(0, 120);
-  const filtered = all.filter((e) => (channel === "all" || e.channel === channel) &&
+  const filtered = all.filter((e) => (channel === "all" || e.channel === channel) && (product === "all" || e.product === product) &&
     (!term || [e.question_excerpt, e.reply_excerpt, e.reason].some((v) => String(v || "").toLocaleLowerCase().includes(term))));
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -92,7 +92,8 @@ export default async function handler(req, res) {
     const page = Math.max(1, Number.parseInt(req.query?.page, 10) || 1);
     const channel = ["all", "ask_me", "facebook_marketplace"].includes(req.query?.channel) ? req.query.channel : "all";
     const search = String(req.query?.search || "").slice(0, 120);
-    return res.status(200).json(await getConversationsActivity(db, { days, page, channel, search }));
+    const product = ["finance","rent2buy"].includes(req.query?.product) ? req.query.product : "all";
+    return res.status(200).json(await getConversationsActivity(db, { days, page, channel, product, search }));
   } catch (error) {
     console.error("CONVERSATIONS_ACTIVITY_FAILED", String(error?.message || error).slice(0, 200));
     return res.status(500).json({ error: "Conversation history could not be loaded" });
