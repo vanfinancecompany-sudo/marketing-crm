@@ -1,6 +1,7 @@
 import { loadGa4PipelineSummary } from './_ga4-data-api.js';
 import { loadLiveApplicationCompletions } from './_live-application-completions.js';
 import { loadCrmApplicationOpportunities } from './_crm-application-opportunities.js';
+import { loadWebsiteBusinessReport } from './_website-business-report.js';
 
 function clean(value,limit=500){return String(value||'').trim().slice(0,limit);}
 function number(value){const parsed=Number(value);return Number.isFinite(parsed)?parsed:0;}
@@ -70,6 +71,10 @@ export function withCrmApplicationOpportunities(summary, applicationStats) {
 export default async function handler(request,response){
  if(request.method!=='GET')return response.status(405).json({ok:false,message:'Method not allowed.'});
  response.setHeader('Cache-Control','no-store');
+ if (request.query?.businessReport === '1') {
+  try { return response.status(200).json({ok:true,businessReport:await loadWebsiteBusinessReport()}); }
+  catch { return response.status(503).json({ok:false,message:'Business reporting temporarily unavailable.'}); }
+ }
  try{
   const [summary,live,confirmed]=await Promise.all([
    loadGa4PipelineSummary(),

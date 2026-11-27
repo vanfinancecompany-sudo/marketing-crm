@@ -158,7 +158,7 @@ describe('Website Analytics fresh data', () => {
     assert.match(html, /\/shared\/sidebar-renderer\.js/);
     assert.match(html, /\/website-analytics\/live-status\.js/);
     assert.match(liveStatus, /MarketingCrmSidebarRenderer\.render/);
-    assert.match(liveStatus, /Today · live application confirmations/);
+    assert.match(liveStatus, /Today · CRM applications received/);
     assert.match(liveStatus, /settled seven-day GA4 counters above intentionally stop at yesterday/);
   });
 
@@ -252,4 +252,26 @@ describe('CRM-confirmed applications, 60-minute reporting rule', () => {
     assert.equal(verified.sites[0].crmConfirmedApplicationsToday, 7);
     assert.equal(verified.sites[0].crmConfirmedApplications7Days, 45);
   });
+});
+
+import { buildRanges, boundary, measurementWarning, opportunityCount, relativeChange, countSessions, summarizeSite } from '../api/_website-business-report.js';
+
+describe('Stable CRM business reporting', () => {
+ const ranges = buildRanges(new Date('2026-11-27T13:37:00Z'));
+ it('compares complete UK calendar days and preserves a partial today', () => {
+  assert.equal(ranges.sevenDays.startDate,'2026-11-20'); assert.equal(ranges.previousSevenDays.startDate,'2026-11-13'); assert.equal(ranges.twentyEightDays.startDate,'2026-10-30'); assert.equal(ranges.previousTwentyEightDays.startDate,'2026-10-02'); assert.equal(ranges.today.to,'2026-11-27T13:37:00.000Z');
+  assert.equal(boundary('2026-10-25'),'2026-10-24T23:00:00.000Z'); assert.equal(boundary('2026-03-29'),'2026-03-29T00:00:00.000Z');
+ });
+ it('does not compare across known measurement breaks',()=>{
+  assert.ok(measurementWarning('vanFinance',ranges.sevenDays,ranges.previousSevenDays)); assert.ok(measurementWarning('rent2buy',ranges.sevenDays,ranges.previousSevenDays));
+  const later=buildRanges(new Date('2027-02-01T12:00:00Z')); assert.equal(measurementWarning('vanFinance',later.twentyEightDays,later.previousTwentyEightDays),null);
+  const traffic=Object.fromEntries(Object.keys(ranges).map(k=>[k,{sessions:100,sourceLabelledSessions:20}])); assert.equal(summarizeSite('vanFinance',ranges,traffic,[]).comparisons.sevenDays.sessionChange,null);
+ });
+ it('uses the existing CRM deduplication and excludes unrelated sites',()=>{
+  const rows=[{id:1,created_at:'2026-11-25T12:00:00Z',source:'Wix Finance Application',name:'Test Applicant',email:'fixture@example.invalid'},{id:2,created_at:'2026-11-25T12:05:00Z',source:'Wix Finance Application',name:'Test Applicant',email:'fixture@example.invalid'},{id:3,created_at:'2026-11-26T12:00:00Z',source:'Van Finance Company Rent2Buy',name:'Test Applicant',email:'fixture@example.invalid'},{id:4,created_at:'2026-11-27T00:00:00Z',source:'Rent2BuyVans.co.uk',name:'Test Applicant',email:'fixture@example.invalid'},{id:5,created_at:'2026-11-25T12:00:00Z',source:'VanFinance.co',name:'Other Applicant',email:'other@example.invalid'}];
+  const groups=groupApplicationOpportunities(rows);assert.equal(opportunityCount(groups,'vanFinance',ranges.sevenDays),2);assert.equal(opportunityCount(groups,'rent2buy',ranges.sevenDays),0);assert.equal(opportunityCount(groups,'rent2buy',ranges.today),1);
+ });
+ it('never substitutes zero for unavailable data',async()=>{
+  assert.equal(opportunityCount(null,'vanFinance',ranges.today),null);assert.equal(opportunityCount([],'vanFinance',ranges.today),0);assert.equal(relativeChange(0,5),-1);assert.equal(relativeChange(5,0),null);assert.equal(relativeChange(null,5),null);assert.equal(await countSessions({from(){throw Error('offline')}},'test',ranges.today),null);
+ });
 });

@@ -46,22 +46,26 @@
     element.replaceChildren();
 
     const strong = document.createElement('strong');
-    strong.textContent = 'Today · live application confirmations';
+    strong.textContent = 'Today · CRM applications received';
     element.appendChild(strong);
 
     const summary = document.createElement('span');
+    const totals = latest.applicationOpportunities?.periods?.today?.sites;
+    const verified = latest.applicationStatsStatus === 'crm_verified' && totals;
     summary.textContent = sites.length
-      ? sites.map((site) => `${siteLabel(site)} ${Number(site.applicationCompletionsToday || 0)} completed`).join(' · ')
+      ? sites.map((site) => {
+          const value = !verified ? null : site.key === 'vanFinance'
+            ? (Number.isSafeInteger(totals.vanFinance) && Number.isSafeInteger(totals.vfcRent2Buy) ? totals.vanFinance + totals.vfcRent2Buy : null)
+            : totals[site.key];
+          return `${siteLabel(site)} ${Number.isSafeInteger(value) ? value + ' received' : 'unavailable'}`;
+        }).join(' · ')
       : 'No live application feed available';
     element.appendChild(summary);
 
     const note = document.createElement('small');
-    const delayed = sites.some((site) => site.applicationCompletionSource === 'first_party_live');
-    note.textContent = delayed
-      ? 'A completed application has been confirmed by the live first-party tracker while GA4 is still processing it. The settled seven-day GA4 counters above intentionally stop at yesterday.'
-      : 'Today is shown separately because the weekly GA4 counters above use settled data through yesterday.';
+    note.textContent = 'These are CRM-verified opportunities, not GA4 or browser completion events. The settled seven-day GA4 counters above intentionally stop at yesterday.';
     element.appendChild(note);
-    element.classList.toggle('is-live-ahead', delayed);
+    element.classList.remove('is-live-ahead');
   }
 
   async function load() {
@@ -76,7 +80,7 @@
       if (element) {
         element.replaceChildren();
         const strong = document.createElement('strong');
-        strong.textContent = 'Today · live application confirmations';
+        strong.textContent = 'Today · CRM applications received';
         const note = document.createElement('small');
         note.textContent = 'Live confirmation is temporarily unavailable. Settled GA4 reporting above is unaffected.';
         element.append(strong, note);

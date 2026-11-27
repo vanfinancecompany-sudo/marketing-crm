@@ -148,3 +148,5 @@ export async function loadCrmApplicationOpportunities({ now = new Date(), supaba
   if ((data || []).length >= 5000) throw new Error('Too many applications to safely calculate the reporting period.');
   return buildApplicationOpportunitySummary(data || [], { now });
 }
+
+export { SOURCES as APPLICATION_REPORT_SOURCES };

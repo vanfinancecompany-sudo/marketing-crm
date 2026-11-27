@@ -24,7 +24,7 @@
           <div>
             <div class="eyebrow">CONVERSION INTELLIGENCE</div>
             <h1>Website Analytics</h1>
-            <p>Seven settled days versus the previous seven. GA4 is the source of truth for settled website reporting across Van Finance Company and Rent2Buy Vans.</p>
+            <p>Seven settled days versus the previous seven. GA4 is the source of truth for settled website reporting across Van Finance Company and Rent2Buy Vans. CRM applications and first-party recorded sessions are separate business measures.</p>
           </div>
           <button class="refresh-button" id="refreshButton" type="button">Refresh analytics</button>
         </header>
@@ -39,6 +39,15 @@
           <button type="button" class="site-tab is-active" data-site="all">All websites</button>
           <button type="button" class="site-tab" data-site="vanFinance">Van Finance</button>
           <button type="button" class="site-tab" data-site="rent2buy">Rent2Buy</button>
+        </section>
+
+        <section class="panel" id="businessPerformance" aria-labelledby="businessPerformanceTitle">
+          <div class="section-head"><div><div class="eyebrow">BUSINESS PERFORMANCE</div><h2 id="businessPerformanceTitle">CRM applications and recorded visits</h2></div></div>
+          <p class="quiet-note">CRM applications are deduplicated using the existing 60-minute applicant rule. Today is partial; 7- and 28-day comparisons exclude today. Recorded sessions are first-party observations, not verified people. Source-labelled sessions are a subset, not proof of consent. GA4 below measures a separate, consent-dependent population.</p>
+          <p id="businessReportStatus" class="quiet-note" role="status">Loading business performance…</p>
+          <div class="table-wrap"><table><thead><tr><th>Website</th><th>Period</th><th>Recorded sessions</th><th>Source-labelled sessions</th><th>CRM applications</th></tr></thead><tbody id="businessReportRows"></tbody></table></div>
+          <div id="businessReportWarnings" aria-live="polite"></div>
+          <p class="quiet-note">Van Finance includes finance and Rent2Buy applications received through the Van Finance Company website; standalone Rent2Buy is separate. VanFinance.co and manual leads are excluded. Missing data is shown as unavailable, not zero.</p>
         </section>
 
         <section class="insight-card journey-panel" id="dailyJourneys" aria-labelledby="journeyTitle">
@@ -78,7 +87,7 @@
           <div class="section-head">
             <div>
               <div class="eyebrow">APPLICATION FUNNEL</div>
-              <h2>Application started vs completed</h2>
+              <h2>GA4 application start and completion events</h2>
             </div>
           </div>
           <div class="funnel-grid" id="applicationFunnel"></div>
@@ -138,6 +147,7 @@
     <script type="module" src="/website-analytics/app.js"></script>
     <script type="module" src="/website-analytics/customer-journeys.js"></script>
     <script src="/website-analytics/live-status.js"></script>
+    <script type="module" src="/website-analytics/business-report.js"></script>
     <script src="/website-analytics/live-finance-funnel.js"></script>
   </body>
 </html>
