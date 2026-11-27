@@ -124,12 +124,12 @@ function funnelCard(site) {
   return `<article class="funnel-card ${tone}">
     <div class="funnel-title">${escapeHtml(site.label)}</div>
     <div class="funnel-line">
-      <span>Application started</span><strong>${fmtNumber(current.applicationStarts)}</strong>
+      <span>GA4 start events</span><strong>${fmtNumber(current.applicationStarts)}</strong>
       <small>${escapeHtml(delta(current.applicationStarts, previous.applicationStarts).text)} vs previous week</small>
     </div>
     <div class="funnel-arrow">↓</div>
     <div class="funnel-line">
-      <span>Application completed</span><strong>${fmtNumber(current.applicationCompletions)}</strong>
+      <span>GA4 completion events</span><strong>${fmtNumber(current.applicationCompletions)}</strong>
       <small>${escapeHtml(delta(current.applicationCompletions, previous.applicationCompletions).text)} vs previous week</small>
     </div>
     <div class="funnel-rate${rate == null ? ' muted' : ''}">
@@ -174,7 +174,7 @@ function renderWatchlist() {
       const currentRate = Number(events.conversionRate || 0);
       const previousRate = previousEvents.conversionRate;
       const comparison = previousRate == null ? 'Previous-period conversion is not established yet.' : `${delta(currentRate, previousRate).text} versus the previous seven days.`;
-      items.push(watchItem(currentRate >= 0.35 ? 'good' : 'warn', `${site.label}: application conversion`, `${fmtNumber(events.applicationStarts)} starts produced ${fmtNumber(events.applicationCompletions)} completions (${fmtPct(currentRate)}). ${comparison}`));
+      items.push(watchItem(currentRate >= 0.35 ? 'good' : 'warn', `${site.label}: GA4 event ratio`, `${fmtNumber(events.applicationStarts)} starts produced ${fmtNumber(events.applicationCompletions)} completions (${fmtPct(currentRate)}). ${comparison}`));
     } else {
       items.push(watchItem('info', `${site.label}: application event baseline`, 'No application_start event is present in this settled seven-day window yet. Keep an eye on this as the new GA4 event history builds.'));
     }
