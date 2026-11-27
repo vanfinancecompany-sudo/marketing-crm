@@ -244,12 +244,16 @@ test("background renewal owns the Post grant and records restrictions without a 
   // Automatic jobs use a dedicated, unfocused window whose tab is active (rendered), never a hidden background tab.
   assert.equal(runtime.windows.length, 1);
   assert.equal(runtime.windows[0].focused, false);
-  assert.equal(runtime.windows[0].state, "normal");
+  assert.ok(runtime.windows[0].left <= -3000 && runtime.windows[0].top <= -3000, "posting window is kept off-screen");
   assert.equal(runtime.tabs.find(tab => tab.created).windowId, 7);
   assert.equal(runtime.tabs.at(-1).url, job.groupUrl);
   assert.equal(runtime.stored.get("vfcRent2BuyGroupRenewal").postingWindowId, 7);
   assert.equal(runtime.deliveries.some(item => item.type === "GROUP_RENEWAL_WAKE"), false);
   assert.deepEqual(runtime.requests.find(item => item.body.action === "worker-next").body.usedVehicleIds, ["earlier-stock"]);
+  const restored = runtime.windows.length;
+  assert.equal((await send("ENSURE_GROUP_RENEWAL_VISIBLE")).ok, true, "the posting page can ask for its window to be restored");
+  assert.ok(runtime.windows.length > restored && runtime.windows.at(-1).state === "normal" && runtime.windows.at(-1).left <= -3000);
+  runtime.tabs.push({ id: 2, url: job.groupUrl }); // the stub records activation without the URL
   assert.equal((await send("GROUP_RENEWAL_READY")).ok, true);
   assert.equal((await send("GROUP_RENEWAL_OUTCOME", { status: "submitted", approvalState: "pending" })).ok, false);
   runtime.responses.set("worker-reserve", [{ ok: true, reservedAt: new Date().toISOString() }]);

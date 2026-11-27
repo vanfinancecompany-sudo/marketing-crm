@@ -933,7 +933,7 @@
     }
     if (!post) return renewalOutcome(job, "needs_attention", { reason: "Could not verify the caption, attached photo and Post button in Facebook" });
 
-    if (document.visibilityState !== "visible") {
+    if (!await waitForVisiblePage(15000, job)) {
       return renewalOutcome(job, "needs_attention", { reason: "Facebook posting tab became hidden before submission. Nothing was posted." });
     }
     const reserved = await chrome.runtime.sendMessage({ type: "BEGIN_GROUP_RENEWAL_SUBMISSION", jobId: job.id });
@@ -953,8 +953,11 @@
   // Background tabs can delay timers; DOM changes also trigger a strict check.
   // This does not relax any composer, membership or publication safeguard.
   // Facebook only finishes rendering the composer and its toasts in a visible page.
-  function waitForVisiblePage(timeoutMs) {
+  function waitForVisiblePage(timeoutMs, job = null) {
     if (document.visibilityState === "visible") return Promise.resolve(true);
+    if (job?.renewal?.automatic) {
+      try { chrome.runtime.sendMessage({ type: "ENSURE_GROUP_RENEWAL_VISIBLE", jobId: job.id }); } catch {}
+    }
     return new Promise((resolve) => {
       let timer = null;
       const done = (value) => {
@@ -1083,7 +1086,7 @@
 
     let editor, scope, verified, openerSeen, diagnostic;
     if (job.renewal?.automatic) {
-      if (!await waitForVisiblePage(20000)) {
+      if (!await waitForVisiblePage(20000, job)) {
         await renewalOutcome(job, "needs_attention", { reason: "Facebook posting tab stayed hidden (window minimised or tab in background). Nothing was inserted or posted." });
         return;
       }

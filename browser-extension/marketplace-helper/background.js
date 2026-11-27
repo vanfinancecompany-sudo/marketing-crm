@@ -224,15 +224,17 @@ async function stopRenewalForRestriction(state, reason) {
 // tab is hidden: Chromium pauses animation frames and throttles timers there, so
 // Facebook never finished rendering the Create Post composer or its confirmation.
 // The posting tab is active only inside its own window, so the owner's focus is not
-// taken. With Edge window occlusion disabled, a covered (not minimised) window stays visible.
+// taken. The window is kept off-screen so it never needs managing; with Edge window
+// occlusion disabled an off-screen or covered (not minimised) window still renders.
+const POSTING_WINDOW_BOUNDS = { left: -4000, top: -4000, width: 1280, height: 960 };
 async function renewalPostingTab(state) {
   let win = state.postingWindowId ? await chrome.windows.get(state.postingWindowId, { populate: true }).catch(() => null) : null;
   if (win && win.type !== "normal") win = null;
   if (!win) {
-    win = await chrome.windows.create({ url: "about:blank", focused: false, type: "normal", state: "normal", width: 1280, height: 960 });
+    win = await chrome.windows.create({ url: "about:blank", focused: false, type: "normal", ...POSTING_WINDOW_BOUNDS });
     return { tab: win.tabs[0], windowId: win.id };
   }
-  if (win.state === "minimized") await chrome.windows.update(win.id, { state: "normal" });
+  await chrome.windows.update(win.id, { state: "normal", ...POSTING_WINDOW_BOUNDS }).catch(() => {});
   const owned = (win.tabs || []).find(item => item.id === state.tabId);
   const tab = owned ? await chrome.tabs.update(owned.id, { active: true })
     : await chrome.tabs.create({ windowId: win.id, url: "about:blank", active: true });
@@ -369,6 +371,15 @@ async function handleRenewalMessage(message, sender) {
   const pending = state.pending;
   if (!pending || pending.tabId !== sender?.tab?.id || pending.job.id !== message.jobId || senderOrigin(sender) !== "https://www.facebook.com" ||
       canonicalGroupUrl(sender.url) !== pending.job.groupUrl) return { ok: false };
+  if (message.type === "ENSURE_GROUP_RENEWAL_VISIBLE") {
+    // Something minimised the posting window or switched its tab: restore it off-screen.
+    if (!pending.job.renewal.automatic) return { ok: false };
+    const tab = await chrome.tabs.get(pending.tabId).catch(() => null);
+    if (!tab) return { ok: false };
+    await chrome.windows.update(tab.windowId, { state: "normal", ...POSTING_WINDOW_BOUNDS }).catch(() => {});
+    if (!tab.active) await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+    return { ok: true };
+  }
   if (message.type === "GROUP_RENEWAL_READY") {
     await saveRenewal({ ...state, restricted: false, pending: { ...pending, prepared: true } });
   } else if (message.type === "BEGIN_GROUP_RENEWAL_SUBMISSION") {
@@ -1251,7 +1262,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (["GET_GROUP_RENEWAL_STATE", "ACK_GROUP_RENEWAL_RESULT", "OPEN_GROUP_RENEWAL_DRAFT", "SET_GROUP_RENEWAL_AUTOMATION",
         "GET_GROUP_RENEWAL_PAIRING", "CLEAR_GROUP_RENEWAL_PAIRING", "WAKE_GROUP_RENEWAL_WORKER",
-        "GROUP_RENEWAL_READY", "BEGIN_GROUP_RENEWAL_SUBMISSION", "GROUP_RENEWAL_OUTCOME"].includes(message?.type)) {
+        "GROUP_RENEWAL_READY", "BEGIN_GROUP_RENEWAL_SUBMISSION", "GROUP_RENEWAL_OUTCOME", "ENSURE_GROUP_RENEWAL_VISIBLE"].includes(message?.type)) {
       sendResponse(await withRenewalLock(() => handleRenewalMessage(message, sender)));
       return;
     }
