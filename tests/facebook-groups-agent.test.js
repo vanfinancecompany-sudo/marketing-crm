@@ -249,7 +249,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.41");
+  assert.equal(manifest.version, "1.2.42");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -803,7 +803,7 @@ test("renewal receipts require a trusted Post click and fresh, matching Facebook
 test("automatic renewal verifies the prepared advert before one native Post action", async () => {
   const job = { id: "auto-renewal", registration: "AB12CDE", caption: "REGISTRATION: AB12CDE", renewal: { automatic: true } };
   const rectangle = () => ({ width: 150, height: 24 });
-  async function run({ visiblePhoto = true, authorised = true, response = "Your post was published.", hidden = false, postingChecks = 0 } = {}) {
+  async function run({ visiblePhoto = true, authorised = true, response = "Your post was published.", hidden = false, postingChecks = 0, closeAfterPosting = false, closeWithoutPosting = false } = {}) {
     const fixture = createVerifiedComposerFixture();
     const feedback = [];
     const outcome = [];
@@ -823,6 +823,7 @@ test("automatic renewal verifies the prepared advert before one native Post acti
         if (!clicked || postingLeft <= 0) return [];
         postingLeft -= 1;
         if (postingLeft === 0 && response) feedback.push({ innerText: response, getBoundingClientRect: rectangle });
+        if (postingLeft === 0 && closeAfterPosting) fixture.dialog.isConnected = false;
         return [{ innerText: "Posting", getBoundingClientRect: rectangle, getAttribute: () => null }];
       }
       return query(selector);
@@ -838,6 +839,7 @@ test("automatic renewal verifies the prepared advert before one native Post acti
       assert.ok(harness.calls.includes("BEGIN_GROUP_RENEWAL_SUBMISSION"));
       clicks += 1;
       clicked = true;
+      if (closeWithoutPosting) fixture.dialog.isConnected = false;
       if (response && !postingChecks) feedback.push({ innerText: response, getBoundingClientRect: rectangle });
     };
     await harness.hooks.submitAutomaticRenewal(job, fixture.dialog, fixture.editor);
@@ -864,6 +866,15 @@ test("automatic renewal verifies the prepared advert before one native Post acti
   const slowUnclear = await run({ postingChecks: 40, response: "" });
   assert.equal(slowUnclear.clicks, 1);
   assert.equal(slowUnclear.result.duplicateRisk, true);
+  // Facebook finishes Posting and closes the composer without a message: accepted (admin review counts).
+  const closed = await run({ postingChecks: 30, response: "", closeAfterPosting: true });
+  assert.equal(closed.clicks, 1);
+  assert.equal(closed.result.status, "submitted");
+  assert.equal(closed.result.approvalState, "submitted");
+  // A composer that disappears without Facebook ever posting is not evidence.
+  const vanished = await run({ response: "", closeWithoutPosting: true });
+  assert.equal(vanished.result.status, "needs_attention");
+  assert.equal(vanished.result.duplicateRisk, true);
   // A hidden page never reaches the Post grant or click.
   const hiddenRun = await run({ hidden: true });
   assert.equal(hiddenRun.clicks, 0);

@@ -854,9 +854,12 @@
       // Facebook keeps the composer open showing "Posting" while it uploads the photo. Keep
       // watching for up to ~3 minutes while it does, then allow the usual confirmation window.
       let quietChecks = 0;
+      let sawPosting = false;
       for (let attempt = 0; attempt < 300 && quietChecks < 25; attempt += 1) {
         await sleep(600);
-        quietChecks = facebookStillPosting(dialog) ? 0 : quietChecks + 1;
+        const posting = facebookStillPosting(dialog);
+        if (posting) sawPosting = true;
+        quietChecks = posting ? 0 : quietChecks + 1;
         if (renewalRestriction()) return renewalOutcome(job, "stop", { reason: "Facebook reported an account restriction or security check" });
         collect();
         const feedback = classifyRenewalFeedback([...seen]);
@@ -869,6 +872,11 @@
         }
         if (feedback === "failed" && dialog.isConnected && visible(dialog)) {
           return renewalOutcome(job, "failed", { reason: "Facebook reported a failed post and left the composer open.", failureStage: "publication" });
+        }
+        // Facebook accepted the submission: it finished "Posting" and closed the composer without a
+        // failure (a failed post keeps the composer open). Admin review still counts as submitted.
+        if (captionHasRegistration && sawPosting && !posting && feedback !== "failed" && (!dialog.isConnected || !visible(dialog))) {
+          return renewalOutcome(job, "submitted", { approvalState: "submitted" });
         }
       }
       return renewalOutcome(job, "needs_attention", { reason: "Facebook did not confirm this exact advert. Check the previous submission before retrying.", duplicateRisk: true, failureStage: "publication" });
