@@ -906,7 +906,8 @@ export function isUnsuitableForTesting(group) {
 }
 
 // "Check All Groups": every active group not live-checked in the last
-// GROUP_RECHECK_DAYS days, plus any group whose posting eligibility is not yet known.
+// GROUP_RECHECK_DAYS days, plus any group whose posting eligibility is not yet known
+// or was not confirmed last time (those stay in every run until Facebook shows a result).
 export const GROUP_RECHECK_DAYS = 7;
 export const CHECK_BATCH_SIZE = 25;
 export function groupCheckQueue(groups, productKey, now = new Date()) {
@@ -916,7 +917,7 @@ export function groupCheckQueue(groups, productKey, now = new Date()) {
       !group.archived &&
       group.status !== "Red" &&
       Boolean(groupSlug(group.url)) &&
-      (timeOf(group.lastCheckedAt) < staleBefore || !group.postingCheckedAt))
+      (timeOf(group.lastCheckedAt) < staleBefore || !group.postingCheckedAt || group.postingMode === "unknown"))
     .sort((a, b) => timeOf(a.postingCheckedAt) - timeOf(b.postingCheckedAt)
       || timeOf(a.lastCheckedAt) - timeOf(b.lastCheckedAt) || Number(b.score || 0) - Number(a.score || 0));
 }

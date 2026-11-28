@@ -79,3 +79,20 @@ test("page: Ready to Test view, Next Suitable Group, posting badge; manual posti
   }
   assert.equal(pageSource.includes("autoSubmit"), false);
 });
+
+test("stored data keeps listing-only and posting-off apart; unconfirmed groups stay in the next Check All", async () => {
+  const { groupCheckQueue } = await import("../services/facebookGroupsAgent.js");
+  const listing = inspect("listing_only", { evidence: "Sell something" });
+  const off = inspect("posting_off", { evidence: "Only admins can post" });
+  assert.equal(listing.postingMode, "listing_only");
+  assert.equal(off.postingMode, "posting_off");
+  assert.equal(groupPostingLabel(listing), "Marketplace listings only");
+  assert.equal(groupPostingLabel(off), "Posting turned off");
+  const now = new Date();
+  const queue = groupCheckQueue([
+    { ...inspect("unknown"), url: url("100000000001") },
+    { ...inspect("normal"), url: url("100000000002") },
+    { ...listing, url: url("100000000003") },
+  ], "rent2buy", now).map((item) => item.url);
+  assert.deepEqual(queue, [url("100000000001")], "only the unconfirmed group is checked again straight away");
+});
