@@ -161,8 +161,10 @@ test("Check All queues cover every eligible item, in automatic batches", () => {
   groups.push(group("900000000100", { archived: true }));
   groups.push(group("900000000101", { status: "Red" }));
   groups.push(group("900000000102", { membershipPending: true }));
-  groups.push(group("900000000103", { lastCheckedAt: "2026-11-27T10:00:00.000Z" }));
-  assert.equal(groupCheckQueue(groups, "rent2buy", NOW).length, 64);
+  groups.push(group("900000000103", { lastCheckedAt: "2026-11-27T10:00:00.000Z", postingCheckedAt: "2026-11-27T10:00:00.000Z", postingMode: "normal" }));
+  groups.push(group("900000000104", { lastCheckedAt: "2026-11-27T10:00:00.000Z" }));
+  // 64 never checked + pending membership (a check shows approval) + recently checked before posting detection.
+  assert.equal(groupCheckQueue(groups, "rent2buy", NOW).length, 66);
 
   const posted = [];
   for (let index = 0; index < 91; index += 1) {

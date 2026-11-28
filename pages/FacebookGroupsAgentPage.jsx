@@ -18,6 +18,9 @@ import {
   getFacebookHelperStatus,
   groupCheckQueue,
   groupDueState,
+  groupPostingLabel,
+  isReadyToTest,
+  isUnsuitableForTesting,
   groupPipeline,
   hydrateFacebookGroups,
   loadFacebookGroups,
@@ -206,7 +209,8 @@ export default function FacebookGroupsAgentPage({
   const [usedVehicleKeys, setUsedVehicleKeys] = useState(() => loadUsedVanKeys(productKey));
   const [statusFilter, setStatusFilter] = useState("All");
   const [segmentFilter, setSegmentFilter] = useState("All");
-  const [pipelineView, setPipelineView] = useState("new");
+  const [pipelineView, setPipelineView] = useState("ready");
+  const suitableSeen = useRef(new Set());
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState("");
   const [checkRun, setCheckRunState] = useState(() => loadCheckRun(productKey));
@@ -271,7 +275,17 @@ export default function FacebookGroupsAgentPage({
   );
 
   const newGroups = useMemo(
-    () => activeGroups.filter((group) => groupPipeline(group) === "new"),
+    () => activeGroups.filter((group) => groupPipeline(group) === "new" && !isUnsuitableForTesting(group)),
+    [activeGroups],
+  );
+
+  const readyGroups = useMemo(
+    () => activeGroups.filter((group) => isReadyToTest(group)),
+    [activeGroups],
+  );
+
+  const unsuitableGroups = useMemo(
+    () => activeGroups.filter((group) => isUnsuitableForTesting(group)),
     [activeGroups],
   );
 
@@ -309,7 +323,11 @@ export default function FacebookGroupsAgentPage({
         ? awaitingGroups
         : pipelineView === "membership_pending"
           ? membershipPendingGroups
-          : newGroups;
+          : pipelineView === "ready"
+            ? readyGroups
+            : pipelineView === "unsuitable"
+              ? unsuitableGroups
+              : newGroups;
 
   const visibleGroups = useMemo(
     () => pipelineGroups
@@ -478,6 +496,8 @@ export default function FacebookGroupsAgentPage({
     const result = {
       total: activeGroups.length,
       new: newGroups.length,
+      ready: readyGroups.length,
+      unsuitable: unsuitableGroups.length,
       membershipPending: membershipPendingGroups.length,
       awaiting: awaitingGroups.length,
       proven: provenGroups.length,
@@ -491,7 +511,7 @@ export default function FacebookGroupsAgentPage({
       else if (group.status !== "Red") result.amber += 1;
     }
     return result;
-  }, [activeGroups, newGroups, membershipPendingGroups, awaitingGroups, provenGroups, dueGroups, archivedGroups]);
+  }, [activeGroups, newGroups, readyGroups, unsuitableGroups, membershipPendingGroups, awaitingGroups, provenGroups, dueGroups, archivedGroups]);
 
   useEffect(() => {
     setUsedVehicleKeys(loadUsedVanKeys(productKey));
@@ -762,6 +782,27 @@ export default function FacebookGroupsAgentPage({
     }
   }
 
+  async function openNextSuitableGroup() {
+    if (busy) return;
+    if (!selectedVehicle) {
+      setMessage("Choose a van in Post setup first, then use Next Suitable Group.");
+      return;
+    }
+    let next = readyGroups.find((group) => !suitableSeen.current.has(checkQueueKey(group)));
+    if (!next && readyGroups.length) {
+      suitableSeen.current.clear();
+      next = readyGroups[0];
+    }
+    if (!next) {
+      setMessage("No groups are ready to test yet. Run Check All Groups to find groups with normal posting.");
+      return;
+    }
+    suitableSeen.current.add(checkQueueKey(next));
+    setShowArchived(false);
+    setPipelineView("ready");
+    await preparePost(next);
+  }
+
   async function preparePost(group) {
     if (!selectedVehicle) {
       setMessage("Choose a van at the top of the page first.");
@@ -887,6 +928,10 @@ export default function FacebookGroupsAgentPage({
         <div className="posting-card__body">
           <div className="creative-card__tags">
             <span className="tag">{pipelineLabel(group)}</span>
+            <span className={`tag tag--${group.postingMode === "normal" ? "success" : ["listing_only", "posting_off", "unavailable"].includes(group.postingMode) ? "danger" : "warning"}`}
+              title={group.postingEvidence ? `Facebook showed: ${group.postingEvidence}` : undefined}>
+              {groupPostingLabel(group)}
+            </span>
             {due.due ? <span className="tag tag--success">DUE AGAIN</span> : null}
             <span className="tag">{group.segment || "Group"}</span>
             <span className="tag">{group.area || "Audience unknown"}</span>
@@ -1004,7 +1049,10 @@ export default function FacebookGroupsAgentPage({
             </p>
           </div>
           <div className="card-actions">
-            <button className="button button--primary" type="button" onClick={discoverGroups} disabled={Boolean(busy)}>
+            <button className="button button--primary" type="button" onClick={() => void openNextSuitableGroup()} disabled={Boolean(busy) || !readyGroups.length}>
+              {`Next Suitable Group (${readyGroups.length} ready)`}
+            </button>
+            <button className="button button--ghost" type="button" onClick={discoverGroups} disabled={Boolean(busy)}>
               {busy === "discovery" ? "Discovering." : "Discover New Groups"}
             </button>
             <button className="button button--ghost" type="button" onClick={() => void startCheckRun("groups")} disabled={Boolean(busy) || !groupQueue.length}>
@@ -1019,6 +1067,7 @@ export default function FacebookGroupsAgentPage({
         <div className="posting-summary-strip">
           {[
             ["Active", counts.total],
+            ["Ready to Test", counts.ready],
             ["New / Testing", counts.new],
             ["Pending Membership", counts.membershipPending],
             ["Awaiting", counts.awaiting],
@@ -1138,7 +1187,7 @@ export default function FacebookGroupsAgentPage({
       <section className="panel">
         <div className="panel__header">
           <div>
-            <h3>{showArchived ? "Archived / dead groups" : pipelineView === "proven" ? "Proven / Hot groups" : pipelineView === "awaiting" ? "Awaiting approval / visibility" : pipelineView === "membership_pending" ? "Pending membership" : "New & testing groups"}</h3>
+            <h3>{showArchived ? "Archived / dead groups" : pipelineView === "proven" ? "Proven / Hot groups" : pipelineView === "awaiting" ? "Awaiting approval / visibility" : pipelineView === "membership_pending" ? "Pending membership" : pipelineView === "ready" ? "Ready to test" : pipelineView === "unsuitable" ? "Listing only / posting off" : "New & testing groups"}</h3>
             <p>
               {showArchived
                 ? "Unavailable, declined or unwanted groups stay out of the working pipelines but can be restored."
@@ -1148,12 +1197,22 @@ export default function FacebookGroupsAgentPage({
                     ? "Posts already sent to Facebook and waiting for approval or visibility checks."
                     : pipelineView === "membership_pending"
                       ? "Groups where your join request is still waiting for admin approval. Once Facebook shows you as joined, they return to New & Testing."
-                      : "Fresh local selling, classified, vehicle and trade groups you have not posted to yet."}
+                      : pipelineView === "ready"
+                        ? "Untested groups where Facebook showed a normal post box (Write something / Create post). Use Next Suitable Group to work through them."
+                        : pipelineView === "unsuitable"
+                          ? "Facebook showed only Marketplace selling / listing controls, or posting is turned off. Kept out of testing, not archived; a later check can move them back."
+                          : "Untested local groups, including ones not checked yet, needing you to join first, or where Facebook did not show a clear posting option."}
             </p>
           </div>
           <div className="card-actions">
+            <button className={`button ${!showArchived && pipelineView === "ready" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("ready"); }}>
+              Ready to Test ({counts.ready})
+            </button>
             <button className={`button ${!showArchived && pipelineView === "new" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("new"); }}>
               New & Testing ({counts.new})
+            </button>
+            <button className={`button ${!showArchived && pipelineView === "unsuitable" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("unsuitable"); }}>
+              Listing only / posting off ({counts.unsuitable})
             </button>
             <button className={`button ${!showArchived && pipelineView === "membership_pending" ? "button--primary" : "button--ghost"}`} type="button" onClick={() => { setShowArchived(false); setPipelineView("membership_pending"); }}>
               Pending Membership ({counts.membershipPending})
@@ -1201,7 +1260,11 @@ export default function FacebookGroupsAgentPage({
                   ? "No posts are waiting for approval or visibility checks."
                   : pipelineView === "membership_pending"
                     ? "No group membership requests are currently pending."
-                    : "No new groups match this view yet. Run discovery to build the pipeline."}
+                    : pipelineView === "ready"
+                      ? "No groups are confirmed ready yet. Run Check All Groups: it now reads each group's posting options."
+                      : pipelineView === "unsuitable"
+                        ? "No listing-only or posting-off groups."
+                        : "No new groups match this view yet. Run discovery to build the pipeline."}
           </div>
         ) : (
           <div className="posting-card-grid posting-card-grid--dense">
