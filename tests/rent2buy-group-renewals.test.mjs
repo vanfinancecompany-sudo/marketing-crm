@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, createHmac, webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt, renewalReviewIdentity } from "../lib/rent2buyGroupRenewals.js";
+import { buildRenewalPlan, groupActivitySourceId, summarizeRenewalRun, londonDay, nextRunAt, renewalReviewIdentity, renewalHoldKind, activeRenewalHold } from "../lib/rent2buyGroupRenewals.js";
 import { groupDueState, groupPipeline } from "../services/facebookGroupsAgent.js";
 import {
   runDailyRenewalCheck, handlePost, readRenewals, authoriseRenewalRequest, verifyBackgroundCredential,
@@ -26,18 +26,18 @@ test("queue matches the CRM's own Proven/Hot due rules; Rent2Buy only", () => {
   }
 });
 
-test("stale or conflicting records never exclude a proven group; they become checks; cap respected", () => {
+test("stale or conflicting records never exclude a proven group; they become checks; no daily cap", () => {
   const stale = [fixture("unresolved", { postStatus: "pending" }), fixture("conflict", { joined: false, canPost: false }), fixture("gone", { unavailable: true }), fixture("red", { status: "Red" })];
   const plan = buildRenewalPlan([...stale, ...Array.from({ length: 30 }, (_, i) => fixture("g" + i))], now, 30);
   assert.equal(plan.dueCount, 34);
   assert.equal(plan.reviewCount, 3);
-  assert.equal(plan.groups.length, 30, "daily maximum");
-  assert.ok(plan.groups.every((g) => !g.issues.length), "clean groups first");
+  assert.equal(plan.groups.length, 34, "every due proven group is queued");
+  assert.ok(plan.groups.slice(0, 30).every((g) => !g.issues.length), "clean groups first");
   const all = buildRenewalPlan(stale, now, 30);
   assert.equal(all.groups.length, 4, "all four still queued");
   assert.deepEqual(all.groups.find((g) => g.name === "unresolved").issues, []);
   assert.match(all.groups.find((g) => g.name === "conflict").issues.join(" "), /Membership.*Posting permission/);
-  assert.equal(buildRenewalPlan(stale, now, 2).groups.length, 2, "custom maximum");
+  assert.equal(buildRenewalPlan(stale, now, 2).groups.length, 4, "a stored maximum no longer caps the queue");
 });
 
 test("statuses: confirmed submission, acceptance, awaiting, skipped, stopped; composer opening never counts", () => {
@@ -87,7 +87,7 @@ function fakeDb({ enabled = true, maxDaily = 30, groups = [] } = {}) {
   } };
 }
 
-test("hourly scans append newly due groups while preserving the daily cap, outcomes and review holds", async () => {
+test("hourly scans append every newly due group while preserving outcomes and review holds", async () => {
   const db = fakeDb({ maxDaily: 2, groups: [fixture("ok"), fixture("later", { lastPostedAt: "2026-11-18T08:00:00Z" }),
     fixture("after-cap", { lastPostedAt: "2026-11-18T09:00:00Z" })] });
   const first = await runDailyRenewalCheck(db, now);
@@ -98,8 +98,8 @@ test("hourly scans append newly due groups while preserving the daily cap, outco
   const later = new Date("2026-11-25T08:01:00Z");
   assert.equal((await runDailyRenewalCheck(db, later)).added, 1);
   assert.equal((await runDailyRenewalCheck(db, later)).alreadyChecked, true);
-  assert.equal((await runDailyRenewalCheck(db, new Date("2026-11-25T09:00:00Z"))).added, 0);
-  assert.deepEqual(run.plan.groups.map((group) => group.name), ["ok", "later"]);
+  assert.equal((await runDailyRenewalCheck(db, new Date("2026-11-25T09:00:00Z"))).added, 1);
+  assert.deepEqual(run.plan.groups.map((group) => group.name), ["ok", "later", "after-cap"]);
   assert.equal(run.plan.groups[1].queuedAt, later.toISOString());
   assert.equal(run.plan.reviews[url("ok")].result, "unknown");
   assert.equal(run.outcomes[url("ok")].duplicateRisk, true);
@@ -109,7 +109,7 @@ test("hourly scans append newly due groups while preserving the daily cap, outco
   assert.equal((await runDailyRenewalCheck(off, now)).disabled, true);
   assert.equal(off.t.rent2buy_group_renewal_runs.length, 0);
   const capped = fakeDb({ maxDaily: 1, groups: [fixture("ok"), fixture("two")] });
-  assert.equal((await runDailyRenewalCheck(capped, now)).queued, 1, "uses the CRM maximum setting");
+  assert.equal((await runDailyRenewalCheck(capped, now)).queued, 2, "no daily cap");
 });
 
 test("a worker token can report a heartbeat only, in the environment where it was issued", () => {
@@ -136,7 +136,7 @@ test("background credentials are hashed, revocable and scoped to the worker allo
   assert.ok(await verifyBackgroundCredential(db, token));
   assert.equal((await manageBackgroundWorker(db, { action: "worker-enroll", hash: "c".repeat(64) }, now)).ok, false);
   assert.equal(authoriseRenewalRequest(request, { action: "worker-next" }, environment), "background");
-  for (const action of ["settings", "claim", "heartbeat-token", "worker-enroll", "worker-revoke", "worker-test-arm"]) {
+  for (const action of ["settings", "claim", "heartbeat-token", "worker-enroll", "worker-revoke"]) {
     assert.equal(authoriseRenewalRequest(request, { action }, environment), "");
   }
   assert.equal(authoriseRenewalRequest({ ...request, method: "GET" }, null, environment), "");
@@ -160,56 +160,91 @@ function workerTestDb(...ids) {
   return db;
 }
 
-test("Southampton test retry recognises every pre-submission composer failure wording, never a submission risk", async () => {
-  const southampton = url("830909275134315");
-  const armWith = async (outcome) => {
-    const db = workerTestDb("aaa", "830909275134315");
-    await runDailyRenewalCheck(db, now);
-    db.t.rent2buy_group_renewal_runs[0].outcomes[southampton] = { status: "needs_attention", jobId: "old-job", mode: "automatic", ...outcome };
-    return (await manageBackgroundWorker(db, { action: "worker-test-arm" }, now)).ok;
-  };
-  for (const reason of ["Posting permission or group composer could not be verified",
-    "Create Post opener found, but composer could not be verified before timeout",
-    "Create Post composer or opener not found before timeout",
-    "Create Post opener found; composer timeout; visible dialogs=1, Create Post=1, local Post=0, valid editors=0, tab=hidden"]) {
-    assert.equal(await armWith({ reason }), true, reason);
-  }
-  assert.equal(await armWith({ reason: "anything", failureCode: "composer_unverified" }), true, "stable code");
-  const composer = { reason: "Create Post opener found, but composer could not be verified before timeout", failureCode: "composer_unverified" };
-  assert.equal(await armWith({ ...composer, duplicateRisk: true }), false);
-  assert.equal(await armWith({ ...composer, attemptedAt: now.toISOString() }), false);
-  assert.equal(await armWith({ ...composer, submissionReservedAt: now.toISOString() }), false);
-  assert.equal(await armWith({ ...composer, failureStage: "publication" }), false);
-  assert.equal(await armWith({ reason: "Facebook did not confirm submission. Check before retrying." }), false);
-  assert.equal(await armWith({ ...composer, mode: "manual" }), false);
+test("failures before submission are retried once the same day; risky or blocked outcomes are not", async () => {
+  const db = workerTestDb("first", "second");
+  await runDailyRenewalCheck(db, now);
+  const run = () => db.t.rent2buy_group_renewal_runs[0];
+  const call = (action, details, at = now) => handleBackgroundWorker(db, { action, ...details }, at, { VERCEL_ENV: "production" });
+  const first = url("first");
+  const second = url("second");
+  run().outcomes[second] = { status: "needs_attention", mode: "automatic", jobId: "second-old-job",
+    reason: "Facebook did not confirm this exact advert.", duplicateRisk: true, attemptedAt: now.toISOString(), failureStage: "publication" };
+  run().outcomes[first] = { status: "needs_attention", mode: "automatic", jobId: "morning-composer-job",
+    reason: "Posting permission or group composer could not be verified" };
+  const retry = await call("worker-next", { jobId: "first-retry-job" });
+  assert.equal(retry.job.groupUrl, first, "an earlier pre-submission failure is processed again today");
+  assert.equal(run().outcomes[first].retries, 1);
+  await call("worker-result", { groupUrl: first, jobId: "first-retry-job", runDate: londonDay(now), status: "needs_attention",
+    reason: "Create Post opener found, but composer could not be verified before timeout" });
+  const group = db.t.facebook_group_state.find(row => row.group_key === first);
+  assert.equal(group.state.renewalHold.kind, "technical", "a second pre-submission failure is held for review");
+  const next = await call("worker-next", { jobId: "after-retry-job" });
+  assert.equal(next.job, undefined, "no further retries; the duplicate-risk group is never retried");
+  assert.equal(run().outcomes[second].duplicateRisk, true);
 });
 
-test("Southampton test arms while hourly checks are paused and after a closed test; historical approval is not a prerequisite", async () => {
+test("a first technical failure is not held, so it can be retried today", async () => {
+  const db = workerTestDb("solo");
+  await runDailyRenewalCheck(db, now);
+  const call = (action, details) => handleBackgroundWorker(db, { action, ...details }, now, { VERCEL_ENV: "production" });
+  const first = await call("worker-next", { jobId: "solo-first-job" });
+  assert.equal(first.job.groupUrl, url("solo"));
+  await call("worker-result", { groupUrl: url("solo"), jobId: "solo-first-job", runDate: londonDay(now), status: "needs_attention",
+    reason: "Facebook did not accept the stock photo" });
+  assert.equal(db.t.facebook_group_state[0].state.renewalHold, undefined);
+  assert.equal((await call("worker-next", { jobId: "solo-second-job" })).job.groupUrl, url("solo"));
+});
+
+test("group blockers are classified; admin review and duplicate-risk attempts are never group holds", () => {
+  assert.equal(renewalHoldKind("needs_attention", "Facebook shows a group rule that prohibits commercial adverts"), "rules");
+  assert.equal(renewalHoldKind("needs_attention", "The group's rules do not allow this advert or its link."), "rules");
+  assert.equal(renewalHoldKind("needs_attention", "Membership is pending"), "membership");
+  assert.equal(renewalHoldKind("needs_attention", "Create Post opener found, but composer could not be verified before timeout"), "technical");
+  assert.equal(renewalHoldKind("failed", "Facebook reported a failed post and left the composer open."), "technical");
+  assert.equal(renewalHoldKind("needs_attention", "Facebook did not confirm this exact advert.", true), "", "duplicate risk keeps its own hold");
+  assert.equal(renewalHoldKind("submitted", "pending admin approval"), "", "admin review is a submission");
+  assert.equal(renewalHoldKind("stop", "Facebook requires account or security review"), "", "account-wide stop is separate");
+  assert.equal(renewalHoldKind("needs_attention", "Facebook posting tab stayed hidden (window minimised or tab in background). Nothing was inserted or posted."), "");
+  assert.equal(activeRenewalHold({ renewalHold: { kind: "membership" }, membershipPending: false }), null, "membership confirmed ends the hold");
+  assert.equal(activeRenewalHold({ renewalHold: { kind: "rules" }, membershipPending: false }).kind, "rules");
+});
+
+test("a group-level blocker holds the group out of later queues until reinstated, keeping history", async () => {
   const southampton = url("830909275134315");
   const db = workerTestDb("aaa", "830909275134315");
   await runDailyRenewalCheck(db, now);
-  const run = () => db.t.rent2buy_group_renewal_runs[0];
-  const settings = db.t.rent2buy_group_renewal_settings[0];
-  const group = db.t.facebook_group_state.find(row => row.group_key === southampton);
-  run().outcomes[southampton] = { status: "needs_attention", jobId: "old-composer-job", mode: "automatic",
-    reason: "Create Post opener found, but composer could not be verified before timeout" };
-  run().plan.controlledTest = { armedAt: now.toISOString(), jobId: "old-composer-job" };
-  settings.enabled = false;
-  const arm = () => manageBackgroundWorker(db, { action: "worker-test-arm" }, now);
-  assert.equal((await arm()).ok, false, "an open test still blocks");
-  run().plan.controlledTest.closedAt = now.toISOString();
-  // An older advert still awaiting approval, never re-checked, does not obstruct a new advert.
-  group.state = { ...group.state, acceptedPostCount: 1, postStatus: "awaiting", lastPostCheckAt: undefined };
-  assert.equal((await arm()).ok, true, "paused hourly checks, a closed earlier test and historical approval do not block");
-  assert.equal(run().plan.controlledTest.closedAt, undefined);
-  assert.deepEqual(run().plan.controlledTestHistory.map(item => item.jobId), ["old-composer-job"], "earlier test kept in history");
-  assert.ok(settings.background_test_date);
-  const request = (action, details = {}) => handleBackgroundWorker(db, { action, ...details }, now, { VERCEL_ENV: "production" });
-  assert.equal((await request("worker-next", { jobId: "paused-worker-job" })).paused, true, "no job while hourly checks are off");
-  settings.enabled = true;
-  const next = await request("worker-next", { jobId: "southampton-armed-job" });
-  assert.equal(next.job.groupUrl, southampton, "only the Southampton job is released");
-  assert.equal((await arm()).ok, false, "single use");
+  const run = db.t.rent2buy_group_renewal_runs[0];
+  run.outcomes[southampton] = { status: "preparing", jobId: "rules-block-job", mode: "automatic", at: now.toISOString() };
+  const result = await handleBackgroundWorker(db, { action: "worker-result", groupUrl: southampton, jobId: "rules-block-job",
+    runDate: londonDay(now), status: "needs_attention", reason: "Facebook shows a group rule that prohibits commercial adverts" }, now, { VERCEL_ENV: "production" });
+  assert.equal(result.ok, true);
+  const row = () => db.t.facebook_group_state.find(item => item.group_key === southampton);
+  assert.equal(row().state.renewalHold.kind, "rules");
+  assert.equal(run.outcomes[southampton].reason, "Facebook shows a group rule that prohibits commercial adverts", "run history keeps the reason");
+  const tomorrow = new Date(now.getTime() + 86_400_000);
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), false, "held group is not re-queued");
+  const reinstated = await handlePost(db, { action: "reinstate", groupUrl: southampton }, tomorrow);
+  assert.equal(reinstated.ok, true);
+  assert.equal(row().state.renewalHold, undefined);
+  assert.equal(row().state.renewalHoldHistory.at(-1).kind, "rules");
+  assert.ok(row().state.renewalHoldHistory.at(-1).reinstatedAt);
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), true, "reinstated group returns");
+});
+
+test("membership blockers hold the group until membership is confirmed", async () => {
+  const southampton = url("830909275134315");
+  const db = workerTestDb("aaa", "830909275134315");
+  await runDailyRenewalCheck(db, now);
+  db.t.rent2buy_group_renewal_runs[0].outcomes[southampton] = { status: "preparing", jobId: "membership-job-1", mode: "automatic", at: now.toISOString() };
+  await handleBackgroundWorker(db, { action: "worker-result", groupUrl: southampton, jobId: "membership-job-1",
+    runDate: londonDay(now), status: "needs_attention", reason: "Membership is pending" }, now, { VERCEL_ENV: "production" });
+  const row = db.t.facebook_group_state.find(item => item.group_key === southampton);
+  assert.equal(row.state.renewalHold.kind, "membership");
+  assert.equal(row.state.membershipPending, true);
+  const tomorrow = new Date(now.getTime() + 86_400_000);
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), false);
+  row.state = { ...row.state, membershipPending: false };
+  assert.equal(buildRenewalPlan(db.t.facebook_group_state, tomorrow).groups.some(group => group.groupKey === southampton), true);
 });
 
 test("worker composer failures are stored with the stable failure code", async () => {
@@ -226,24 +261,14 @@ test("worker composer failures are stored with the stable failure code", async (
   assert.equal(run.outcomes[southampton].attemptedAt, undefined);
 });
 
-test("the Southampton worker consumes one attempt, records one activity and tracks approval separately", async () => {
-  const southampton = url("830909275134315");
+test("the worker submits one advert per group, records one activity and tracks approval separately", async () => {
   const db = workerTestDb("aaa", "830909275134315");
   await runDailyRenewalCheck(db, now);
-  const run = db.t.rent2buy_group_renewal_runs[0];
-  run.outcomes[southampton] = { status: "needs_attention", jobId: "old-composer-job", mode: "automatic",
-    reason: "Posting permission or group composer could not be verified" };
-  const arm = () => manageBackgroundWorker(db, { action: "worker-test-arm" }, now);
-  run.outcomes[southampton].duplicateRisk = true;
-  assert.equal((await arm()).ok, false);
-  assert.equal(run.outcomes[southampton].duplicateRisk, true);
-  delete run.outcomes[southampton].duplicateRisk;
-  assert.equal((await arm()).ok, true, "a recorded pre-click composer failure can use the single authorisation");
-  assert.equal((await arm()).ok, false);
   const request = (action, details = {}, at = now) => handleBackgroundWorker(db, { action, ...details }, at, { VERCEL_ENV: "production" });
-  const jobId = "southampton-test-job";
+  const jobId = "first-group-job";
   const first = await request("worker-next", { jobId, usedVehicleIds: ["stock-1"] });
-  assert.equal(first.job.groupUrl, southampton);
+  const southampton = first.job.groupUrl;
+  const other = southampton === url("aaa") ? url("830909275134315") : url("aaa");
   assert.equal(first.job.registration, "CD34EFG");
   assert.match(first.job.caption, /REGISTRATION: CD34EFG/);
   assert.deepEqual((await request("worker-next", { jobId })).job, first.job, "lost claim response replays the same stock and job");
@@ -271,9 +296,7 @@ test("the Southampton worker consumes one attempt, records one activity and trac
   assert.equal(receipt.metadata.approval_outcome, "accepted");
   assert.equal(receipt.metadata.submitted_at, now.toISOString());
   assert.equal(db.t.marketing_daily_activity_events.length, 1);
-  assert.equal((await request("worker-next", { jobId: "after-controlled-1" }, later)).controlledTest, true);
-  assert.equal((await manageBackgroundWorker(db, { action: "worker-test-close" }, later)).ok, true);
-  assert.equal((await request("worker-next", { jobId: "after-controlled-2" }, later)).job.groupUrl, url("aaa"));
+  assert.equal((await request("worker-next", { jobId: "next-group-job" }, later)).job.groupUrl, other, "moves on to the next group");
 });
 
 test("an interrupted reserved job retains duplicate protection and allows the next group", async () => {

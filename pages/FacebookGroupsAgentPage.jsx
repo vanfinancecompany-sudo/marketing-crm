@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  CHECK_BATCH_SIZE,
   GROUP_AGENT_DISCOVERY_COMPLETE,
   GROUP_AGENT_INSPECTION_COMPLETE,
+  GROUP_AGENT_INSPECTION_PROGRESS,
   GROUP_POST_EVENT_ACK,
   GROUP_POST_STATUS_COMPLETE,
   GROUP_POST_STATUS_PROGRESS,
@@ -10,8 +12,11 @@ import {
   GROUP_POST_SUBMITTED,
   applyGroupInspection,
   archiveFacebookGroup,
-  buildFacebookGroupPostJob,
+  awaitingPostQueue,
+  cancelFacebookGroupAgentJob,
+  checkQueueKey,
   getFacebookHelperStatus,
+  groupCheckQueue,
   groupDueState,
   groupPipeline,
   hydrateFacebookGroups,
@@ -21,10 +26,8 @@ import {
   markGroupPosted,
   mergeFacebookGroupsByRecentPostState,
   normalizeFacebookGroupUrl,
-  mergeDiscoveredGroups,
+  mergeDiscoveredGroupsWithReport,
   prepareFacebookGroupPost,
-  persistFacebookGroupsRemote,
-  requestGroupRenewalHelper,
   recoverFacebookGroupsFromSnapshot,
   requestFacebookGroupRecoverySnapshot,
   restoreFacebookGroup,
@@ -49,6 +52,55 @@ async function renewalRequest(body) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "The renewal queue is unavailable.");
   return data;
+}
+
+// One "Check All" run at a time per product, kept in this browser so an interrupted
+// run resumes without repeating finished groups.
+function checkRunStorageKey(productKey) {
+  return `vfcFacebookGroupsCheckRun:${productKey}`;
+}
+
+function loadCheckRun(productKey) {
+  try {
+    const run = JSON.parse(window.localStorage.getItem(checkRunStorageKey(productKey)) || "null");
+    if (!run || !Array.isArray(run.keys) || Date.now() - Date.parse(run.startedAt || 0) > 3 * 86400000) return null;
+    // A page reload interrupts a run; it waits for Resume (a late batch result still counts).
+    return ["running", "stopping"].includes(run.status) ? { ...run, status: "stopped" } : run;
+  } catch {
+    return null;
+  }
+}
+
+function emptyCheckCounts(kind) {
+  return kind === "posts"
+    ? { approved: 0, declined: 0, awaiting: 0, unverified: 0, unavailable: 0 }
+    : { checked: 0, canPost: 0, membershipPending: 0, removed: 0 };
+}
+
+function addCheckOutcome(counts, kind, outcome) {
+  const next = { ...counts };
+  if (kind === "posts") {
+    const key = outcome?.accepted ? "approved" : outcome?.declined ? "declined" : outcome?.unavailable ? "unavailable"
+      : outcome?.pending ? "awaiting" : "unverified";
+    next[key] = Number(next[key] || 0) + 1;
+    return next;
+  }
+  next.checked = Number(next.checked || 0) + 1;
+  if (outcome?.unavailable || outcome?.explicitStatus === "Red") next.removed = Number(next.removed || 0) + 1;
+  else if (outcome?.membershipPending) next.membershipPending = Number(next.membershipPending || 0) + 1;
+  else if (outcome?.canPost) next.canPost = Number(next.canPost || 0) + 1;
+  return next;
+}
+
+function outcomeKey(kind, outcome) {
+  const url = normalizeFacebookGroupUrl(outcome?.requestedUrl || outcome?.url || outcome?.groupUrl || "").toLowerCase();
+  return kind === "posts" ? `${url}|${String(outcome?.registration || "").toUpperCase()}` : url;
+}
+
+function checkCountsLabel(kind, counts = {}) {
+  return kind === "posts"
+    ? `${counts.approved || 0} approved · ${counts.declined || 0} declined · ${counts.awaiting || 0} still awaiting · ${counts.unverified || 0} unable to verify${counts.unavailable ? ` · ${counts.unavailable} group${counts.unavailable === 1 ? "" : "s"} unavailable` : ""}`
+    : `${counts.checked || 0} checked · ${counts.canPost || 0} can post · ${counts.membershipPending || 0} membership pending · ${counts.removed || 0} unavailable or rules forbid adverts`;
 }
 
 function clean(value) {
@@ -157,16 +209,10 @@ export default function FacebookGroupsAgentPage({
   const [pipelineView, setPipelineView] = useState("new");
   const [showArchived, setShowArchived] = useState(false);
   const [busy, setBusy] = useState("");
-  const [renewalRunning, setRenewalRunning] = useState(false);
-  const [renewalAutomatic, setRenewalAutomatic] = useState(null);
-  const [workerPaired, setWorkerPaired] = useState(false);
-  const [workerTest, setWorkerTest] = useState(null);
-  const [workerActionPending, setWorkerActionPending] = useState(false);
-  const [renewalPending, setRenewalPending] = useState(false);
-  const [renewalDraft, setRenewalDraft] = useState(null);
-  const [renewalMessage, setRenewalMessage] = useState("");
-  const renewalWork = useRef(false);
-  const renewalRunningRef = useRef(false);
+  const [checkRun, setCheckRunState] = useState(() => loadCheckRun(productKey));
+  const checkRunRef = useRef(checkRun);
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
 
   function recordGroupPostActivity({ groupUrl, groupName, registration, postedAt, renewalDate, jobId, automatic, approvalState, permalink }) {
     const activityDate = londonDateKey(postedAt ? new Date(postedAt) : new Date());
@@ -243,7 +289,6 @@ export default function FacebookGroupsAgentPage({
     () => provenGroups.filter((group) => groupDueState(group).due),
     [provenGroups],
   );
-
   const awaitingGroups = useMemo(
     () => activeGroups.filter((group) =>
       ["awaiting", "pending", "not_found"].includes(group.postStatus)
@@ -286,160 +331,147 @@ export default function FacebookGroupsAgentPage({
     }),
     [vehicles, selectedVehicleId, usedVehicleKeys],
   );
-  const supportsRenewals = isRent2Buy && helperStatus.capabilities.includes("groups-renewals");
-  const supportsBackgroundWorker = supportsRenewals && helperStatus.capabilities.includes("groups-renewal-independent-worker");
+  const groupQueue = useMemo(() => groupCheckQueue(groups, productKey), [groups, productKey]);
+  const postQueue = useMemo(() => awaitingPostQueue(groups, productKey), [groups, productKey]);
+  const supportsCancel = helperStatus.capabilities.includes("groups-agent-cancel");
 
-  function setRenewalRun(on) {
-    renewalRunningRef.current = on;
-    setRenewalRunning(on);
+  function setCheckRun(next) {
+    checkRunRef.current = next;
+    setCheckRunState(next);
+    try {
+      if (next && next.status !== "complete") window.localStorage.setItem(checkRunStorageKey(productKey), JSON.stringify(next));
+      else window.localStorage.removeItem(checkRunStorageKey(productKey));
+    } catch {}
   }
 
-  async function configureBackgroundWorker(action, enabled) {
-    setWorkerActionPending(true);
+  // Remaining items of a run that are still eligible (archived or decided items drop out).
+  function checkRunTargets(run) {
+    if (!run) return [];
+    const done = new Set(run.done || []);
+    const live = run.kind === "posts"
+      ? awaitingPostQueue(groupsRef.current, productKey)
+      : scoreFacebookGroups(groupsRef.current, productKey).filter((group) => !group.archived && group.status !== "Red");
+    const liveByKey = new Map(live.map((group) => [checkQueueKey(group), group]));
+    return run.keys.filter((key) => !done.has(key)).map((key) => liveByKey.get(key)).filter(Boolean);
+  }
+
+  function finishCheckRun(run, status, note = "") {
+    setBusy("");
+    if (!run) return;
+    const next = { ...run, status, current: null, inBatch: 0, finishedAt: new Date().toISOString(), note };
+    setCheckRun(next);
+    const what = run.kind === "posts" ? "Awaiting post check" : "Group check";
+    const remaining = checkRunTargets(next).length;
+    setMessage(`${what} ${status === "complete" ? "finished" : `stopped with ${remaining} left`}: ${checkCountsLabel(run.kind, run.counts)}.${note ? ` ${note}` : ""}`);
+  }
+
+  async function runNextCheckBatch() {
+    const run = checkRunRef.current;
+    if (!run) return;
+    if (run.status !== "running") {
+      finishCheckRun(run, "stopped");
+      return;
+    }
+    const targets = checkRunTargets(run);
+    if (!targets.length) {
+      finishCheckRun(run, "complete");
+      return;
+    }
+    const batch = targets.slice(0, CHECK_BATCH_SIZE);
     try {
-      if (action === "pair") {
-        const { hash } = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_PAIRING");
-        await renewalRequest({ action: "worker-enroll", hash });
-        const paired = await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { usedVehicleIds: usedVehicleKeys });
-        setWorkerPaired(true);
-        setRenewalAutomatic(paired.automatic === true);
-      } else if (action === "toggle") {
-        const status = await requestGroupRenewalHelper("SET_GROUP_RENEWAL_AUTOMATION", undefined, { enabled });
-        setRenewalRun(false);
-        setRenewalAutomatic(status.automatic === true);
-      } else {
-        await renewalRequest({ action });
-        await requestGroupRenewalHelper(action === "worker-revoke" ? "CLEAR_GROUP_RENEWAL_PAIRING" : "WAKE_GROUP_RENEWAL_WORKER");
-        if (action === "worker-revoke") {
-          setWorkerPaired(false);
-          setRenewalAutomatic(false);
-        }
-      }
-      setWorkerTest(await renewalRequest({ action: "worker-test-status" }));
-      setRenewalMessage("");
+      const ack = run.kind === "posts"
+        ? await startFacebookPostStatusCheck(batch, productKey, batch.length)
+        : await startFacebookGroupInspection(batch, productKey, batch.length);
+      setCheckRun({ ...checkRunRef.current, current: { jobId: ack.jobId, keys: batch.map(checkQueueKey) }, inBatch: 0 });
     } catch (error) {
-      setRenewalMessage(error.message);
-    } finally {
-      setWorkerActionPending(false);
+      finishCheckRun(checkRunRef.current, "stopped", error.message || "The helper could not start the next batch.");
     }
   }
 
-  // Manual queue preparation continues to belong to the interactive page.
-  // This path never requests or handles an automatic claim.
-  async function advanceRenewals() {
-    if (renewalWork.current) return;
-    renewalWork.current = true;
-    let helper;
-    try {
-      helper = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
-      setRenewalAutomatic(helper.automatic === true);
-      setWorkerPaired(helper.paired === true);
-      setRenewalPending(Boolean(helper.pending));
-      setRenewalDraft(helper.pending || null);
-      if (helper.restrictionReason) setRenewalMessage(helper.restrictionReason);
-      if (helper.pending) return;
-      const result = helper.result;
-      if (result?.status === "submitted") {
-        const current = loadFacebookGroups();
-        const item = current.find(group => normalizeFacebookGroupUrl(group.url).toLowerCase() === result.groupUrl.toLowerCase());
-        if (!item) throw new Error("Refresh the group records before saving this browser receipt.");
-        const updated = Date.parse(item.lastPostedAt) >= Date.parse(result.postedAt) ? current : markGroupPosted(current, result.groupUrl, result);
-        await persistFacebookGroupsRemote(updated);
-        await recordGroupPostActivity({ ...result, renewalDate: result.date });
-        await renewalRequest({ action: "submission", groupUrl: result.groupUrl, registration: result.registration,
-          postedAt: result.postedAt, runDate: result.date, jobId: result.jobId });
-        saveFacebookGroups(updated, { remote: false });
-        setGroups(updated);
-        markVehicleUsed(result.registration, result.vehicleId);
-        await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
-        setRenewalMessage(result.groupName + " submission confirmed");
-        return;
-      }
-      if (result) {
-        await renewalRequest(result.status === "stop" ? { action: "stop", reason: result.reason, groupUrl: result.groupUrl,
-          jobId: result.jobId, runDate: result.date, duplicateRisk: result.duplicateRisk } :
-          { action: "outcome", groupUrl: result.groupUrl, runDate: result.date, jobId: result.jobId,
-            status: result.status, reason: result.reason, duplicateRisk: result.duplicateRisk,
-            failureStage: result.failureStage, attemptedAt: result.attemptedAt });
-        await requestGroupRenewalHelper("ACK_GROUP_RENEWAL_RESULT", result.jobId);
-        if (result.status === "stop") setRenewalRun(false);
-        setRenewalMessage(result.groupName + " - " + result.reason);
-        return;
-      }
-      if (!renewalRunningRef.current || helper.automatic || vehiclesLoading) return;
-      const { today, latest, settings } = await renewalRequest();
-      const ready = settings.enabled && latest?.date === today && !latest.stopped
-        ? latest.groups.filter(item => item.status === "queued" && !item.review) : [];
-      const group = ready.find(item => !item.issues?.length) || ready[0];
-      if (!group) {
-        setRenewalRun(false);
-        setRenewalMessage(latest?.stopped?.reason || "No manual adverts are ready.");
-        return;
-      }
-      const renewal = { date: today, jobId: crypto.randomUUID() };
-      const vehicle = rotationVehicles.find(item => {
-        const job = buildFacebookGroupPostJob({ group, vehicle: item, productKey, renewal });
-        return !usedVehicleKeys.includes(vehicleKey(item)) && job.caption && job.imageUrl && job.registration;
-      });
-      if (!vehicle) {
-        setRenewalRun(false);
-        setRenewalMessage("No unused eligible van has both a caption and an image.");
-        return;
-      }
-      const claimed = await renewalRequest({ action: "claim", groupUrl: group.url, jobId: renewal.jobId, registration: vehicle.registration || vehicle.reg });
-      if (!claimed.prepare) {
-        setRenewalMessage(group.name + " - " + claimed.reason);
-        return;
-      }
-      try {
-        await prepareFacebookGroupPost({ group, vehicle, productKey, renewal });
-        setRenewalPending(true);
-        setRenewalMessage(group.name + " - preparing the stock photo and caption.");
-      } catch (error) {
-        const current = await requestGroupRenewalHelper("GET_GROUP_RENEWAL_STATE");
-        if (!current.pending && !current.result) await renewalRequest({ action: "outcome", groupUrl: group.url, jobId: renewal.jobId,
-          status: "failed", reason: error.message });
-      }
-    } catch (error) {
-      setRenewalRun(false);
-      setRenewalPending(false);
-      if (!helper) setRenewalAutomatic(null);
-      setRenewalMessage(error.message || "Could not continue the renewal queue.");
-    } finally {
-      renewalWork.current = false;
+  // Starts (or resumes) a run over the whole queue; the helper works in batches
+  // and the next batch starts automatically until the queue is finished or stopped.
+  async function startCheckRun(kind, explicitKeys = null) {
+    if (!explicitKeys) {
+      if (busy) return;
+      if (!(await requireGroupsHelper())) return;
     }
+    const existing = checkRunRef.current;
+    let run;
+    if (!explicitKeys && existing && existing.kind === kind && existing.status !== "complete" && checkRunTargets(existing).length) {
+      run = { ...existing, status: "running", current: null, inBatch: 0, note: "" };
+    } else {
+      const keys = explicitKeys || (kind === "posts" ? postQueue : groupQueue).map(checkQueueKey);
+      if (!keys.length) {
+        setMessage(kind === "posts" ? "No adverts are awaiting an approval check." : "Every active group has been checked in the last week.");
+        return;
+      }
+      run = { kind, startedAt: new Date().toISOString(), keys, done: [], counted: [], current: null, inBatch: 0,
+        status: "running", counts: emptyCheckCounts(kind) };
+    }
+    setCheckRun(run);
+    setBusy(kind === "posts" ? "post-status" : "inspection");
+    setMessage("");
+    await runNextCheckBatch();
   }
 
-  useEffect(() => {
-    if (!supportsRenewals) return undefined;
-    void advanceRenewals();
-    const timer = renewalRunning || renewalPending ? window.setInterval(advanceRenewals, 4000) : null;
-    return () => { if (timer !== null) window.clearInterval(timer); };
-  }, [supportsRenewals, renewalRunning, renewalPending, rotationVehicles, usedVehicleKeys, vehiclesLoading]);
-
-  useEffect(() => {
-    if (!supportsBackgroundWorker) return undefined;
-    let cancelled = false;
-    async function refreshTest() {
+  async function stopCheckRun() {
+    const run = checkRunRef.current;
+    if (!run || !["running", "stopping"].includes(run.status)) return;
+    if (!run.current) {
+      finishCheckRun(run, "stopped");
+      return;
+    }
+    setCheckRun({ ...run, status: "stopping" });
+    if (supportsCancel) {
       try {
-        const status = await renewalRequest({ action: "worker-test-status" });
-        if (!cancelled) setWorkerTest(status);
+        await cancelFacebookGroupAgentJob(run.current.jobId);
+        return;
       } catch {}
     }
-    void refreshTest();
-    const timer = workerTest?.test?.armedAt && !workerTest.test.closedAt && (!workerTest.test.outcome || workerTest.test.outcome === "preparing")
-      ? window.setInterval(refreshTest, 10_000) : null;
-    return () => { cancelled = true; if (timer !== null) window.clearInterval(timer); };
-  }, [supportsBackgroundWorker, workerTest?.test?.armedAt, workerTest?.test?.closedAt, workerTest?.test?.outcome]);
-  async function reviewRenewalDraft() {
-    if (!renewalDraft) return;
-    const copied = await copyGroupCaptionForFallback(renewalDraft.caption);
-    try {
-      await requestGroupRenewalHelper("OPEN_GROUP_RENEWAL_DRAFT", renewalDraft.id);
-      setRenewalMessage(copied ? "Caption copied. Paste it and approve with Facebook's Post button." : "Use Copy caption in the Facebook draft.");
-    } catch (error) {
-      setRenewalMessage(error.message);
+    setMessage("Stopping after the item in progress finishes its batch.");
+  }
+
+  // Live progress for one item; returns false when it does not belong to the run.
+  function countCheckOutcome(jobId, kind, outcome) {
+    const run = checkRunRef.current;
+    if (!run || run.kind !== kind || run.current?.jobId !== jobId) return false;
+    const key = outcomeKey(kind, outcome);
+    if ((run.counted || []).includes(key)) return true;
+    setCheckRun({ ...run, counted: [...(run.counted || []), key], inBatch: Number(run.inBatch || 0) + 1,
+      counts: addCheckOutcome(run.counts, kind, outcome) });
+    return true;
+  }
+
+  // A finished helper batch; returns false when it was not started by the run.
+  function completeCheckBatch(jobId, kind, outcomes) {
+    const run = checkRunRef.current;
+    if (!run || run.kind !== kind || !run.current || run.current.jobId !== jobId) return false;
+    let counts = run.counts;
+    const counted = new Set(run.counted || []);
+    for (const outcome of outcomes) {
+      const key = outcomeKey(kind, outcome);
+      if (counted.has(key)) continue;
+      counted.add(key);
+      counts = addCheckOutcome(counts, kind, outcome);
     }
+    // A full batch is finished as a whole. A batch stopped part-way only finishes the
+    // items Facebook actually reported, so Resume still checks the rest.
+    const reported = new Set(outcomes.map((outcome) =>
+      normalizeFacebookGroupUrl(outcome?.requestedUrl || outcome?.url || outcome?.groupUrl || "").toLowerCase()));
+    const finishedKeys = run.status === "stopping" ? run.current.keys.filter((key) => reported.has(key)) : run.current.keys;
+    const next = { ...run, counts, counted: [...counted], done: [...new Set([...(run.done || []), ...finishedKeys])],
+      current: null, inBatch: 0 };
+    if (kind === "posts" && outcomes.some((outcome) => outcome?.restricted)) {
+      finishCheckRun(next, "stopped", "Facebook asked for a security check, so checking stopped. Complete it in Facebook, then resume.");
+      return true;
+    }
+    if (next.status === "running") {
+      setCheckRun(next);
+      window.setTimeout(() => void runNextCheckBatch(), 1500);
+    } else {
+      finishCheckRun(next, "stopped");
+    }
+    return true;
   }
 
   const counts = useMemo(() => {
@@ -536,24 +568,25 @@ export default function FacebookGroupsAgentPage({
       if (payload.type === GROUP_AGENT_DISCOVERY_COMPLETE) {
         if (payload.productKey && payload.productKey !== productKey) return;
         const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-        const merged = mergeDiscoveredGroups(groups, candidates, productKey);
+        const { groups: merged, report } = mergeDiscoveredGroupsWithReport(groupsRef.current, candidates, productKey);
+        groupsRef.current = merged;
         setGroups(merged);
         saveFacebookGroups(merged);
+        setBusy("");
         setLastRun({
           type: "discovery",
-          found: candidates.length,
+          found: report.added,
+          known: report.known,
           queries: Number(payload.queryCount || 0),
           at: new Date().toISOString(),
         });
         setMessage(
-          `Discovery found ${candidates.length} candidate group${candidates.length === 1 ? "" : "s"}. Live-checking the strongest/stalest candidates now.`,
+          `Discovery searched ${Number(payload.queryCount || 0)} places/group types: ${report.added} new group${report.added === 1 ? "" : "s"} added`
+          + `, ${report.known} already on record${report.knownArchived ? ` (${report.knownArchived} archived, left archived)` : ""}`
+          + `${report.outOfScope ? `, ${report.outOfScope} outside the ${isRent2Buy ? "Rent2Buy area or " : ""}relevant group types` : ""}.`
+          + `${report.added ? " Checking the new groups now." : ""}`,
         );
-        setBusy("inspection");
-        startFacebookGroupInspection(scoreFacebookGroups(merged, productKey), productKey, 12)
-          .catch((error) => {
-            setBusy("");
-            setMessage(`${error.message || "Discovery completed, but live checks could not start."} You can press Check Next 12 manually.`);
-          });
+        if (report.added) void startCheckRun("groups", report.addedUrls.map((url) => url.toLowerCase()));
         return;
       }
 
@@ -568,6 +601,7 @@ export default function FacebookGroupsAgentPage({
           ).length;
           return updated;
         });
+        if (completeCheckBatch(payload.jobId, "groups", inspections)) return;
         setBusy("");
         setLastRun({ type: "inspection", checked: inspections.length, at: new Date().toISOString() });
         setMessage(
@@ -604,10 +638,17 @@ export default function FacebookGroupsAgentPage({
         return;
       }
 
+      if (payload.type === GROUP_AGENT_INSPECTION_PROGRESS) {
+        if (payload.productKey && payload.productKey !== productKey) return;
+        countCheckOutcome(payload.jobId, "groups", payload.inspection || {});
+        return;
+      }
+
       if (payload.type === GROUP_POST_STATUS_PROGRESS) {
         if (payload.productKey && payload.productKey !== productKey) return;
         persist((current) => markGroupPostStatus(current, payload.result));
         void recordGroupApproval(payload.result).catch(() => {});
+        countCheckOutcome(payload.jobId, "posts", payload.result || {});
         return;
       }
 
@@ -618,6 +659,7 @@ export default function FacebookGroupsAgentPage({
           (next, result) => markGroupPostStatus(next, result),
           current,
         ));
+        if (completeCheckBatch(payload.jobId, "posts", results)) return;
         const accepted = results.filter((item) => item.accepted).length;
         const pending = results.filter((item) => item.pending).length;
         const declined = results.filter((item) => item.declined).length;
@@ -681,28 +723,13 @@ export default function FacebookGroupsAgentPage({
     setMessage("Starting Facebook discovery. The helper will work through a controlled batch of live group searches.");
     try {
       await startFacebookGroupDiscovery(productKey, {
-        queryCount: isRent2Buy ? 10 : 12,
-        maxGroups: isRent2Buy ? 50 : 70,
+        queryCount: isRent2Buy ? 16 : 12,
+        maxGroups: isRent2Buy ? 480 : 70,
       });
       setMessage("Facebook discovery is running in a helper tab. Keep Facebook logged in; results will return here automatically.");
     } catch (error) {
       setBusy("");
       setMessage(error.message || "Could not start Facebook group discovery.");
-    }
-  }
-
-  async function checkNextGroups() {
-    if (busy) return;
-    if (!(await requireGroupsHelper())) return;
-    setBusy("inspection");
-    setMessage("Checking the next group batch for access, posting ability and visible advertising rules.");
-    try {
-      const generalGroups = activeGroups.filter((group) => groupPipeline(group) !== "membership_pending");
-      await startFacebookGroupInspection(generalGroups, productKey, 12);
-      setMessage("Live group checks are running. Dead/unavailable groups will fall out of the active pipelines automatically.");
-    } catch (error) {
-      setBusy("");
-      setMessage(error.message || "Could not start live group checks.");
     }
   }
 
@@ -721,21 +748,6 @@ export default function FacebookGroupsAgentPage({
     } catch (error) {
       setBusy("");
       setMessage(error.message || "Could not check pending memberships.");
-    }
-  }
-
-  async function checkPostAcceptance() {
-    if (busy) return;
-    if (!(await requireGroupsHelper())) return;
-    setBusy("post-status");
-    const batchSize = Math.min(25, awaitingGroups.length);
-    setMessage(`Checking the next ${batchSize} of ${awaitingGroups.length} posted group${awaitingGroups.length === 1 ? "" : "s"} to see which adverts are visible, still pending, or unavailable.`);
-    try {
-      await startFacebookPostStatusCheck(activeGroups, productKey, Math.min(25, awaitingGroups.length || 25));
-      setMessage("Acceptance checks are running through the posted groups. Results will return here automatically.");
-    } catch (error) {
-      setBusy("");
-      setMessage(error.message || "Could not start the post acceptance check.");
     }
   }
 
@@ -995,15 +1007,11 @@ export default function FacebookGroupsAgentPage({
             <button className="button button--primary" type="button" onClick={discoverGroups} disabled={Boolean(busy)}>
               {busy === "discovery" ? "Discovering." : "Discover New Groups"}
             </button>
-            <button className="button button--ghost" type="button" onClick={checkNextGroups} disabled={Boolean(busy)}>
-              {busy === "inspection" ? "Checking." : "Check Next 12"}
+            <button className="button button--ghost" type="button" onClick={() => void startCheckRun("groups")} disabled={Boolean(busy) || !groupQueue.length}>
+              {busy === "inspection" ? "Checking Groups." : `Check All Groups (${groupQueue.length})`}
             </button>
-            <button className="button button--ghost" type="button" onClick={checkPostAcceptance} disabled={Boolean(busy) || !counts.awaiting}>
-              {busy === "post-status"
-                ? "Checking Posts."
-                : counts.awaiting > 25
-                  ? `Check next 25 of ${counts.awaiting} Awaiting Posts`
-                  : `Check ${counts.awaiting} Awaiting Posts`}
+            <button className="button button--ghost" type="button" onClick={() => void startCheckRun("posts")} disabled={Boolean(busy) || !postQueue.length}>
+              {busy === "post-status" ? "Checking Posts." : `Check All Awaiting Posts (${postQueue.length})`}
             </button>
           </div>
         </div>
@@ -1036,44 +1044,46 @@ export default function FacebookGroupsAgentPage({
         </div>
 
         {message ? <div className="notice">{message}</div> : null}
-        {isRent2Buy ? <div className="notice">
-          <strong>Proven / Hot renewals</strong>
-          <p>{!supportsBackgroundWorker ? "Update the Groups Helper to use automatic background posting." :
-            !workerPaired ? "Pair the Groups Helper to let it post while the CRM is closed." :
-              renewalAutomatic ? "Automatic adverts are enabled in the Edge background worker." : "Automatic adverts are paused in this Edge profile."}</p>
-          {supportsBackgroundWorker && !workerPaired ? <button className="button button--small" type="button" disabled={workerActionPending}
-            onClick={() => void configureBackgroundWorker("pair")}>Pair background Groups Helper</button> : null}
-          {supportsBackgroundWorker && workerPaired ? <button className="button button--small" type="button" disabled={workerActionPending || Boolean(busy)}
-            onClick={() => void configureBackgroundWorker("toggle", !renewalAutomatic)}>
-            {renewalAutomatic ? "Pause automatic adverts" : "Enable automatic adverts"}
-          </button> : null}
-          {workerTest?.paired ? <button className="button button--small button--ghost" type="button" disabled={workerActionPending || renewalAutomatic === true}
-            onClick={() => void configureBackgroundWorker("worker-revoke")}>Revoke background helper</button> : null}
-          {workerPaired && workerTest && !workerTest.used && (!workerTest.test || workerTest.test.closedAt) ?
-            <button className="button button--small button--ghost" type="button" disabled={workerActionPending}
-              onClick={() => void configureBackgroundWorker("worker-test-arm")}>Authorise one Southampton test advert</button> : null}
-          {workerTest?.test && !workerTest.test.closedAt ? <>
-            <p>Southampton test {workerTest.test.outcome?.replaceAll("_", " ") || "authorised and waiting for the background worker"}.</p>
-            <button className="button button--small button--ghost" type="button" disabled={workerActionPending || workerTest.test.outcome === "preparing"}
-              onClick={() => void configureBackgroundWorker("worker-test-close")}>{workerTest.test.outcome ? "Resume normal queue" : "Cancel Southampton test"}</button>
-          </> : null}
-          {renewalAutomatic === false ? <button className="button button--small" type="button" disabled={!supportsRenewals || Boolean(busy)}
-            onClick={() => setRenewalRun(!renewalRunning)}>
-            {renewalRunning ? "Pause after this group" : "Prepare today's renewal queue"}
-          </button> : null}
-          {renewalDraft && !renewalDraft.renewal?.automatic ? <details>
-            <summary>{renewalDraft.prepared ? "Review prepared advert" : "Preparing advert"} � {renewalDraft.groupName}</summary>
-            <p>{renewalDraft.registration}</p>
-            <img src={renewalDraft.imageUrl} alt="Prepared stock photo" width="200" />
-            <p style={{ whiteSpace: "pre-wrap" }}>{renewalDraft.caption}</p>
-            <button className="button button--small" type="button" onClick={reviewRenewalDraft}>Copy caption and open Facebook draft</button>
-          </details> : null}
-          {renewalMessage ? <p role="status">{renewalMessage}</p> : null}
-        </div> : null}
+        {checkRun ? (() => {
+          const total = checkRun.keys.length;
+          const finished = (checkRun.done || []).length;
+          const active = ["running", "stopping"].includes(checkRun.status);
+          const position = Math.min(total, finished + Number(checkRun.inBatch || 0) + (active && checkRun.current ? 1 : 0));
+          const noun = checkRun.kind === "posts" ? "awaiting post" : "group";
+          const remaining = active ? 0 : checkRunTargets(checkRun).length;
+          return (
+            <div className="notice" role="status">
+              <strong>{checkRun.kind === "posts" ? "Checking awaiting posts" : "Checking groups"}</strong>{" "}
+              {active
+                ? `${checkRun.status === "stopping" ? "Stopping" : "Checking"} ${noun} ${Math.max(1, position)} of ${total}.`
+                : checkRun.status === "complete"
+                  ? `Finished all ${total}.`
+                  : `Stopped after ${finished} of ${total}.`}
+              <br />
+              {checkCountsLabel(checkRun.kind, checkRun.counts)}
+              {checkRun.note ? <><br />{checkRun.note}</> : null}
+              <div className="card-actions">
+                {active ? (
+                  <button className="button button--small button--ghost" type="button" onClick={() => void stopCheckRun()} disabled={checkRun.status === "stopping"}>
+                    {checkRun.status === "stopping" ? "Stopping." : "Stop"}
+                  </button>
+                ) : null}
+                {!active && remaining ? (
+                  <button className="button button--small" type="button" onClick={() => void startCheckRun(checkRun.kind)} disabled={Boolean(busy)}>
+                    Resume ({remaining} left)
+                  </button>
+                ) : null}
+                {!active ? (
+                  <button className="button button--small button--ghost" type="button" onClick={() => setCheckRun(null)}>Dismiss</button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })() : null}
         {lastRun ? (
           <div className="creative-card__meta">
             Last agent run: {lastRun.type === "discovery"
-              ? `${lastRun.found || 0} groups discovered`
+              ? `${lastRun.found || 0} new groups discovered (${lastRun.known || 0} already on record)`
               : `${lastRun.checked || 0} groups checked`}
           </div>
         ) : null}
@@ -1138,7 +1148,7 @@ export default function FacebookGroupsAgentPage({
                     ? "Posts already sent to Facebook and waiting for approval or visibility checks."
                     : pipelineView === "membership_pending"
                       ? "Groups where your join request is still waiting for admin approval. Once Facebook shows you as joined, they return to New & Testing."
-                      : "Fresh vehicle-sales and classified-group discoveries you have not posted to yet."}
+                      : "Fresh local selling, classified, vehicle and trade groups you have not posted to yet."}
             </p>
           </div>
           <div className="card-actions">

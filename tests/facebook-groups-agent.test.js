@@ -80,7 +80,7 @@ test("Rent2Buy and Finance scoring stay separate", () => {
   assert.ok(rent2buy.every((group) => isRent2BuyLocalGroup(group)));
 });
 
-test("Rent2Buy discovery keeps local vehicle/classified groups and rejects irrelevant or out-of-area groups", () => {
+test("Rent2Buy discovery keeps local selling, vehicle and trade groups and rejects irrelevant or out-of-area groups", () => {
   const groups = loadFacebookGroups();
   const merged = mergeDiscoveredGroups(groups, [
     {
@@ -110,7 +110,7 @@ test("Rent2Buy discovery keeps local vehicle/classified groups and rejects irrel
   ], "rent2buy");
 
   assert.ok(merged.some((group) => /southampton-car-van-classifieds/i.test(group.url)));
-  assert.equal(merged.some((group) => /southampton-self-employed/i.test(group.url)), false);
+  assert.ok(merged.some((group) => /southampton-self-employed/i.test(group.url)), "local trade/business groups are useful");
   assert.equal(merged.some((group) => /manchester-van-sales/i.test(group.url)), false);
   assert.equal(merged.some((group) => /uk-vans-nationwide/i.test(group.url)), false);
 });
@@ -119,12 +119,12 @@ test("Rent2Buy local radius recognises intended Southampton-area locations", () 
   for (const name of ["Portsmouth Buy Sell", "Bournemouth Trades", "Reading Vans", "Guildford Marketplace", "Bristol Small Business", "London Van Sales"]) {
     assert.equal(isRent2BuyLocalGroup({ name }), true, name);
   }
-  for (const name of ["Manchester Van Sales", "Leeds Trades", "Liverpool Marketplace", "UK Nationwide Vans"]) {
+  for (const name of ["Manchester Van Sales", "Leeds Trades", "Liverpool Marketplace", "UK Nationwide Vans", "Gloucester Buy and Sell", "Maidstone Marketplace"]) {
     assert.equal(isRent2BuyLocalGroup({ name }), false, name);
   }
 });
 
-test("Facebook group relevance is restricted to vehicle sales and classified-style groups", () => {
+test("Facebook group relevance covers selling, classified, vehicle and trade/business groups", () => {
   for (const name of [
     "UK Car and Van Classifieds",
     "Vans for Sale UK",
@@ -132,6 +132,11 @@ test("Facebook group relevance is restricted to vehicle sales and classified-sty
     "Southampton Buy, Sell, Swap",
     "Facebay Portsmouth",
     "Weston Super Mare Online Sales",
+    "UK Small Business Networking",
+    "Builders and Electricians UK",
+    "Courier Drivers UK",
+    "Hampshire Tradesmen",
+    "Profile photo of Basingstoke selling page",
   ]) {
     assert.equal(isVehicleClassifiedGroup({ name }), true, name);
   }
@@ -139,10 +144,10 @@ test("Facebook group relevance is restricted to vehicle sales and classified-sty
   for (const name of [
     "Self Employed Estate Agents UK",
     "Self Employed Cleaners Support Group",
-    "UK Small Business Networking",
-    "Builders and Electricians UK",
-    "Courier Drivers UK",
-    "Entrepreneurs and Business Owners",
+    "Jobs in Southampton",
+    "Southampton Nail Technicians",
+    "Portsmouth Singles Dating",
+    "Rooms to Rent Southampton",
   ]) {
     assert.equal(isVehicleClassifiedGroup({ name }), false, name);
   }
@@ -150,7 +155,7 @@ test("Facebook group relevance is restricted to vehicle sales and classified-sty
 
 test("Previously accepted groups stay in Proven / Hot even if they fail the new discovery relevance filter", () => {
   const historicalWinner = {
-    name: "Southampton Self Employed Business Network",
+    name: "Southampton Nail Technicians Support Group",
     url: "https://www.facebook.com/groups/historical-winner/",
     finance: false,
     rent2buy: true,
@@ -215,14 +220,15 @@ test("Chrome helper recovery can rebuild Awaiting group records", () => {
 
 test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipelines", () => {
   assert.match(pageSource, /Discover New Groups/);
-  assert.match(pageSource, /Check Next 12/);
+  assert.match(pageSource, /Check All Groups \(\$\{groupQueue\.length\}\)/);
+  assert.doesNotMatch(pageSource, /Check Next 12|Check next 25 of/);
   assert.match(pageSource, /New & Testing/);
   assert.match(pageSource, /Pending Membership \(\{counts\.membershipPending\}\)/);
   assert.match(pageSource, /pipelineView === "membership_pending"/);
   assert.match(pageSource, /Check Pending Membership \(\$\{counts\.membershipPending\}\)/);
   assert.match(pageSource, /async function checkPendingMembership\(\)/);
   assert.match(pageSource, /membershipPendingGroups,/);
-  assert.match(pageSource, /groupPipeline\(group\) !== "membership_pending"/);
+  assert.match(serviceSource, /groupPipeline\(group\) !== "membership_pending"/);
   assert.match(pageSource, /Awaiting \(\{counts\.awaiting\}\)/);
   assert.match(pageSource, /Proven \/ Hot/);
   assert.match(pageSource, /pipelineView === "awaiting"/);
@@ -234,7 +240,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
   assert.match(serviceSource, /RENT2BUY_QUERY_BANK/);
   assert.match(serviceSource, /van classifieds UK/);
   assert.match(serviceSource, /car and van classifieds UK/);
-  assert.match(serviceSource, /car and van classifieds Hampshire/);
+  assert.match(serviceSource, /buildRent2BuyDiscoveryQueries\(\)/);
   assert.doesNotMatch(serviceSource, /Southampton courier drivers/);
   assert.doesNotMatch(serviceSource, /builders UK/);
   assert.doesNotMatch(serviceSource, /small business owners UK/);
@@ -975,8 +981,8 @@ test("acceptance checker waits for Facebook search results to render", () => {
   assert.match(groupsHelperSource, /Date\.now\(\) - waitStarted < 9000/);
   assert.doesNotMatch(groupsHelperSource, /resultAnchors\.length \|\| evidenceLines\.length/);
   assert.match(groupsHelperSource, /evidenceLines = wantedReg \? registrationEvidenceLines/);
-  assert.match(pageSource, /Math\.min\(25, awaitingGroups\.length \|\| 25\)/);
-  assert.match(pageSource, /Check next 25 of/);
+  assert.match(pageSource, /Check All Awaiting Posts \(\$\{postQueue\.length\}\)/);
+  assert.match(pageSource, /window\.setTimeout\(\(\) => void runNextCheckBatch\(\), 1500\)/);
 });
 
 test("approval checker can recognise a live advert from registration text without a permalink anchor", () => {

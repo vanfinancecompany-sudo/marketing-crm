@@ -8,15 +8,15 @@ import {
   OUTCOMES, RUN_TABLE, SETTINGS_TABLE, DEFAULT_DAILY_LIMIT, GROUP_ACTIVITY_SOURCE, RENT2BUY_GROUP_ACTIVITY_TYPE,
   buildRenewalAdvertHistory, buildRenewalPlan, canonicalGroup, clampLimit, groupActivitySourceId, londonDay, nextRunAt, summarizeRenewalRun,
   renewalPostPermalink, renewalReviewIdentity, renewalReviewTarget, isHistoricalSubmissionHold, isExpiredAttemptHold, recentRenewalAttempt,
+  renewalHoldKind,
 } from "../lib/rent2buyGroupRenewals.js";
 import { describeRenewalAgent, renewalHeartbeatChannel } from "../lib/rent2buyGroupRenewalMonitor.js";
 import { markGroupPosted, markGroupPostStatus } from "../services/facebookGroupsAgent.js";
 import { loadWorkerAdvert } from "../lib/rent2buyGroupWorkerStock.js";
 
-const SOUTHAMPTON_TEST_GROUP = "https://www.facebook.com/groups/830909275134315/";
 const WORKER_TOKEN = /^r2b-worker-[a-f0-9]{64}$/;
 const WORKER_ACTIONS = new Set(["worker-next", "worker-reserve", "worker-result", "worker-approval", "worker-heartbeat", "worker-stop", "worker-enable-check"]);
-const WORKER_MANAGEMENT_ACTIONS = new Set(["worker-enroll", "worker-revoke", "worker-test-status", "worker-test-arm", "worker-test-close"]);
+const WORKER_MANAGEMENT_ACTIONS = new Set(["worker-enroll", "worker-revoke", "worker-test-status"]);
 const JOB_ID = /^[a-zA-Z0-9-]{10,80}$/;
 
 const PAGE = 500;
@@ -47,10 +47,28 @@ function composerFailureCode(status, reason) {
   return status === "needs_attention" && COMPOSER_FAILURE_PATTERN.test(String(reason || "")) ? COMPOSER_UNVERIFIED : "";
 }
 
-function canRetryComposerForTest(outcome) {
-  return outcome?.status === "needs_attention" && outcome.mode === "automatic" && !outcome.attemptedAt &&
-    !outcome.submissionReservedAt && !outcome.duplicateRisk && !outcome.failureStage &&
-    (outcome.failureCode === COMPOSER_UNVERIFIED || composerFailureCode(outcome.status, outcome.reason) === COMPOSER_UNVERIFIED);
+// A failure before any submission was reserved may be retried the same day, once. A second
+// pre-submission failure becomes a technical hold; rules and membership blockers are held at once.
+function retryablePreSubmission(outcome) {
+  return ["needs_attention", "failed"].includes(outcome?.status) && outcome.mode === "automatic" && Boolean(outcome.jobId) &&
+    !outcome.attemptedAt && !outcome.submissionReservedAt && !outcome.duplicateRisk && !outcome.failureStage &&
+    (outcome.retries || 0) < 1 && !["rules", "membership"].includes(renewalHoldKind(outcome.status, outcome.reason));
+}
+
+// Persist or clear a group's renewal hold in its existing state record (no schema change).
+async function updateGroupHold(db, groupUrl, change, at) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data, error } = await db.from("facebook_group_state").select("state").eq("group_key", groupUrl).eq("rent2buy", true).maybeSingle();
+    if (error) throw error;
+    if (!data?.state) return null;
+    const next = change(data.state);
+    if (!next) return data.state;
+    const saved = await db.from("facebook_group_state").update({ state: next, updated_at: at })
+      .eq("group_key", groupUrl).eq("state", JSON.stringify(data.state)).select("group_key").maybeSingle();
+    if (saved.error) throw saved.error;
+    if (saved.data) return next;
+  }
+  throw new Error("The group changed while saving its renewal hold. Retry shortly.");
 }
 
 async function readBackgroundSettings(db) {
@@ -330,49 +348,8 @@ export async function manageBackgroundWorker(db, body, now) {
     return data ? { ok: true } : { ok: false, error: "A background helper is already paired. Revoke it before pairing another." };
   }
   const settings = await readBackgroundSettings(db);
-  const date = londonDay(now);
-  const { data: run, error } = await db.from(RUN_TABLE).select("plan,outcomes,stopped").eq("run_date", date).maybeSingle();
-  if (error) throw error;
-  const test = run?.plan?.controlledTest;
-  const outcome = run?.outcomes?.[SOUTHAMPTON_TEST_GROUP];
-  if (body.action === "worker-test-status") return { ok: true,
-    test: test ? { ...test, outcome: test.jobId && test.jobId === outcome?.jobId ? outcome.status : null } : null,
-    used: Boolean(settings.background_test_date), paired: Boolean(settings.background_token_hash),
-  };
-  if (body.action === "worker-test-close") return updateToday(db, now, current => {
-    const existing = current.plan?.controlledTest;
-    const currentOutcome = current.outcomes?.[SOUTHAMPTON_TEST_GROUP];
-    if (!existing || (existing.jobId && currentOutcome?.jobId === existing.jobId && currentOutcome.status === "preparing")) {
-      return { error: "Wait until the controlled job finishes before resuming normal processing" };
-    }
-    return { plan: { ...current.plan, controlledTest: { ...existing, closedAt: now.toISOString() } } };
-  });
-  // Arming is allowed while hourly checks are paused: the worker receives no job until they are enabled,
-  // and then only this Southampton job. A closed earlier test is kept in history and does not block a new one.
-  if (!settings.background_token_hash || settings.background_test_date || !run || (test && !test.closedAt) || run.stopped) {
-    return { ok: false, error: "A paired worker and an active queue with unused test authorisation are required" };
-  }
-  const eligibility = await checkRenewalClaim(db, SOUTHAMPTON_TEST_GROUP, true, now);
-  if (!eligibility.prepare) return { ok: false, error: eligibility.reason };
-  // Record the one-use authorisation before making it visible to the worker.
-  const { data: armed, error: armError } = await db.from(SETTINGS_TABLE).update({ background_test_date: date })
-    .eq("id", 1).is("background_test_date", null).select("id").maybeSingle();
-  if (armError) throw armError;
-  if (!armed) return { ok: false, error: "The Southampton authorisation has already been used" };
-  const result = await updateToday(db, now, current => {
-    const existing = current.outcomes?.[SOUTHAMPTON_TEST_GROUP];
-    const earlier = current.plan.controlledTest;
-    if (current.stopped || (earlier && !earlier.closedAt) || !current.plan.groups?.some(group => group.groupKey === SOUTHAMPTON_TEST_GROUP) ||
-        Object.values(current.outcomes || {}).some(item => item.status === "preparing") ||
-        (existing && !canRetryComposerForTest(existing))) return { error: "Southampton is held or outside today's queue, or another advert is preparing" };
-    return { plan: { ...current.plan, controlledTest: { armedAt: now.toISOString() },
-      ...(earlier ? { controlledTestHistory: [...(current.plan.controlledTestHistory || []), earlier].slice(-20) } : {}) } };
-  });
-  if (!result.ok) {
-    const { error: releaseError } = await db.from(SETTINGS_TABLE).update({ background_test_date: null }).eq("id", 1).eq("background_test_date", date);
-    if (releaseError) throw releaseError;
-  }
-  return result;
+  if (body.action === "worker-test-status") return { ok: true, paired: Boolean(settings.background_token_hash) };
+  return { ok: false, error: "Unknown worker management action" };
 }
 
 async function readWorkerRun(db, date) {
@@ -410,18 +387,15 @@ async function nextWorkerJob(db, body, now) {
   if (existing) return { ok: true, job: existing.status === "preparing" && !existing.submissionReservedAt ? existing.workerJob : null,
     resetRotation: existing.resetRotation === true };
   if (unfinished.length) return { ok: true, busy: true };
-  const controlled = run.plan.controlledTest && !run.plan.controlledTest.closedAt;
-  if (controlled && run.plan.controlledTest.jobId) return { ok: true, controlledTest: true };
   const { latest, nextRunAt } = await readRenewals(db, now, { queueOnly: true });
   if (latest?.date !== date || latest.stopped) return { ok: true, wakeAt: nextRunAt };
-  const ready = latest.groups.filter(item => item.status === "queued" && !item.review);
-  const group = controlled ? latest.groups.find(item => item.groupKey === SOUTHAMPTON_TEST_GROUP && !item.review &&
-    (item.status === "queued" || canRetryComposerForTest(run.outcomes?.[item.groupKey]))) :
-    ready.find(item => !item.issues?.length) || ready[0];
+  const ready = latest.groups.filter(item => !item.review &&
+    (item.status === "queued" || retryablePreSubmission(run.outcomes?.[item.groupKey])));
+  const group = ready.find(item => !item.issues?.length) || ready[0];
   if (!group) {
-    const held = !controlled && latest.groups.find(item => item.review?.kind === "attempt" && ["needs_attention", "failed"].includes(item.status));
+    const held = latest.groups.find(item => item.review?.kind === "attempt" && ["needs_attention", "failed"].includes(item.status));
     const target = held?.review;
-    return { ok: true, wakeAt: nextRunAt, controlledTest: Boolean(controlled), ...(target ? { review: {
+    return { ok: true, wakeAt: nextRunAt, ...(target ? { review: {
       url: held.url, name: held.name, registration: target.registration, postedAt: target.postedAt,
       reviewKind: target.kind, permalink: target.permalink, identity: renewalReviewIdentity(target),
     } } : {}) };
@@ -434,19 +408,17 @@ async function nextWorkerJob(db, body, now) {
   if (eligibility.prepare && !job) return { ok: true, wakeAt: nextRunAt, noStock: true };
   const claim = await updateToday(db, now, current => {
     const previous = current.outcomes?.[group.groupKey];
-    const test = current.plan.controlledTest;
-    const testActive = Boolean(test && !test.closedAt);
-    if (current.stopped || testActive !== Boolean(controlled) || (testActive && (test.jobId || group.groupKey !== SOUTHAMPTON_TEST_GROUP)) ||
-        !current.plan.groups?.some(item => item.groupKey === group.groupKey) ||
+    const retry = retryablePreSubmission(previous);
+    if (current.stopped || !current.plan.groups?.some(item => item.groupKey === group.groupKey) ||
         Object.values(current.outcomes || {}).some(entry => entry.mode === "automatic" && entry.status === "preparing") ||
-        (previous && !isHistoricalSubmissionHold(previous) && !isExpiredAttemptHold(previous, now) &&
-          !(testActive && canRetryComposerForTest(previous)))) return { error: "The queue changed before the worker could claim this group" };
+        (previous && !isHistoricalSubmissionHold(previous) && !isExpiredAttemptHold(previous, now) && !retry)) {
+      return { error: "The queue changed before the worker could claim this group" };
+    }
     const entry = job ? { status: "preparing", registration: job.registration, mode: "automatic", jobId: job.id,
-      workerJob: job, resetRotation, at: now.toISOString() } :
+      workerJob: job, resetRotation, at: now.toISOString(), retries: retry ? (previous.retries || 0) + 1 : 0 } :
       { status: "needs_attention", mode: "automatic", reason: eligibility.reason, at: now.toISOString(),
         ...(eligibility.unresolved ? { retryAt: eligibility.unresolved.retryAt } : {}) };
-    return { outcomes: { ...current.outcomes, [group.groupKey]: entry },
-      ...(controlled && job ? { plan: { ...current.plan, controlledTest: { ...test, jobId: job.id } } } : {}) };
+    return { outcomes: { ...current.outcomes, [group.groupKey]: entry } };
   });
   return claim.ok ? { ok: true, job, resetRotation, checkedGroup: true } : claim;
 }
@@ -465,9 +437,7 @@ async function reserveWorkerPost(db, body, now) {
   if (!eligibility.prepare) return { ok: false, error: eligibility.reason };
   const reserved = await updateToday(db, now, run => {
     const entry = run.outcomes?.[groupUrl];
-    const test = run.plan.controlledTest;
-    if (run.stopped || (test && !test.closedAt && test.jobId !== body.jobId) ||
-        !entry?.workerJob || entry.jobId !== body.jobId || entry.status !== "preparing" || entry.submissionReservedAt ||
+    if (run.stopped || !entry?.workerJob || entry.jobId !== body.jobId || entry.status !== "preparing" || entry.submissionReservedAt ||
         now.getTime() - Date.parse(entry.at) >= 120_000) {
       return { error: "The automatic claim cannot be authorised to post" };
     }
@@ -534,9 +504,20 @@ async function recordWorkerResult(db, body, now) {
   }
   if (body.status === "submitted") return saveWorkerSubmission(db, run, entry, groupUrl, body, now);
   const attemptedAt = entry.submissionReservedAt || body.attemptedAt;
-  return handlePost(db, { action: body.status === "stop" ? "stop" : "outcome", status: body.status, groupUrl,
+  const duplicateRisk = Boolean(entry.submissionReservedAt || body.duplicateRisk);
+  const saved = await handlePost(db, { action: body.status === "stop" ? "stop" : "outcome", status: body.status, groupUrl,
     jobId: entry.jobId, runDate: run.run_date, reason: body.reason, attemptedAt, failureStage: body.failureStage,
-    duplicateRisk: Boolean(entry.submissionReservedAt || body.duplicateRisk) }, now);
+    duplicateRisk }, now);
+  const reason = clean(body.reason, 200);
+  const found = saved.ok ? renewalHoldKind(body.status, reason, duplicateRisk) : "";
+  // Technical failures get one same-day retry before they are held for review.
+  const kind = found === "technical" && !(entry.retries >= 1) ? "" : found;
+  if (kind) {
+    await updateGroupHold(db, groupUrl, state => ({ ...state,
+      renewalHold: { kind, reason, at: now.toISOString(), runDate: run.run_date, jobId: entry.jobId },
+      ...(kind === "membership" ? { membershipPending: true } : {}) }), now.toISOString());
+  }
+  return saved;
 }
 
 async function recordWorkerApproval(db, body, now) {
@@ -613,6 +594,17 @@ export async function handlePost(db, body, now = new Date(), environment = proce
       }
       return { outcomes: { ...run.outcomes, [groupKey]: { ...existing, status: "submitted", at: now.toISOString() } } };
     }, body.runDate);
+  }
+  if (action === "reinstate") {
+    const groupKey = canonicalGroup(body.groupUrl);
+    if (!groupKey) return { ok: false, error: "Valid groupUrl required" };
+    const state = await updateGroupHold(db, groupKey, current => {
+      if (!current.renewalHold) return null;
+      const { renewalHold, ...rest } = current;
+      return { ...rest, renewalHoldHistory: [...(current.renewalHoldHistory || []), { ...renewalHold, reinstatedAt: now.toISOString() }].slice(-20),
+        ...(renewalHold.kind === "membership" ? { membershipPending: false } : {}) };
+    }, now.toISOString());
+    return state ? { ok: true, state } : { ok: false, error: "Group not found" };
   }
   if (action === "settings") {
     const row = { id: 1, updated_at: now.toISOString() };

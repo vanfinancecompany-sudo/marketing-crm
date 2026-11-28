@@ -1,7 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from "react";
 import {getFacebookHelperStatus} from "../services/facebookGroupsAgent.js";
 import {MARKETING_ACCESS_STORAGE_KEY,MARKETING_ACCESS_HEADER} from "../services/marketingAccess.js";
-import {approvalMonitorHealth,healthCounts} from "../lib/crmHealthRegistry.js";
+import {healthCounts} from "../lib/crmHealthRegistry.js";
 import "../styles/global-agent-health.css";
 const LABEL={critical:"Issue",warning:"Attention",unverified:"Unverified",healthy:"Healthy",running:"Running",idle:"Idle",disabled:"Disabled",manual:"On demand"};
 const ORDER={critical:0,warning:1,unverified:2,running:3,healthy:4,idle:5,disabled:6,manual:7};
@@ -37,12 +37,11 @@ export default function AutomationHealthCentre(){
   return()=>{mounted.current=false;clearInterval(interval);clearInterval(clock);document.removeEventListener("visibilitychange",resume);window.removeEventListener("focus",resume);window.removeEventListener("keydown",keydown);};
  },[refresh]);
  const local=[
-  {key:"groups-extension",label:"VFC Facebook Helper",category:"Browser extensions",state:helper?.connected?"healthy":"idle",detail:helper?.connected?"Version "+helper.version+" is connected in this browser. The approval and renewal rows report execution outcomes.":"No helper connected in this window. Check the configured Edge profile if this is the renewal browser.",source:"Local extension connection"},
+  {key:"groups-extension",label:"VFC Facebook Helper",category:"Browser extensions",state:helper?.connected?"healthy":"idle",detail:helper?.connected?"Version "+helper.version+" is connected in this browser.":"No helper connected in this window. Available on demand in its configured browser profile.",source:"Local extension connection"},
   {key:"finance-autofill",label:"Finance lender autofill",category:"Browser extensions",state:"manual",detail:"On-demand extension used in Main CRM and lender portals. No Marketing CRM heartbeat is available.",source:"External extension"}
  ];
  const stale=!payload||!!error||tick-Date.parse(payload.checkedAt)>12*60000;
  const items=[...(payload?.items||[]).map(x=>stale?{...x,state:["critical","warning","disabled","manual"].includes(x.state)?x.state:"unverified",detail:"Last recorded: "+x.detail}:x),...local];
- if(!items.some(x=>x.key==="group-approval-monitor")&&helper?.connected)items.push(approvalMonitorHealth(helper.approvalMonitor,new Date(tick)));
  if(stale)items.unshift({key:"cloud",label:"Cloud monitoring",category:"Current incidents",state:error&&payload?"warning":"unverified",detail:error||"Waiting for current cloud evidence."});
  const counts=healthCounts(items),attention=items.filter(x=>["critical","warning","unverified"].includes(x.state));
  const shown=(showAll?items:attention).slice().sort((a,b)=>(ORDER[a.state]??9)-(ORDER[b.state]??9));

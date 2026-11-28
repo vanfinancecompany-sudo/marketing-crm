@@ -129,32 +129,27 @@ test("renewal monitoring checks schedules, stale browser, stalled work, publicat
   assert.equal(check({ settings: { enabled: true, updatedAt: ago(2) }, run: null }).issues.length, 0);
 });
 
-test("concurrent renewal monitor checks send one problem email and clear it after recovery", async () => {
+test("retired group renewal incidents close silently and never reopen", async () => {
   const state = {
     conversation_channel_status: [
       { channel: "facebook_marketplace", last_heartbeat_at: ago(1), status: { mode: "auto", monitoring: true, tabReportedAt: ago(1) } },
       { channel: RENEWAL_MONITOR_CHANNEL, last_heartbeat_at: ago(25), status: { state: "ready" } },
     ],
+    conversation_monitor_alerts: [{ fingerprint: "rent2buy-renewal:browser-disconnected", channel: RENEWAL_MONITOR_CHANNEL, status: "open", severity: "critical", first_seen_at: ago(20), emailed_at: ago(10) }],
     rent2buy_group_renewal_settings: [{ id: 1, enabled: true, updated_at: ago(24 * 60) }],
     rent2buy_group_renewal_runs: [{ run_date: "2026-11-24", checked_at: ago(35), plan: {} }],
   };
   const db = fakeDb(state);
   const sent = [];
-  const run = (date, environment = {}) => runConversationsMonitor(db, { now: date, environment,
+  const run = date => runConversationsMonitor(db, { now: date, environment: { CONVERSATIONS_RECOVERY_EMAILS: "true" },
     sendEmail: async (_, subject) => { sent.push(subject); return true; } });
-  await run(now, { VERCEL_ENV: "preview" });
-  assert.equal(state.conversation_monitor_alerts.length, 0);
   await run(now);
-  assert.equal(sent.length, 0);
+  assert.equal(state.conversation_monitor_alerts[0].status, "resolved");
   const second = new Date(now.getTime() + 6 * 60_000);
   await Promise.all([run(second), run(second), run(second)]);
-  assert.equal(sent.length, 1);
-  assert.match(sent[0], /Rent2Buy group renewal browser stopped/);
+  assert.equal(sent.length, 0);
   assert.equal(state.conversation_monitor_alerts.length, 1);
-  state.conversation_channel_status[1].last_heartbeat_at = second.toISOString();
-  await run(second);
   assert.equal(state.conversation_monitor_alerts[0].status, "resolved");
-  assert.equal(sent.length, 1);
 });
 
 test("Ask Me sessions created by the Facebook assistant are not counted as website conversations", () => {

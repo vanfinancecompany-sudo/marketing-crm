@@ -59,7 +59,7 @@ export async function buildConversationsDashboard(db, { days = 7, now = new Date
       whatsapp: { status: "not_connected", note: "WhatsApp is not connected yet." },
     },
     activity: events.slice(0, 100).map(e => ({...e,kind:marketplaceDisplayKind(e)})),
-    alerts: alertsRes.data || [],
+    alerts: (alertsRes.data || []).filter(a => a.channel !== "rent2buy_group_renewal" && !a.fingerprint?.startsWith("rent2buy-renewal:")),
   };
 }
 
