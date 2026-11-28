@@ -490,21 +490,75 @@
     return "";
   }
 
+  // Posting eligibility from the controls Facebook actually shows on the group page.
+  // A normal composer ("Write something...", "Create post", "Start discussion") makes
+  // the group testable even when it also offers "Sell something"; listing-only groups
+  // show only selling/listing controls.
+  const LISTING_CONTROL_PATTERN = /^(?:sell something|sell an item|create (?:a |new )?listing|list (?:an item|something)(?: for sale)?|what are you selling\??|post (?:an item|a listing)(?: for sale)?)$/i;
+  const POSTING_OFF_PATTERN = /only admins can post|admins? (?:have )?turned off posting|posting (?:has been |is )?(?:turned off|disabled|paused)|you can'?t post in this group|members can'?t post/i;
+
+  function visibleControlLabel(pattern) {
+    const control = [...document.querySelectorAll('button, [role="button"], a, [role="tab"]')]
+      .filter(visible)
+      .find((element) => pattern.test(clean(element.getAttribute("aria-label") || element.innerText || element.textContent)));
+    return control ? clean(control.getAttribute("aria-label") || control.innerText || control.textContent).slice(0, 80) : "";
+  }
+
+  function postingEvidence() {
+    const text = pageLines().join("\n");
+    const opener = findComposerOpener();
+    const normal = opener ? clean(elementEvidence(opener)).slice(0, 80) || "Write something"
+      : verifiedComposerDialog() ? "Create post" : visibleControlLabel(/^start (?:a )?discussion$/i);
+    return {
+      unavailable: contentUnavailable(text),
+      normal,
+      listing: visibleControlLabel(LISTING_CONTROL_PATTERN),
+      join: visibleControlLabel(/^join(?: group)?$/i),
+      joined: visibleControlLabel(/^joined$/i),
+      pending: membershipPendingVisible() ? "Membership pending" : visibleControlLabel(/^(?:cancel request|requested|pending)$/i),
+      postingOff: text.match(POSTING_OFF_PATTERN)?.[0] || "",
+    };
+  }
+
+  // Waits only until the page shows decisive controls. A normal composer or an
+  // unavailable notice decides at once; other controls get a short moment for a
+  // late composer. Nothing decisive within the limit is reported as unknown.
+  async function waitForPostingEvidence(timeoutMs = 10000) {
+    const started = Date.now();
+    let firstOther = 0;
+    while (Date.now() - started < timeoutMs) {
+      const evidence = postingEvidence();
+      if (evidence.unavailable || evidence.normal) return evidence;
+      if (evidence.listing || evidence.join || evidence.pending || evidence.postingOff) {
+        if (!firstOther) firstOther = Date.now();
+        else if (Date.now() - firstOther >= 1500) return evidence;
+      }
+      await sleep(250);
+    }
+    return { ...postingEvidence(), timedOut: true };
+  }
+
+  function postingModeFrom(evidence) {
+    if (evidence.unavailable) return { mode: "unavailable", label: "Facebook says this group is unavailable" };
+    if (evidence.normal) return { mode: "normal", label: evidence.normal };
+    if (evidence.pending) return { mode: "membership_pending", label: evidence.pending };
+    if (evidence.join) return { mode: "join_required", label: evidence.join };
+    if (evidence.listing) return { mode: "listing_only", label: evidence.listing };
+    if (evidence.postingOff) return { mode: "posting_off", label: evidence.postingOff };
+    return { mode: "unknown", label: evidence.timedOut ? "No posting controls appeared" : "" };
+  }
+
   async function inspectGroup(state) {
-    await sleep(1800);
+    const evidence = await waitForPostingEvidence();
+    const posting = postingModeFrom(evidence);
     const lines = pageLines();
     const pageText = lines.join("\n").slice(0, 30000);
-    const unavailable = contentUnavailable(pageText);
+    const unavailable = posting.mode === "unavailable" || contentUnavailable(pageText);
     const ruleEvidence = extractRuleEvidence(lines);
-    const canPost = Boolean(findComposerOpener() || verifiedComposerDialog());
-    const joinButton = buttonWithText(/^join(?: group)?$/i);
-    const joinedButton = buttonWithText(/^joined$/i);
-    const pendingMembershipButton = buttonWithText(/^(?:cancel request|requested|pending)$/i);
-    const membershipPending = !canPost && !joinedButton && Boolean(
-      pendingMembershipButton ||
-      /membership request (?:is )?pending|your request to join is pending|request to join (?:is )?pending|membership pending|request sent/i.test(pageText)
-    );
-    const joined = canPost || Boolean(joinedButton) ? true : membershipPending || joinButton ? false : null;
+    const canPost = posting.mode === "normal";
+    const membershipPending = posting.mode === "membership_pending";
+    const joined = canPost || posting.mode === "listing_only" || Boolean(evidence.joined) ? true
+      : membershipPending || posting.mode === "join_required" ? false : null;
     const approvalRequired = /post approval|requires? approval|pending approval|admin approval/i.test(pageText);
     const linksAllowed = /no external links|links? (?:are )?not allowed|no links/i.test(pageText)
       ? false
@@ -532,6 +586,8 @@
         explicitStatus: unavailable ? "Red" : explicitRuleStatus(ruleEvidence),
         unavailable,
         canPost: unavailable ? false : canPost,
+        postingMode: unavailable ? "unavailable" : posting.mode,
+        postingEvidence: posting.label,
         joined,
         membershipPending,
         approvalRequired,
@@ -1209,6 +1265,9 @@
     Object.assign(window.__VFC_FACEBOOK_GROUPS_TEST_HOOKS__, {
       elementEvidence,
       findComposerOpener,
+      postingEvidence,
+      postingModeFrom,
+      waitForPostingEvidence,
       isVerifiedCreatePostDialog,
       verifiedComposerDialog,
       isRejectedComposerEditor,

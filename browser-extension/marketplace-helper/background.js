@@ -541,6 +541,12 @@ function groupSearchUrl(query) {
   return `https://www.facebook.com/search/groups/?q=${encodeURIComponent(String(query || ""))}`;
 }
 
+// The main group page shows the post composer (or only selling controls); the
+// About tab does not, so posting eligibility is read from the main page.
+function groupInspectionUrl(value) {
+  return canonicalGroupUrl(value) || String(value || "");
+}
+
 function groupAboutUrl(value) {
   const base = canonicalGroupUrl(value);
   return base ? `${base}about/` : String(value || "");
@@ -782,6 +788,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-state-recovery",
           "groups-inspection-progress",
           "groups-agent-cancel",
+          "groups-posting-mode",
         ],
         approvalMonitor: await readApprovalHealth().catch(() => null),
       });
@@ -955,7 +962,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         startedAt: Date.now(),
       };
       await saveGroupAgentState(state);
-      const tab = await chrome.tabs.create({ url: groupAboutUrl(job.groups[0]?.url), active: true });
+      const tab = await chrome.tabs.create({ url: groupInspectionUrl(job.groups[0]?.url), active: true });
       state.tabId = tab.id || null;
       await saveGroupAgentState(state);
       sendResponse({ ok: true, jobId: job.id, tabId: state.tabId });
@@ -1084,7 +1091,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (nextGroup) {
         await saveGroupAgentState(state);
         if (state.tabId) {
-          await chrome.tabs.update(state.tabId, { url: groupAboutUrl(nextGroup.url), active: true });
+          await chrome.tabs.update(state.tabId, { url: groupInspectionUrl(nextGroup.url), active: true });
         }
       } else {
         await broadcastToCrm({

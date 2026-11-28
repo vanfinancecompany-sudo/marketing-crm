@@ -249,7 +249,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.44");
+  assert.equal(manifest.version, "1.2.45");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -697,7 +697,7 @@ function loadGroupHelperTestHooks({
     get activeElement() { return activeElement; },
     querySelectorAll(selector) {
       if (selector === '[role="dialog"]') return dialogs;
-      if (selector === 'button, [role="button"], a') return controls;
+      if (selector === 'button, [role="button"], a' || selector === 'button, [role="button"], a, [role="tab"]') return controls;
       if (selector === "div, span") return labels;
       if (selector === "img") return images;
       if (selector.startsWith('[role="alert"]')) return feedback;
@@ -1211,4 +1211,43 @@ test("helper 1.2.44 reports clean names, the requested URL, the group ID, per-gr
   assert.match(backgroundSource, /"groups-inspection-progress"/);
   assert.match(bridgeSource, /VFC_GROUP_AGENT_CANCEL_ACK/);
   assert.match(bridgeSource, /VFC_GROUP_INSPECTION_PROGRESS/);
+});
+
+function postingControl(label) {
+  return {
+    innerText: label, textContent: label, children: [], parentElement: null,
+    getAttribute: (name) => (name === "aria-label" ? label : null),
+    getBoundingClientRect: () => ({ width: 120, height: 32 }),
+    closest: () => null, querySelectorAll: () => [],
+  };
+}
+
+test("live checks classify posting eligibility from the controls Facebook shows", async () => {
+  const classify = async (labels, bodyText = "") => {
+    const helper = loadGroupHelperTestHooks({ controls: labels.map(postingControl) });
+    helper.document.body.innerText = bodyText;
+    return helper.hooks.postingModeFrom(await helper.hooks.waitForPostingEvidence(10000)).mode;
+  };
+  assert.equal(await classify(["Write something...", "Sell something"]), "normal", "a normal composer wins even beside selling");
+  assert.equal(await classify(["Create post"]), "normal");
+  assert.equal(await classify(["Start discussion", "Sell Something"]), "normal");
+  assert.equal(await classify(["Sell something"]), "listing_only");
+  assert.equal(await classify(["Create new listing"]), "listing_only");
+  assert.equal(await classify(["Join group"]), "join_required");
+  assert.equal(await classify(["Cancel request"]), "membership_pending");
+  assert.equal(await classify([], "Your membership is pending"), "membership_pending");
+  assert.equal(await classify(["Joined"], "Only admins can post in this group"), "posting_off");
+  assert.equal(await classify([], "This content isn't available right now"), "unavailable");
+  assert.equal(await classify(["Joined", "Invite"]), "unknown", "no decisive control is uncertain, not a rejection");
+});
+
+test("live checks open the main group page and read posting controls instead of a fixed wait", () => {
+  for (const text of ["url: groupInspectionUrl(job.groups[0]?.url)", "url: groupInspectionUrl(nextGroup.url)", '"groups-posting-mode"']) {
+    assert.ok(backgroundSource.includes(text), text);
+  }
+  for (const text of ["const evidence = await waitForPostingEvidence();", 'postingMode: unavailable ? "unavailable" : posting.mode']) {
+    assert.ok(groupsHelperSource.includes(text), text);
+  }
+  const inspect = groupsHelperSource.slice(groupsHelperSource.indexOf("async function inspectGroup"), groupsHelperSource.indexOf("async function checkPostedStatus"));
+  assert.equal(inspect.includes("sleep(1800)"), false);
 });
