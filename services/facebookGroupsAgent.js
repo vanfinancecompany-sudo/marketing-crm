@@ -511,6 +511,12 @@ export function applyGroupInspection(groups, inspections, productKey) {
       members: inspection.members || group.members,
       privacy: inspection.privacy || group.privacy,
       canPost: typeof inspection.canPost === "boolean" ? inspection.canPost : group.canPost,
+      // Posting eligibility read from the group page's visible controls (helper 1.2.45+).
+      ...(POSTING_MODES.includes(inspection.postingMode) ? {
+        postingMode: inspection.postingMode,
+        postingEvidence: clean(inspection.postingEvidence || "").slice(0, 120),
+        postingCheckedAt: new Date().toISOString(),
+      } : {}),
       joined: typeof inspection.joined === "boolean" ? inspection.joined : group.joined,
       membershipPending: inspection.joined === true
         ? false
@@ -873,8 +879,35 @@ export function startFacebookGroupInspection(groups, productKey, limit = 12) {
   }));
 }
 
-// "Check All Groups": every active group (any pipeline except Pending Membership,
-// which has its own check) not live-checked in the last GROUP_RECHECK_DAYS days.
+// Posting eligibility, from the helper's live check of the group page.
+export const POSTING_MODES = Object.freeze(["normal", "listing_only", "join_required", "membership_pending", "posting_off", "unavailable", "unknown"]);
+const POSTING_LABELS = Object.freeze({
+  normal: "Normal posting available",
+  listing_only: "Marketplace listings only",
+  join_required: "Join the group first",
+  membership_pending: "Membership pending",
+  posting_off: "Posting turned off",
+  unavailable: "Group unavailable",
+  unknown: "Posting not confirmed",
+});
+export function groupPostingLabel(group) {
+  return POSTING_LABELS[group?.postingMode] || "Posting not checked yet";
+}
+
+// Ready to Test: an untested group where Facebook showed a normal post composer.
+export function isReadyToTest(group) {
+  return !group?.archived && !group?.mergedInto && groupPipeline(group) === "new" && group?.postingMode === "normal";
+}
+
+// Not suitable for a normal advert on the evidence Facebook showed (selling/listing
+// controls only, or posting switched off). Kept, not archived; a later check can change it.
+export function isUnsuitableForTesting(group) {
+  return !group?.archived && groupPipeline(group) === "new" && ["listing_only", "posting_off"].includes(group?.postingMode);
+}
+
+// "Check All Groups": every active group not live-checked in the last
+// GROUP_RECHECK_DAYS days, plus any group whose posting eligibility is not yet known
+// or was not confirmed last time (those stay in every run until Facebook shows a result).
 export const GROUP_RECHECK_DAYS = 7;
 export const CHECK_BATCH_SIZE = 25;
 export function groupCheckQueue(groups, productKey, now = new Date()) {
@@ -883,10 +916,10 @@ export function groupCheckQueue(groups, productKey, now = new Date()) {
     .filter((group) =>
       !group.archived &&
       group.status !== "Red" &&
-      groupPipeline(group) !== "membership_pending" &&
       Boolean(groupSlug(group.url)) &&
-      timeOf(group.lastCheckedAt) < staleBefore)
-    .sort((a, b) => timeOf(a.lastCheckedAt) - timeOf(b.lastCheckedAt) || Number(b.score || 0) - Number(a.score || 0));
+      (timeOf(group.lastCheckedAt) < staleBefore || !group.postingCheckedAt || group.postingMode === "unknown"))
+    .sort((a, b) => timeOf(a.postingCheckedAt) - timeOf(b.postingCheckedAt)
+      || timeOf(a.lastCheckedAt) - timeOf(b.lastCheckedAt) || Number(b.score || 0) - Number(a.score || 0));
 }
 
 // "Check All Awaiting Posts": every posted advert still awaiting an approval decision.
