@@ -1,3 +1,10 @@
+import {
+  buildRent2BuyDiscoveryQueries,
+  looksNational,
+  mentionsCoveragePlace,
+  mentionsOutsidePlace,
+} from "../lib/rent2buyCoverage.js";
+
 export const GROUP_AGENT_DISCOVERY_START = "VFC_GROUP_DISCOVERY_START";
 export const GROUP_AGENT_DISCOVERY_ACK = "VFC_GROUP_DISCOVERY_ACK";
 export const GROUP_AGENT_DISCOVERY_COMPLETE = "VFC_GROUP_DISCOVERY_COMPLETE";
@@ -18,6 +25,9 @@ export const FACEBOOK_HELPER_PING = "VFC_FACEBOOK_HELPER_PING";
 export const FACEBOOK_HELPER_PONG = "VFC_FACEBOOK_HELPER_PONG";
 export const GROUP_RECOVERY_REQUEST = "VFC_GROUP_RECOVERY_REQUEST";
 export const GROUP_RECOVERY_RESPONSE = "VFC_GROUP_RECOVERY_RESPONSE";
+export const GROUP_AGENT_INSPECTION_PROGRESS = "VFC_GROUP_INSPECTION_PROGRESS";
+export const GROUP_AGENT_CANCEL = "VFC_GROUP_AGENT_CANCEL";
+export const GROUP_AGENT_CANCEL_ACK = "VFC_GROUP_AGENT_CANCEL_ACK";
 
 const GROUP_STORAGE_KEY = "marketingFacebookGroupsAgentV1";
 const DISCOVERY_ROTATION_KEY = "marketingFacebookGroupDiscoveryRotationV1";
@@ -48,28 +58,9 @@ const SEED_GROUPS = Object.freeze([
   { name: "Great Small Biz Community", url: "https://www.facebook.com/search/groups/?q=Great%20Small%20Biz%20Community", area: "UK", segment: "Small Business", finance: true, rent2buy: false, members: "", status: "Amber", score: 64 },
 ]);
 
-const RENT2BUY_QUERY_BANK = Object.freeze([
-  { query: "vans for sale Hampshire", segment: "Van/Vehicle" },
-  { query: "used vans for sale Hampshire", segment: "Van/Vehicle" },
-  { query: "van sales Hampshire", segment: "Van/Vehicle" },
-  { query: "van classifieds Hampshire", segment: "Classifieds" },
-  { query: "car and van classifieds Hampshire", segment: "Classifieds" },
-  { query: "commercial vehicles for sale Hampshire", segment: "Van/Vehicle" },
-  { query: "vans buy sell swap Southampton", segment: "Van/Vehicle" },
-  { query: "car and van sales Southampton", segment: "Van/Vehicle" },
-  { query: "van classifieds Portsmouth", segment: "Classifieds" },
-  { query: "cars vans buy sell Portsmouth", segment: "Classifieds" },
-  { query: "van sales Bournemouth", segment: "Van/Vehicle" },
-  { query: "car van classifieds Bournemouth", segment: "Classifieds" },
-  { query: "van sales Basingstoke", segment: "Van/Vehicle" },
-  { query: "car van classifieds Winchester", segment: "Classifieds" },
-  { query: "van sales Salisbury", segment: "Van/Vehicle" },
-  { query: "van classifieds Reading", segment: "Classifieds" },
-  { query: "van sales Guildford", segment: "Van/Vehicle" },
-  { query: "car van classifieds Chichester", segment: "Classifieds" },
-  { query: "van sales Andover", segment: "Van/Vehicle" },
-  { query: "vehicle classifieds Southampton Hampshire", segment: "Classifieds" },
-]);
+// Every place inside the Rent2Buy 100-mile area x every relevant group type
+// (local buy & sell, marketplace, classifieds, vans, cars & vans, trades, business).
+const RENT2BUY_QUERY_BANK = Object.freeze(buildRent2BuyDiscoveryQueries());
 
 const FINANCE_QUERY_BANK = Object.freeze([
   { query: "vans for sale UK", segment: "Van/Vehicle" },
@@ -122,40 +113,98 @@ function groupKey(group) {
     || clean(group?.name).toLowerCase();
 }
 
+// Facebook search shows the avatar link ("Profile photo of ...") and unavailable
+// pages show a placeholder heading; neither is the group's name.
+const UNAVAILABLE_NAME_PATTERN = /^(?:this content isn.t available(?: right now)?|content not found|facebook|log in or sign up.*)$/i;
+export function cleanGroupName(value) {
+  const name = clean(value).replace(/^profile photo of\s+/i, "").trim();
+  return UNAVAILABLE_NAME_PATTERN.test(name) ? "" : name;
+}
+
+function groupSlug(value) {
+  const match = normalizeFacebookGroupUrl(value).match(/^https:\/\/www\.facebook\.com\/groups\/([^/]+)\/$/i);
+  if (!match) return "";
+  try { return decodeURIComponent(match[1]).toLowerCase(); } catch { return match[1].toLowerCase(); }
+}
+
+// Facebook's numeric group ID: recorded by the helper, the URL itself, or the ID
+// Facebook appends to some vanity names ("facebay-portsmouth-...-288347711259127").
+export function facebookGroupNumericId(groupOrUrl) {
+  const explicit = typeof groupOrUrl === "object" ? clean(groupOrUrl?.groupId) : "";
+  if (/^\d{5,}$/.test(explicit)) return explicit;
+  const slug = groupSlug(typeof groupOrUrl === "object" ? groupOrUrl?.url || groupOrUrl?.groupUrl : groupOrUrl);
+  if (/^\d{5,}$/.test(slug)) return slug;
+  return slug.match(/-(\d{8,})$/)?.[1] || "";
+}
+
+// Every identity a group record answers to: numeric ID, vanity/numeric URL slug and
+// any alternative URLs already seen for it.
+export function groupIdentityKeys(group) {
+  const keys = new Set();
+  const id = facebookGroupNumericId(group);
+  if (id) keys.add(`id:${id}`);
+  for (const url of [group?.url, group?.groupUrl, group?.requestedUrl, ...(Array.isArray(group?.aliasUrls) ? group.aliasUrls : [])]) {
+    const slug = groupSlug(url);
+    if (!slug) continue;
+    keys.add(`slug:${slug}`);
+    const aliasId = facebookGroupNumericId(url);
+    if (aliasId) keys.add(`id:${aliasId}`);
+  }
+  return [...keys];
+}
+
+function identityIndex(groups) {
+  const index = new Map();
+  (groups || []).forEach((group, position) => {
+    for (const key of groupIdentityKeys(group)) if (!index.has(key)) index.set(key, position);
+  });
+  return index;
+}
+
+function withAlias(group, url) {
+  const alias = normalizeFacebookGroupUrl(url);
+  if (!alias || !groupSlug(alias) || groupSlug(alias) === groupSlug(group.url)) return group;
+  const aliases = new Set(Array.isArray(group.aliasUrls) ? group.aliasUrls : []);
+  if (aliases.has(alias)) return group;
+  return { ...group, aliasUrls: [...aliases, alias] };
+}
+
 function registrationKey(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-const RENT2BUY_LOCALITY_PATTERN = /\b(?:southampton|eastleigh|chandlers? ford|romsey|totton|new forest|lymington|ringwood|fareham|gosport|portsmouth|havant|waterlooville|petersfield|winchester|andover|basingstoke|alton|farnborough|aldershot|fleet|hook|hampshire|salisbury|amesbury|bournemouth|poole|christchurch|dorchester|weymouth|wimborne|dorset|chichester|bognor regis|worthing|brighton|horsham|crawley|west sussex|guildford|woking|camberley|farnham|surrey|reading|bracknell|maidenhead|newbury|berkshire|swindon|chippenham|trowbridge|warminster|wiltshire|bath|bristol|weston(?:-super-mare| super mare)|somerset|oxford|didcot|abingdon|oxfordshire|london|croydon|kingston|richmond|hounslow|slough)\b/i;
-
+// Local to the Rent2Buy area: the group names or describes a place inside the
+// 100-mile coverage area, or it came from a coverage-area search and does not
+// name somewhere outside it (or present itself as UK-wide).
 export function isRent2BuyLocalGroup(group) {
-  const text = clean([
-    group?.name,
-    group?.area,
-    group?.context,
-    group?.query,
-    group?.ruleEvidence,
-  ].filter(Boolean).join(" "));
-  return RENT2BUY_LOCALITY_PATTERN.test(text);
+  const name = cleanGroupName(group?.name);
+  const described = [name, group?.area, group?.context, group?.ruleEvidence];
+  if (mentionsCoveragePlace(...described)) return true;
+  if (!group?.query || !mentionsCoveragePlace(group.query)) return false;
+  return !mentionsOutsidePlace(name, group?.context) && !looksNational(name);
 }
 
-const VEHICLE_GROUP_PATTERN = /\b(?:vans?|cars?|vehicles?|commercial\s+vehicles?|motor\s+vehicles?|motors?|pickups?|trucks?)\b/i;
-const VEHICLE_SALES_PATTERN = /\b(?:for\s+sale|sales?|sell(?:ing)?|buy(?:ing)?|swap(?:s|ping)?|wanted|classifieds?|market\s*place|marketplace|dealers?)\b/i;
-const CLASSIFIED_GROUP_PATTERN = /\b(?:classifieds?|market\s*place|marketplace|facebay|online\s+sales?|buy\s*[,/&+-]?\s*(?:and\s+)?sell|sell\s*[,/&+-]?\s*(?:and\s+)?buy|buy\s*[,/&+-]?\s*sell\s*[,/&+-]?\s*swap|sell\s*[,/&+-]?\s*swap|selling\s+and\s+buying|for\s+sale\s+and\s+wanted)\b/i;
-const IRRELEVANT_GROUP_PATTERN = /\b(?:jobs?|recruit(?:ment|ing)?|self[-\s]?employed|small\s+business|business\s+owners?|business\s+networking|entrepreneurs?|builders?|electricians?|plumbers?|cleaners?|cleaning|estate\s+agents?|carers?|childcare|support\s+group|therapy|beauty|nails?|fitness|couriers?|delivery\s+drivers?|removals?|accountants?|insurance|mortgages?)\b/i;
+const SELLING_GROUP_PATTERN = /\b(?:buy(?:ing)?|sell(?:ing)?|sales?|for\s+sale|swaps?|swapping|wanted|classifieds?|market\s*place|marketplace|facebay|bargains?|second\s*hand|pre[-\s]?loved|traders?|trading)\b/i;
+const VEHICLE_GROUP_PATTERN = /\b(?:vans?|cars?|vehicles?|commercial\s+vehicles?|motors?|pickups?|trucks?|4x4s?|lcvs?)\b/i;
+const TRADE_BUSINESS_PATTERN = /\b(?:trades?|tradesm[ae]n|tradespeople|tradies|business(?:es)?|self[-\s]?employed|builders?|building|construction|contractors?|plumbers?|plumbing|electricians?|roofers?|roofing|scaffold(?:ers|ing)?|landscap(?:ers?|ing)|gardeners?|gardening|handym[ae]n|carpenters?|joiners?|plasterers?|decorators?|cleaners?|cleaning|couriers?|delivery|removals?|man\s+(?:and|&)\s+van|mechanics?|garages?|motor\s+trade|entrepreneurs?|networking)\b/i;
+const IRRELEVANT_GROUP_PATTERN = /\b(?:jobs?\s+(?:in|at|for|uk|vacancies)|job\s*seekers?|vacanc(?:y|ies)|recruit(?:ment|ing|ers?)?|hiring|support\s+group|mental\s+health|therapy|beauty|nails|lashes|hairdress\w*|fitness|gym|childcare|babysit\w*|nann(?:y|ies)|carers?|dating|singles|prayer|church|lost\s+(?:and|&)\s+found|missing\s+pets?|dog\s+walk\w*|rooms?\s+to\s+(?:rent|let)|house\s*share|flat\s*share|lettings?|estate\s+agents?|mortgages?|crypto|forex)\b/i;
 
-export function isVehicleClassifiedGroup(group) {
-  const text = clean([
-    group?.name,
-    group?.context,
-    group?.ruleEvidence,
-  ].filter(Boolean).join(" "));
+// Useful for a van advert: local buying & selling, classifieds, marketplace,
+// vehicle groups and trade/business groups. Only clearly unrelated audiences
+// (jobs, support, beauty, dating, property lettings, ...) are rejected; whether a
+// group accepts the advert is decided by testing a real post.
+export function isRelevantAdvertisingGroup(group) {
+  const text = clean([cleanGroupName(group?.name), group?.context, group?.ruleEvidence].filter(Boolean).join(" "));
   if (!text || IRRELEVANT_GROUP_PATTERN.test(text)) return false;
-  if (CLASSIFIED_GROUP_PATTERN.test(text)) return true;
-  return VEHICLE_GROUP_PATTERN.test(text) && VEHICLE_SALES_PATTERN.test(text);
+  return SELLING_GROUP_PATTERN.test(text) || VEHICLE_GROUP_PATTERN.test(text) || TRADE_BUSINESS_PATTERN.test(text);
 }
+
+// Earlier name kept for existing callers.
+export const isVehicleClassifiedGroup = isRelevantAdvertisingGroup;
 
 function productAllowed(group, productKey) {
+  // A record folded into another (same Facebook group under a second URL) is history only.
+  if (group?.mergedInto) return false;
   const belongsToProduct = productKey === "rent2buy"
     ? Boolean(group?.rent2buy)
     : Boolean(group?.finance);
@@ -230,9 +279,8 @@ function calculateScore(group, productKey) {
   else if (members >= 2500) score += 2;
 
   if (productKey === "rent2buy") {
-    const local = /southampton|portsmouth|hampshire|bournemouth|basingstoke|winchester|salisbury|reading|guildford|chichester|andover|farnborough|woking|worthing|weston|bath|swindon|bristol/.test(text);
-    if (local) score += 12;
-    if (/liverpool|manchester|leeds|newcastle|warrington|wigan|nottingham|birmingham|suffolk/.test(text)) score -= 18;
+    if (mentionsCoveragePlace(text)) score += 12;
+    else if (mentionsOutsidePlace(text)) score -= 18;
   }
   return Math.max(0, Math.min(100, Math.round(score)));
 }
@@ -358,24 +406,108 @@ export function mergeFacebookGroups(existing, incoming) {
       ...group,
       id: group.id || previous.id || `group-${key.replace(/[^a-z0-9]+/g, "-").slice(0, 80)}`,
       url: normalizeFacebookGroupUrl(group.url || group.groupUrl || previous.url),
+      name: cleanGroupName(group.name) || cleanGroupName(previous.name) || group.name || previous.name || "Facebook group",
       finance: group.finance ?? previous.finance ?? true,
       rent2buy: group.rent2buy ?? previous.rent2buy ?? true,
     });
   }
-  return [...map.values()];
+  return consolidateFacebookGroups([...map.values()]);
+}
+
+const POST_HISTORY_FIELDS = Object.freeze([
+  "lastPostedAt", "lastPostPermalink", "lastRenewalPostedAt", "postStatus", "pendingRegistration",
+  "lastPostCheckAt", "lastPostDetectedState", "lastPostMatchMethod",
+]);
+const timeOf = (value) => Date.parse(value || "") || 0;
+function historyRank(group) {
+  if (group.archived) return 0;
+  const pipeline = groupPipeline(group);
+  return pipeline === "proven" ? 3 : pipeline === "testing" ? 2 : 1;
+}
+
+// Records that share a Facebook group ID are the same group stored under two URLs
+// (vanity name and numeric ID). Keep one record with the combined posting and
+// approval history; the other stays in the database marked mergedInto (history only).
+export function consolidateFacebookGroups(groups, now = new Date()) {
+  const list = groups || [];
+  const byId = new Map();
+  list.forEach((group, position) => {
+    if (group?.mergedInto) return;
+    const id = facebookGroupNumericId(group);
+    if (!id) return;
+    if (!byId.has(id)) byId.set(id, []);
+    byId.get(id).push(position);
+  });
+  if (![...byId.values()].some((positions) => positions.length > 1)) return list;
+
+  const result = [...list];
+  for (const [id, positions] of byId) {
+    if (positions.length < 2) continue;
+    const records = positions.map((position) => result[position]);
+    const ordered = [...records].sort((a, b) =>
+      historyRank(b) - historyRank(a)
+      || Number(b.postCount || 0) - Number(a.postCount || 0)
+      || timeOf(b.lastPostedAt) - timeOf(a.lastPostedAt));
+    const primary = ordered[0];
+    const latestPost = [...records].sort((a, b) => timeOf(b.lastPostedAt) - timeOf(a.lastPostedAt))[0];
+    const sum = (field) => records.reduce((total, record) => total + Number(record[field] || 0), 0);
+    const latest = (field) => records.map((record) => record[field]).filter(Boolean).sort((a, b) => timeOf(b) - timeOf(a))[0] || "";
+    const earliest = (field) => records.map((record) => record[field]).filter(Boolean).sort((a, b) => timeOf(a) - timeOf(b))[0] || "";
+    let merged = {
+      ...primary,
+      groupId: id,
+      finance: records.some((record) => record.finance !== false),
+      rent2buy: records.some((record) => record.rent2buy !== false),
+      postCount: sum("postCount"),
+      acceptedPostCount: sum("acceptedPostCount"),
+      rejectedPostCount: sum("rejectedPostCount"),
+      lastAcceptedAt: latest("lastAcceptedAt"),
+      lastCheckedAt: latest("lastCheckedAt"),
+      discoveredAt: earliest("discoveredAt") || primary.discoveredAt || "",
+      leads: sum("leads"),
+    };
+    if (latestPost !== primary && timeOf(latestPost.lastPostedAt) > timeOf(primary.lastPostedAt)) {
+      for (const field of POST_HISTORY_FIELDS) merged[field] = latestPost[field] ?? merged[field];
+    }
+    for (const record of records) {
+      if (record === primary) continue;
+      merged = withAlias(merged, record.url);
+      for (const alias of record.aliasUrls || []) merged = withAlias(merged, alias);
+    }
+    const mergedAt = now.toISOString();
+    positions.forEach((position) => {
+      const record = result[position];
+      result[position] = record === primary ? merged : {
+        ...record,
+        mergedInto: primary.url,
+        mergedAt: record.mergedAt || mergedAt,
+        archived: true,
+        archivedAt: record.archivedAt && record.archived ? record.archivedAt : mergedAt,
+        archiveReason: `Same Facebook group as ${cleanGroupName(primary.name) || primary.url}`,
+      };
+    });
+  }
+  return result;
 }
 
 export function applyGroupInspection(groups, inspections, productKey) {
-  const byKey = new Map((inspections || []).map((item) => [groupKey(item), item]));
-  return (groups || []).map((group) => {
-    const inspection = byKey.get(groupKey(group));
+  // Match on any identity: Facebook may redirect a numeric URL to the vanity name.
+  const byKey = new Map();
+  for (const item of inspections || []) {
+    for (const key of groupIdentityKeys({ url: item.url, requestedUrl: item.requestedUrl, groupId: item.groupId })) {
+      if (!byKey.has(key)) byKey.set(key, item);
+    }
+  }
+  return consolidateFacebookGroups((groups || []).map((group) => {
+    const inspection = groupIdentityKeys(group).map((key) => byKey.get(key)).find(Boolean);
     if (!inspection) return group;
     const evidence = clean(inspection.ruleText || inspection.pageText || inspection.context || "");
     const classified = inspection.explicitStatus || ruleClassification(evidence);
     const unavailable = Boolean(inspection.unavailable);
-    const next = {
+    let next = {
       ...group,
-      name: inspection.name || group.name,
+      ...(/^\d{5,}$/.test(clean(inspection.groupId)) ? { groupId: clean(inspection.groupId) } : {}),
+      name: cleanGroupName(inspection.name) || cleanGroupName(group.name) || group.name,
       members: inspection.members || group.members,
       privacy: inspection.privacy || group.privacy,
       canPost: typeof inspection.canPost === "boolean" ? inspection.canPost : group.canPost,
@@ -401,20 +533,22 @@ export function applyGroupInspection(groups, inspections, productKey) {
           : group.archiveReason || "",
       source: group.source === "seed" ? "seed+live-check" : "facebook-live",
     };
+    next = withAlias(withAlias(next, inspection.url), inspection.requestedUrl);
     next.score = calculateScore(next, productKey);
     return next;
-  });
+  }));
 }
 
-export function mergeDiscoveredGroups(groups, candidates, productKey) {
-  const incoming = (candidates || []).map((candidate) => {
-    const querySegment = clean(candidate.segment || "Discovered");
-    const next = {
+function discoveredRecord(candidate, productKey, discoveredAt) {
+  const query = clean(candidate.query || "");
+  const next = {
       id: candidate.id || "",
-      name: clean(candidate.name || candidate.title || "Facebook group"),
+      name: cleanGroupName(candidate.name || candidate.title) || "Facebook group",
       url: normalizeFacebookGroupUrl(candidate.url || candidate.groupUrl),
+      ...(/^\d{5,}$/.test(clean(candidate.groupId)) ? { groupId: clean(candidate.groupId) } : {}),
       area: clean(candidate.area || ""),
-      segment: querySegment,
+      query,
+      segment: clean(candidate.segment || "Discovered"),
       finance: productKey === "finance",
       rent2buy: productKey === "rent2buy",
       members: clean(candidate.members || ""),
@@ -423,7 +557,9 @@ export function mergeDiscoveredGroups(groups, candidates, productKey) {
       seedScore: 50,
       source: "facebook-discovery",
       context: clean(candidate.context || "").slice(0, 1200),
-      discoveredAt: new Date().toISOString(),
+      discoveredAt,
+      lastDiscoveredAt: discoveredAt,
+      discoveryCount: 1,
       canPost: null,
       joined: null,
       membershipPending: false,
@@ -444,16 +580,75 @@ export function mergeDiscoveredGroups(groups, candidates, productKey) {
       archived: false,
       archiveReason: "",
       leads: 0,
-    };
-    next.score = calculateScore(next, productKey);
-    return next;
-  }).filter((item) =>
-    item.url &&
-    item.name &&
-    isVehicleClassifiedGroup(item) &&
-    (productKey !== "rent2buy" || isRent2BuyLocalGroup(item))
-  );
-  return mergeFacebookGroups(groups, incoming);
+  };
+  next.score = calculateScore(next, productKey);
+  return next;
+}
+
+// A search result for a group already on record (any status, archived included,
+// under any of its URLs or its numeric ID) only refreshes discovery metadata:
+// pipeline, post history, approval history, status and archive state never change.
+function touchKnownGroup(existing, found, productKey) {
+  let next = {
+    ...existing,
+    lastDiscoveredAt: found.discoveredAt,
+    discoveryCount: Number(existing.discoveryCount || 1) + 1,
+    name: cleanGroupName(existing.name) || found.name || existing.name,
+    members: existing.members || found.members,
+    privacy: existing.privacy || found.privacy,
+    ...(found.groupId && !existing.groupId ? { groupId: found.groupId } : {}),
+  };
+  next = withAlias(next, found.url);
+  // A live group found by the other product's search becomes available to it too.
+  if (!existing.archived && !existing[productKey] && isRelevantAdvertisingGroup(found)
+    && (productKey !== "rent2buy" || isRent2BuyLocalGroup(found))) {
+    next[productKey] = true;
+  }
+  return next;
+}
+
+// Returns the merged records and a report: how many search results were new,
+// already known (and how many of those are archived), or outside scope.
+export function mergeDiscoveredGroupsWithReport(groups, candidates, productKey, now = new Date()) {
+  const discoveredAt = now.toISOString();
+  const result = [...(groups || [])];
+  const index = identityIndex(result);
+  const seen = new Set();
+  const report = { found: 0, added: 0, known: 0, knownArchived: 0, outOfScope: 0, addedUrls: [] };
+  for (const candidate of candidates || []) {
+    const found = discoveredRecord(candidate, productKey, discoveredAt);
+    if (!found.url || !groupSlug(found.url)) continue;
+    const keys = groupIdentityKeys(found);
+    if (keys.some((key) => seen.has(key))) continue;
+    keys.forEach((key) => seen.add(key));
+    report.found += 1;
+
+    const position = keys.map((key) => index.get(key)).find((value) => value !== undefined);
+    if (position !== undefined) {
+      const existing = result[position];
+      report.known += 1;
+      if (existing.archived) report.knownArchived += 1;
+      result[position] = touchKnownGroup(existing, found, productKey);
+      for (const key of groupIdentityKeys(result[position])) {
+        if (!index.has(key)) index.set(key, position);
+        seen.add(key); // later results for the same group in this run are the same find
+      }
+      continue;
+    }
+    if (!isRelevantAdvertisingGroup(found) || (productKey === "rent2buy" && !isRent2BuyLocalGroup(found))) {
+      report.outOfScope += 1;
+      continue;
+    }
+    result.push(found);
+    for (const key of keys) index.set(key, result.length - 1);
+    report.added += 1;
+    report.addedUrls.push(found.url);
+  }
+  return { groups: mergeFacebookGroups([], result), report };
+}
+
+export function mergeDiscoveredGroups(groups, candidates, productKey) {
+  return mergeDiscoveredGroupsWithReport(groups, candidates, productKey).groups;
 }
 
 function rotatedQueries(productKey, limit = 8) {
@@ -496,6 +691,11 @@ function messageRoundTrip(type, ackType, payload, timeoutMs = 9000) {
     window.addEventListener("message", onMessage);
     window.postMessage({ source: "vfc-marketing-crm", type, ...payload }, window.location.origin);
   });
+}
+
+async function withJobId(jobId, pending) {
+  const ack = await pending;
+  return { ...ack, jobId };
 }
 
 function requestId(prefix) {
@@ -612,6 +812,7 @@ function lastPostStateTime(group) {
     group?.lastPostCheckAt,
     group?.lastAcceptedAt,
     group?.archivedAt,
+    group?.restoredAt,
   ].map((value) => Date.parse(value || "") || 0));
 }
 
@@ -631,7 +832,7 @@ export function mergeFacebookGroupsByRecentPostState(localGroups, remoteGroups) 
 export function startFacebookGroupDiscovery(productKey, options = {}) {
   const queries = rotatedQueries(productKey, options.queryCount || 8);
   const id = requestId("group-discovery");
-  return messageRoundTrip(GROUP_AGENT_DISCOVERY_START, GROUP_AGENT_DISCOVERY_ACK, {
+  return withJobId(id, messageRoundTrip(GROUP_AGENT_DISCOVERY_START, GROUP_AGENT_DISCOVERY_ACK, {
     id,
     job: {
       id,
@@ -640,7 +841,7 @@ export function startFacebookGroupDiscovery(productKey, options = {}) {
       maxGroups: Number(options.maxGroups || 60),
       startedAt: new Date().toISOString(),
     },
-  });
+  }));
 }
 
 export function startFacebookGroupInspection(groups, productKey, limit = 12) {
@@ -661,7 +862,7 @@ export function startFacebookGroupInspection(groups, productKey, limit = 12) {
   if (!targets.length) return Promise.reject(new Error("There are no groups waiting for a live check."));
 
   const id = requestId("group-inspection");
-  return messageRoundTrip(GROUP_AGENT_INSPECTION_START, GROUP_AGENT_INSPECTION_ACK, {
+  return withJobId(id, messageRoundTrip(GROUP_AGENT_INSPECTION_START, GROUP_AGENT_INSPECTION_ACK, {
     id,
     job: {
       id,
@@ -669,7 +870,46 @@ export function startFacebookGroupInspection(groups, productKey, limit = 12) {
       groups: targets.map((group) => ({ name: group.name, url: group.url })),
       startedAt: new Date().toISOString(),
     },
-  });
+  }));
+}
+
+// "Check All Groups": every active group (any pipeline except Pending Membership,
+// which has its own check) not live-checked in the last GROUP_RECHECK_DAYS days.
+export const GROUP_RECHECK_DAYS = 7;
+export const CHECK_BATCH_SIZE = 25;
+export function groupCheckQueue(groups, productKey, now = new Date()) {
+  const staleBefore = now.getTime() - GROUP_RECHECK_DAYS * 86400000;
+  return scoreFacebookGroups(groups, productKey)
+    .filter((group) =>
+      !group.archived &&
+      group.status !== "Red" &&
+      groupPipeline(group) !== "membership_pending" &&
+      Boolean(groupSlug(group.url)) &&
+      timeOf(group.lastCheckedAt) < staleBefore)
+    .sort((a, b) => timeOf(a.lastCheckedAt) - timeOf(b.lastCheckedAt) || Number(b.score || 0) - Number(a.score || 0));
+}
+
+// "Check All Awaiting Posts": every posted advert still awaiting an approval decision.
+export function awaitingPostQueue(groups, productKey) {
+  return (groups || [])
+    .filter((group) =>
+      productAllowed(group, productKey) &&
+      !group.archived &&
+      group.lastPostedAt &&
+      ["awaiting", "pending", "not_found"].includes(group.postStatus) &&
+      group.pendingRegistration &&
+      Boolean(groupSlug(group.url)))
+    .sort((a, b) => timeOf(a.lastPostCheckAt || a.lastPostedAt) - timeOf(b.lastPostCheckAt || b.lastPostedAt));
+}
+
+export function checkQueueKey(group) {
+  return groupKey(group);
+}
+
+// Stops the helper's current inspection / post-check batch; it reports the
+// results gathered so far as a normal completion.
+export function cancelFacebookGroupAgentJob(jobId) {
+  return messageRoundTrip(GROUP_AGENT_CANCEL, GROUP_AGENT_CANCEL_ACK, { id: requestId("group-cancel"), jobId }, 5000);
 }
 
 function vehicleRegistration(vehicle) {
@@ -742,11 +982,16 @@ export async function prepareFacebookGroupPost(options) {
   return messageRoundTrip(GROUP_POST_JOB, GROUP_POST_JOB_ACK, { id: job.id, job });
 }
 
+function sameGroupMatcher(groupUrl) {
+  const wanted = new Set(groupIdentityKeys({ url: groupUrl }));
+  return (group) => !group?.mergedInto && groupIdentityKeys(group).some((key) => wanted.has(key));
+}
+
 export function markGroupPosted(groups, groupUrl, details = {}) {
-  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const matches = sameGroupMatcher(groupUrl);
   const postedAt = details.postedAt || new Date().toISOString();
   return (groups || []).map((group) => {
-    if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
+    if (!matches(group)) return group;
     return {
       ...group,
       lastPostedAt: postedAt,
@@ -764,10 +1009,10 @@ export function markGroupPosted(groups, groupUrl, details = {}) {
 }
 
 export function markGroupAccepted(groups, groupUrl, details = {}) {
-  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const matches = sameGroupMatcher(groupUrl);
   const acceptedAt = details.acceptedAt || new Date().toISOString();
   return (groups || []).map((group) => {
-    if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
+    if (!matches(group)) return group;
     const alreadyAccepted = group.postStatus === "accepted" && group.pendingRegistration === clean(details.registration || group.pendingRegistration || "");
     return {
       ...group,
@@ -784,9 +1029,9 @@ export function markGroupAccepted(groups, groupUrl, details = {}) {
 }
 
 export function markGroupPostStatus(groups, result) {
-  const key = normalizeFacebookGroupUrl(result?.url || result?.groupUrl || "").toLowerCase();
+  const matches = sameGroupMatcher(result?.url || result?.groupUrl || "");
   return (groups || []).map((group) => {
-    if (normalizeFacebookGroupUrl(group.url).toLowerCase() !== key) return group;
+    if (!matches(group)) return group;
     // A delayed result from an older advert must never change the current advert.
     if (registrationKey(result?.registration) !== registrationKey(group.pendingRegistration)) return group;
     const checkedAt = Date.parse(result?.checkedAt || "");
@@ -836,27 +1081,28 @@ export function markGroupPostStatus(groups, result) {
 }
 
 export function setGroupRepeatDays(groups, groupUrl, repeatDays) {
-  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const matches = sameGroupMatcher(groupUrl);
   const days = Math.max(1, Math.min(90, Number(repeatDays || 7)));
   return (groups || []).map((group) =>
-    normalizeFacebookGroupUrl(group.url).toLowerCase() === key ? { ...group, repeatDays: days } : group
+    matches(group) ? { ...group, repeatDays: days } : group
   );
 }
 
 export function archiveFacebookGroup(groups, groupUrl, reason = "Removed from active group list") {
-  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const matches = sameGroupMatcher(groupUrl);
   return (groups || []).map((group) =>
-    normalizeFacebookGroupUrl(group.url).toLowerCase() === key
+    matches(group)
       ? { ...group, archived: true, archiveReason: reason, archivedAt: new Date().toISOString() }
       : group
   );
 }
 
 export function restoreFacebookGroup(groups, groupUrl) {
-  const key = normalizeFacebookGroupUrl(groupUrl).toLowerCase();
+  const matches = sameGroupMatcher(groupUrl);
   return (groups || []).map((group) =>
-    normalizeFacebookGroupUrl(group.url).toLowerCase() === key
-      ? { ...group, archived: false, archiveReason: "", unavailable: false, status: group.status === "Red" ? "Amber" : group.status }
+    matches(group)
+      // restoredAt lets the saved state prefer this deliberate restore over the archive.
+      ? { ...group, archived: false, archiveReason: "", unavailable: false, restoredAt: new Date().toISOString(), status: group.status === "Red" ? "Amber" : group.status }
       : group
   );
 }
@@ -877,7 +1123,7 @@ export function startFacebookPostStatusCheck(groups, productKey, limit = 12) {
   if (!targets.length) return Promise.reject(new Error("There are no posted groups waiting for an acceptance check."));
 
   const id = requestId("group-post-status");
-  return messageRoundTrip(GROUP_POST_STATUS_START, GROUP_POST_STATUS_ACK, {
+  return withJobId(id, messageRoundTrip(GROUP_POST_STATUS_START, GROUP_POST_STATUS_ACK, {
     id,
     job: {
       id,
@@ -891,7 +1137,7 @@ export function startFacebookPostStatusCheck(groups, productKey, limit = 12) {
       })),
       startedAt: new Date().toISOString(),
     },
-  });
+  }));
 }
 
 export function scoreFacebookGroups(groups, productKey) {

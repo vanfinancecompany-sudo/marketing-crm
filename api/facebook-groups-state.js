@@ -90,6 +90,7 @@ const POST_STATE_FIELDS = Object.freeze([
   "archived",
   "archiveReason",
   "archivedAt",
+  "restoredAt",
   "unavailable",
   "status",
   "canPost",
@@ -101,7 +102,32 @@ function postStateTime(group = {}) {
     group.lastAcceptedAt,
     group.lastPostCheckAt,
     group.archivedAt,
+    group.restoredAt,
   ].map((value) => Date.parse(value || "") || 0));
+}
+
+const timeOf = (value) => Date.parse(value || "") || 0;
+
+// Discovery identity and history that a later, partial copy of a record (for
+// example a stale browser cache or a fresh search result) must not wipe.
+function preserveIdentity(state, existingState) {
+  const earliestDiscovery = [existingState.discoveredAt, state.discoveredAt].filter(Boolean)
+    .sort((a, b) => timeOf(a) - timeOf(b))[0];
+  if (earliestDiscovery) state.discoveredAt = earliestDiscovery;
+  if (!state.groupId && existingState.groupId) state.groupId = existingState.groupId;
+  if (!state.mergedInto && existingState.mergedInto) {
+    state.mergedInto = existingState.mergedInto;
+    state.mergedAt = existingState.mergedAt;
+  }
+  const aliases = [...new Set([...(existingState.aliasUrls || []), ...(state.aliasUrls || [])].filter(Boolean))];
+  if (aliases.length) state.aliasUrls = aliases;
+  // Archived groups only return through an explicit restore made after the archive.
+  if (existingState.archived && !state.archived && !(timeOf(state.restoredAt) > timeOf(existingState.archivedAt))) {
+    state.archived = true;
+    state.archiveReason = existingState.archiveReason || state.archiveReason || "";
+    state.archivedAt = existingState.archivedAt || state.archivedAt;
+  }
+  return state;
 }
 
 function postStateRank(group = {}) {
@@ -111,7 +137,7 @@ function postStateRank(group = {}) {
   return 1;
 }
 
-function preserveNewerPostState(incomingRow, existingRow) {
+export function preserveNewerPostState(incomingRow, existingRow) {
   const incomingState = incomingRow?.state || {};
   const existingState = existingRow?.state || {};
   if (!existingRow) return incomingRow;
@@ -134,6 +160,7 @@ function preserveNewerPostState(incomingRow, existingRow) {
       }
     }
   }
+  preserveIdentity(state, existingState);
 
   return {
     ...incomingRow,
