@@ -177,7 +177,8 @@ test("Check All queues cover every eligible item, in automatic batches", () => {
 test("page: single-click Check All with progress, stop and resume; background renewal panel removed", () => {
   for (const text of ["Check All Groups (${groupQueue.length})", "Check All Awaiting Posts (${postQueue.length})",
     "Resume ({remaining} left)", "cancelFacebookGroupAgentJob(run.current.jobId)", "window.setTimeout(() => void runNextCheckBatch(), 1500)",
-    "unable to verify", "still awaiting", "mergeDiscoveredGroupsWithReport"]) {
+    "unable to verify", "still awaiting", "mergeDiscoveredGroupsWithReport",
+    'run.status === "stopping" ? run.current.keys.filter((key) => reported.has(key)) : run.current.keys']) {
     assert.ok(pageSource.includes(text), text);
   }
   for (const removed of ["Pair background Groups Helper", "Prepare today's renewal queue", "Proven / Hot renewals",

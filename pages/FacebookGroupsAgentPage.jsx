@@ -454,7 +454,12 @@ export default function FacebookGroupsAgentPage({
       counted.add(key);
       counts = addCheckOutcome(counts, kind, outcome);
     }
-    const next = { ...run, counts, counted: [...counted], done: [...new Set([...(run.done || []), ...run.current.keys])],
+    // A full batch is finished as a whole. A batch stopped part-way only finishes the
+    // items Facebook actually reported, so Resume still checks the rest.
+    const reported = new Set(outcomes.map((outcome) =>
+      normalizeFacebookGroupUrl(outcome?.requestedUrl || outcome?.url || outcome?.groupUrl || "").toLowerCase()));
+    const finishedKeys = run.status === "stopping" ? run.current.keys.filter((key) => reported.has(key)) : run.current.keys;
+    const next = { ...run, counts, counted: [...counted], done: [...new Set([...(run.done || []), ...finishedKeys])],
       current: null, inBatch: 0 };
     if (kind === "posts" && outcomes.some((outcome) => outcome?.restricted)) {
       finishCheckRun(next, "stopped", "Facebook asked for a security check, so checking stopped. Complete it in Facebook, then resume.");
