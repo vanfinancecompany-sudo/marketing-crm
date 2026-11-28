@@ -79,7 +79,7 @@
       const url = canonicalGroupUrl(anchor.href);
       if (!url || seen.has(url)) continue;
       const context = nearestContext(anchor);
-      const name = resultName(anchor, context);
+      const name = resultName(anchor, context).replace(/^profile photo of\s+/i, "").trim();
       if (!name || /groups home|discover groups|your groups|create new group/i.test(name)) continue;
       seen.add(url);
       candidates.push({
@@ -477,6 +477,19 @@
     return { editor: null, scope: null, verified: false };
   }
 
+  // Facebook's numeric ID for the open group page: from the URL itself or the page's
+  // own app-link metadata (never from page content, which can mention other groups).
+  function currentGroupId() {
+    const fromUrl = location.pathname.match(/^\/groups\/(\d{5,})(?:\/|$)/)?.[1];
+    if (fromUrl) return fromUrl;
+    for (const selector of ['meta[property="al:android:url"]', 'meta[property="al:ios:url"]', 'link[rel="alternate"][href^="android-app:"]']) {
+      const value = document.querySelector(selector)?.getAttribute(selector.startsWith("link") ? "href" : "content") || "";
+      const id = value.match(/fb:\/\/group\/(?:\?id=)?(\d{5,})/)?.[1] || value.match(/\/group\/(?:\?id=)?(\d{5,})/)?.[1];
+      if (id) return id;
+    }
+    return "";
+  }
+
   async function inspectGroup(state) {
     await sleep(1800);
     const lines = pageLines();
@@ -512,6 +525,8 @@
       inspection: {
         name: heading || target.name || "",
         url: currentUrl || target.url || "",
+        requestedUrl: canonicalGroupUrl(target.url) || target.url || "",
+        groupId: unavailable ? "" : currentGroupId(),
         pageText: pageText.slice(0, 10000),
         ruleEvidence,
         explicitStatus: unavailable ? "Red" : explicitRuleStatus(ruleEvidence),

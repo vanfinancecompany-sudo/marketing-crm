@@ -33,6 +33,9 @@
   const FACEBOOK_HELPER_PONG = "VFC_FACEBOOK_HELPER_PONG";
   const GROUP_RECOVERY_REQUEST = "VFC_GROUP_RECOVERY_REQUEST";
   const GROUP_RECOVERY_RESPONSE = "VFC_GROUP_RECOVERY_RESPONSE";
+  const GROUP_INSPECTION_PROGRESS = "VFC_GROUP_INSPECTION_PROGRESS";
+  const GROUP_AGENT_CANCEL = "VFC_GROUP_AGENT_CANCEL";
+  const GROUP_AGENT_CANCEL_ACK = "VFC_GROUP_AGENT_CANCEL_ACK";
 
   function validJob(job) {
     return Boolean(
@@ -174,6 +177,17 @@
       return;
     }
 
+    if (message.source === "vfc-marketing-crm" && message.type === GROUP_AGENT_CANCEL) {
+      const id = message.id || "";
+      try {
+        const result = await chrome.runtime.sendMessage({ type: "CANCEL_GROUP_AGENT_JOB", jobId: message.jobId || "" });
+        window.postMessage({ source: "vfc-facebook-helper", type: GROUP_AGENT_CANCEL_ACK, id, ok: Boolean(result?.ok), error: result?.error || "" }, window.location.origin);
+      } catch (error) {
+        window.postMessage({ source: "vfc-facebook-helper", type: GROUP_AGENT_CANCEL_ACK, id, ok: false, error: String(error?.message || error) }, window.location.origin);
+      }
+      return;
+    }
+
     if (message.source === "vfc-marketing-crm" && message.type === GROUP_INSPECTION_START) {
       const id = message.id || message.job?.id || "";
       try {
@@ -293,6 +307,19 @@
         productKey: message.productKey || "",
         candidates: message.candidates || [],
         queryCount: Number(message.queryCount || 0),
+      }, window.location.origin);
+      return;
+    }
+
+    if (message?.type === "GROUP_INSPECTION_PROGRESS") {
+      window.postMessage({
+        source: "vfc-facebook-helper",
+        type: GROUP_INSPECTION_PROGRESS,
+        jobId: message.jobId || "",
+        productKey: message.productKey || "",
+        inspection: message.inspection || {},
+        index: Number(message.index || 0),
+        total: Number(message.total || 0),
       }, window.location.origin);
       return;
     }

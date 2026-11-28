@@ -780,6 +780,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           "groups-post-status",
           "groups-auto-approval-monitor",
           "groups-state-recovery",
+          "groups-inspection-progress",
+          "groups-agent-cancel",
         ],
         approvalMonitor: await readApprovalHealth().catch(() => null),
       });
@@ -987,6 +989,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === "CANCEL_GROUP_AGENT_JOB") {
+      const state = await getGroupAgentState();
+      if (!state || !["inspection", "post-status"].includes(state.mode) || state.job?.id !== message.jobId) {
+        sendResponse({ ok: false, error: "That check is no longer running." });
+        return;
+      }
+      await clearGroupAgentState();
+      if (state.tabId) await chrome.tabs.remove(state.tabId).catch(() => {});
+      await broadcastToCrm(state.mode === "inspection"
+        ? { type: "GROUP_INSPECTION_COMPLETE", jobId: state.job.id, productKey: state.job.productKey, inspections: state.inspections || [], cancelled: true }
+        : { type: "GROUP_POST_STATUS_COMPLETE", jobId: state.job.id, productKey: state.job.productKey, results: state.results || [], cancelled: true },
+      state.crmTabId);
+      sendResponse({ ok: true });
+      return;
+    }
+
     if (message?.type === "GET_GROUP_AGENT_STATE") {
       const state = await getGroupAgentState();
       if (state?.tabId && sender?.tab?.id && state.tabId !== sender.tab.id) {
@@ -1053,6 +1071,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       state.inspections = [...(state.inspections || []), message.inspection || {}];
       state.groupIndex += 1;
+      await broadcastToCrm({
+        type: "GROUP_INSPECTION_PROGRESS",
+        jobId: state.job.id,
+        productKey: state.job.productKey,
+        inspection: message.inspection || {},
+        index: state.groupIndex,
+        total: state.job.groups?.length || 0,
+      }, state.crmTabId);
       const nextGroup = state.job.groups?.[state.groupIndex];
 
       if (nextGroup) {

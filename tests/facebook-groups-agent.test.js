@@ -249,7 +249,7 @@ test("CRM exposes separate New, Pending Membership, Awaiting and Proven pipeline
 });
 
 test("Chrome helper can discover and inspect groups without auto-posting", () => {
-  assert.equal(manifest.version, "1.2.43");
+  assert.equal(manifest.version, "1.2.44");
   assert.equal(manifest.name, "VFC Facebook Helper");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(
@@ -1198,4 +1198,17 @@ test("group composer fail-safe and manual final Post safeguard remain explicit",
   assert.match(groupsHelperSource, /dialog\.contains\(active\)/);
   assert.match(groupsHelperSource, /click Facebook\\'s Post button yourself/);
   assert.doesNotMatch(groupsHelperSource, /\.click\(\).*Facebook.*Post/i);
+});
+
+test("helper 1.2.44 reports clean names, the requested URL, the group ID, per-group progress and can stop a batch", () => {
+  assert.ok(groupsHelperSource.includes(String.raw`resultName(anchor, context).replace(/^profile photo of\s+/i, "")`));
+  assert.match(groupsHelperSource, /requestedUrl: canonicalGroupUrl\(target\.url\)/);
+  assert.match(groupsHelperSource, /groupId: unavailable \? "" : currentGroupId\(\)/);
+  assert.match(groupsHelperSource, /meta\[property="al:android:url"\]/);
+  assert.match(backgroundSource, /type: "GROUP_INSPECTION_PROGRESS"/);
+  assert.match(backgroundSource, /message\?\.type === "CANCEL_GROUP_AGENT_JOB"/);
+  assert.match(backgroundSource, /"groups-agent-cancel"/);
+  assert.match(backgroundSource, /"groups-inspection-progress"/);
+  assert.match(bridgeSource, /VFC_GROUP_AGENT_CANCEL_ACK/);
+  assert.match(bridgeSource, /VFC_GROUP_INSPECTION_PROGRESS/);
 });
